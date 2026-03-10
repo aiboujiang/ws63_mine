@@ -1,0 +1,6 @@
+set(SOURCES_LIST
+    ${CMAKE_CURRENT_SOURCE_DIR}/sle_client.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/wifi_sta_sample.c
+)
+
+set(SOURCES "${SOURCES}" ${SOURCES_LIST} PARENT_SCOPE)

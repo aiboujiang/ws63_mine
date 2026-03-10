@@ -1,0 +1,1 @@
+set(SOURCES "${SOURCES}" "${CMAKE_CURRENT_SOURCE_DIR}/wifi_speed_ap.c" PARENT_SCOPE)

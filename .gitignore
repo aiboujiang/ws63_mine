@@ -1,0 +1,25 @@
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Build outputs
+src/output/
+src/interim_binary/
+*.o
+*.obj
+*.a
+*.so
+*.elf
+*.bin
+*.map
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db

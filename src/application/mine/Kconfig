@@ -1,0 +1,18 @@
+#===============================================================================
+# @brief    Kconfig file for custom mine demos.
+#===============================================================================
+
+choice
+    prompt "Mine SLE UART Demo Role"
+
+config MINE_SUPPORT_SLE_UART_HOST_DEMO
+    bool "Support Mine SLE UART Host Demo."
+    help
+        Build host side demo (SLE server + UART0 bridge).
+
+config MINE_SUPPORT_SLE_UART_SLAVE_DEMO
+    bool "Support Mine SLE UART Slave Demo."
+    help
+        Build slave side demo (SLE client + UART0 bridge).
+
+endchoice

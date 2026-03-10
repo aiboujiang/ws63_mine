@@ -1,0 +1,119 @@
+config SAMPLE_SUPPORT_SLE_BASE_01_DEVICEDISCOVERY_GRANTNODE
+    bool
+    prompt "Support SLE_BASE_01_DEVICEDISCOVERY_GRANTNODE Sample."
+    default n
+    depends on SAMPLE_SUPPORT_SLE_BASE
+    help
+        This option means support sle_base_01_DeviceDiscovery_GrantNode Sample.
+
+config SAMPLE_SUPPORT_SLE_BASE_01_DEVICEDISCOVERY_TERMINALNODE
+    bool
+    prompt "Support SLE_BASE_01_DEVICEDISCOVERY_TERMINALNODE Sample."
+    default n
+    depends on SAMPLE_SUPPORT_SLE_BASE
+    help
+        This option means support sle_base_01_DeviceDiscovery_TerminalNode Sample.
+
+config SAMPLE_SUPPORT_SLE_BASE_02_CONNECTIONMANAGER_GRANTNODE
+    bool
+    prompt "Support SLE_BASE_02_CONNECTIONMANAGER_GRANTNODE Sample."
+    default n
+    depends on SAMPLE_SUPPORT_SLE_BASE
+    help
+        This option means support sle_base_02_ConnectionManager_GrantNode Sample.
+
+config SAMPLE_SUPPORT_SLE_BASE_02_CONNECTIONMANAGER_TERMINALNODE
+    bool
+    prompt "Support SLE_BASE_02_CONNECTIONMANAGER_TERMINALNODE Sample."
+    default n
+    depends on SAMPLE_SUPPORT_SLE_BASE
+    help
+        This option means support sle_base_02_ConnectionManager_TerminalNode Sample.
+
+config SAMPLE_SUPPORT_SLE_BASE_03_SSAP_SERVER
+    bool
+    prompt "Support SLE_BASE_03_SSAP_SERVER Sample."
+    default n
+    depends on SAMPLE_SUPPORT_SLE_BASE
+    help
+        This option means support sle_base_03_SSAP_Server Sample.
+
+config SAMPLE_SUPPORT_SLE_BASE_03_SSAP_CLIENT
+    bool
+    prompt "Support SLE_BASE_03_SSAP_CLIENT Sample."
+    default n
+    depends on SAMPLE_SUPPORT_SLE_BASE
+    help
+        This option means support sle_base_03_SSAP_Client Sample.
+
+config SAMPLE_SUPPORT_SLE_BASE_04_SSAP_CLIENT_WRITEREAD
+    bool
+    prompt "Support SLE_BASE_04_SSAP_CLIENT_WRITEREAD Sample."
+    default n
+    depends on SAMPLE_SUPPORT_SLE_BASE
+    help
+        This option means support sle_base_04_SSAP_Client_WriteRead Sample.
+
+config SAMPLE_SUPPORT_SLE_BASE_05_NOTIINDI_CLIENT
+    bool
+    prompt "Support SLE_BASE_05_NOTIINDI_CLIENT Sample."
+    default n
+    depends on SAMPLE_SUPPORT_SLE_BASE
+    help
+        This option means support sle_base_05_NotiIndi_Client Sample.
+
+config SAMPLE_SUPPORT_SLE_BASE_05_NOTIINDI_SERVER
+    bool
+    prompt "Support SLE_BASE_05_NOTIINDI_SERVER Sample."
+    default n
+    depends on SAMPLE_SUPPORT_SLE_BASE
+    help
+        This option means support sle_base_05_NotiIndi_Server Sample.
+
+config SAMPLE_SUPPORT_SLE_BASE_06_DELAYTEST_CLIENT
+    bool
+    prompt "Support SLE_BASE_06_DELAYTEST_CLIENT Sample."
+    default n
+    depends on SAMPLE_SUPPORT_SLE_BASE
+    help
+        This option means support sle_base_06_DelayTest_Client Sample.
+
+config SAMPLE_SUPPORT_SLE_BASE_06_DELAYTEST_SERVER
+    bool
+    prompt "Support SLE_BASE_06_DELAYTEST_SERVER Sample."
+    default n
+    depends on SAMPLE_SUPPORT_SLE_BASE
+    help
+        This option means support sle_base_06_DelayTest_Server Sample.
+
+config SAMPLE_SUPPORT_SLE_BASE_07_1VN_CLIENT
+    bool
+    prompt "Support SLE_BASE_07_1VN_CLIENT Sample."
+    default n
+    depends on SAMPLE_SUPPORT_SLE_BASE
+    help
+        This option means support sle_base_07_1vN_Client Sample.
+
+config SAMPLE_SUPPORT_SLE_BASE_08_HYBRID_CLIENTNODE
+    bool
+    prompt "Support SLE_BASE_08_HYBRID_CLIENTNODE Sample."
+    default n
+    depends on SAMPLE_SUPPORT_SLE_BASE
+    help
+        This option means support sle_base_08_Hybrid_ClientNode Sample.
+
+config SAMPLE_SUPPORT_SLE_BASE_08_HYBRID_HYBRIDNODE
+    bool
+    prompt "Support SLE_BASE_08_HYBRID_HYBRIDNODE Sample."
+    default n
+    depends on SAMPLE_SUPPORT_SLE_BASE
+    help
+        This option means support sle_base_08_Hybrid_HybridNode Sample.
+
+config SAMPLE_SUPPORT_SLE_BASE_08_HYBRID_SERVERNODE
+    bool
+    prompt "Support SLE_BASE_08_HYBRID_SERVERNODE Sample."
+    default n
+    depends on SAMPLE_SUPPORT_SLE_BASE
+    help
+        This option means support sle_base_08_Hybrid_ServerNode Sample.

@@ -1,0 +1,10 @@
+config SAMPLE_SUPPORT_MQTT_REMOTE_CAR
+    bool
+    prompt "Support MQTT_REMOTE_CAR Sample."
+    default n
+    depends on ENABLE_INTERGRATION_SAMPLE
+    help
+        This option means support MQTT_REMOTE_CAR Sample.
+
+
+
