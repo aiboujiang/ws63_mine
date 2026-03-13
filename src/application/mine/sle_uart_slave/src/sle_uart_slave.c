@@ -497,8 +497,14 @@ static void *mine_sle_uart_slave_task(const char *arg)
 {
     int read_ret;
     errcode_t send_ret;
+#if MINE_LD2402_ENABLE
+    /* 仅在雷达功能启用时保留状态缓冲区，避免未使用告警。 */
     char radar_status[24] = {0};
+#endif
+#if MINE_ZW101_ENABLE
+    /* 仅在指纹功能启用时保留状态缓冲区，避免未使用告警。 */
     char zw101_status[24] = {0};
+#endif
 
     unused(arg);
     osal_msleep(MINE_INIT_DELAY_MS);
