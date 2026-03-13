@@ -103,6 +103,16 @@ extern "C" {
 #define MINE_LD2402_UART_BUS MINE_UART2_BUS
 
 /**
+ * @brief ZW101 启用开关，1=启用，0=禁用。
+ */
+#define MINE_ZW101_ENABLE 1
+
+/**
+ * @brief ZW101 所在 UART 总线。
+ */
+#define MINE_ZW101_UART_BUS MINE_UART0_BUS
+
+/**
  * @brief UART 与 SLE 之间转发的数据结构。
  *
  * @param value     数据缓冲区指针。

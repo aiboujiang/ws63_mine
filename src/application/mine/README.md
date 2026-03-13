@@ -89,3 +89,13 @@ python build.py menuconfig
   - 初始化（任务创建、UART/SLE 初始化）
   - 链路管理（扫描、连接、配对、发现）
   - 数据路径（UART 入队、UART->SLE 发送、SLE->UART 接收）
+
+---
+
+## 6. ZW101 指纹模块（从机）
+
+- 从机侧已接入 `ZW101` 指纹协议模块（目录：`application/mine/common/ZW101`）。
+- 默认开关与总线配置位于 `application/mine/sle_uart_slave/inc/sle_uart_slave.h`：
+  - `MINE_ZW101_ENABLE`
+  - `MINE_ZW101_UART_BUS`
+- 协议解析与握手初始化在从机主逻辑中完成，按总线接收字节流自动喂入解析器。
