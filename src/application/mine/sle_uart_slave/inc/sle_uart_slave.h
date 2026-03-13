@@ -1,6 +1,6 @@
 /*
  * Copyright (c) HiSilicon (Shanghai) Technologies Co., Ltd.
- * Description: Mine demo - SLE UART slave side.
+ * 描述: Mine 示例 - SLE UART 从机侧。
  */
 
 #ifndef MINE_SLE_UART_SLAVE_H
@@ -95,7 +95,7 @@ extern "C" {
 /**
  * @brief LD2402 启用开关，1=启用，0=禁用。
  */
-#define MINE_LD2402_ENABLE 1
+#define MINE_LD2402_ENABLE 0
 
 /**
  * @brief LD2402 所在 UART 总线。
@@ -105,12 +105,42 @@ extern "C" {
 /**
  * @brief ZW101 启用开关，1=启用，0=禁用。
  */
-#define MINE_ZW101_ENABLE 1
+#define MINE_ZW101_ENABLE 0
 
 /**
  * @brief ZW101 所在 UART 总线。
  */
-#define MINE_ZW101_UART_BUS MINE_UART0_BUS
+#define MINE_ZW101_UART_BUS MINE_UART2_BUS
+
+/**
+ * @brief ZW101 自动录入开关，1=启用，0=禁用。
+ */
+#define MINE_ZW101_AUTO_ENROLL_ENABLE 0
+
+/**
+ * @brief 自动录入目标模板 ID。
+ */
+#define MINE_ZW101_AUTO_ENROLL_ID 1
+
+/**
+ * @brief ZW101 自动验证开关，1=启用，0=禁用。
+ */
+#define MINE_ZW101_AUTO_VERIFY_ENABLE 0
+
+/**
+ * @brief 自动验证周期（毫秒）。
+ */
+#define MINE_ZW101_AUTO_VERIFY_INTERVAL_MS 3000
+
+/**
+ * @brief 指纹库检索起始页。
+ */
+#define MINE_ZW101_SEARCH_START_PAGE 0
+
+/**
+ * @brief 指纹库检索页数。
+ */
+#define MINE_ZW101_SEARCH_PAGE_NUM 300
 
 /**
  * @brief UART 与 SLE 之间转发的数据结构。

@@ -1,6 +1,6 @@
 /*
  * Copyright (c) HiSilicon (Shanghai) Technologies Co., Ltd.
- * Description: Mine demo - Slave side OLED module.
+ * 描述: Mine 示例 - 从机侧 OLED 模块。
  */
 
 #include "sle_uart_slave_module.h"

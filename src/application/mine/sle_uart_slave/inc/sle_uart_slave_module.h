@@ -1,6 +1,6 @@
 /*
  * Copyright (c) HiSilicon (Shanghai) Technologies Co., Ltd.
- * Description: Mine demo - Slave side internal shared declarations.
+ * 描述: Mine 示例 - 从机侧内部共享声明。
  */
 
 #ifndef MINE_SLE_UART_SLAVE_MODULE_H
@@ -11,12 +11,12 @@
 
 #include "sle_uart_slave.h"
 
-/* UART parameters. */
+/* UART 参数。 */
 #define MINE_UART_RX_BUFFER_SIZE 512
 #define MINE_UART_BUS_COUNT 3
 #define MINE_UART_BUS_INVALID 0xFF
 
-/* SLE parameters. */
+/* SLE 参数。 */
 #define MINE_SLE_DEFAULT_MTU_SIZE 512
 #define MINE_SLE_SAFE_CHUNK_LEN 200
 #define MINE_SLE_SEEK_INTERVAL_DEFAULT 100
@@ -25,11 +25,11 @@
 #define MINE_UUID_BASE_INDEX_15 15
 #define MINE_SLE_MAC_ADDR_LEN 6
 
-/* Task timing parameters. */
+/* 任务时序参数。 */
 #define MINE_INIT_DELAY_MS 500
 #define MINE_TASK_LOOP_WAIT_MS 80
 
-/* OLED panel layout. */
+/* OLED 面板布局。 */
 #define MINE_OLED_LINE_COUNT 8
 #define MINE_OLED_LINE_CHARS 21
 #define MINE_OLED_DATA_LINE_COUNT 3
@@ -45,14 +45,14 @@
 #define MINE_OLED_LINE_RX 6
 #define MINE_OLED_LINE_TX 7
 
-/* Logging. */
+/* 日志参数。 */
 #define MINE_LOG_BUFFER_LEN 192
 
-/* LD2402 status cache. */
+/* LD2402 状态缓存。 */
 #define MINE_LD2402_STATUS_TEXT_LEN 48
 #define MINE_LD2402_SN_MAX_LEN 16
 
-/* ZW101 status cache. */
+/* ZW101 状态缓存。 */
 #define MINE_ZW101_STATUS_TEXT_LEN 48
 
 /**

@@ -1,6 +1,6 @@
 /*
  * Copyright (c) HiSilicon (Shanghai) Technologies Co., Ltd.
- * Description: Mine demo - Slave side SLE/SSAPC module.
+ * 描述: Mine 示例 - 从机侧 SLE/SSAPC 模块。
  */
 
 #include "sle_uart_slave_module.h"

@@ -1,6 +1,6 @@
 /*
  * Copyright (c) HiSilicon (Shanghai) Technologies Co., Ltd.
- * Description: ZW101 fingerprint protocol adapter.
+ * 描述: ZW101 指纹协议适配层。
  */
 
 #include "zw101_protocol.h"
@@ -9,6 +9,13 @@
 
 #include "securec.h"
 
+/*
+ * 预构建命令模板。
+ *
+ * 说明:
+ * 1) 帧头/地址/包类型/长度字段已预填；
+ * 2) 可变参数与校验和会在发送前按需更新。
+ */
 static const uint8_t g_zw101_fixed_cmd_match_capture_image[] = {
     0xEF, 0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0x01, 0x00, 0x03, ZW101_CMD_MATCH_GETIMAGE, 0x00, 0x05
 };
@@ -48,6 +55,7 @@ static const uint8_t g_zw101_variable_cmd_rgb_ctrl[] = {
     ZW101_RGB_BREATH, ZW101_RGB_COLOR_B, ZW101_RGB_COLOR_B, 0x00, 0x0F, 0x00, 0x00
 };
 
+/* 按协议定义范围累加字节，计算 16 位校验和。 */
 static uint16_t zw101_calc_sum(const uint8_t *data, uint16_t size)
 {
     uint16_t sum = 0;
@@ -59,6 +67,7 @@ static uint16_t zw101_calc_sum(const uint8_t *data, uint16_t size)
     return sum;
 }
 
+/* 将校验和（高/低字节）写入帧尾两个字节。 */
 static void zw101_set_checksum(uint8_t *packet, uint16_t size)
 {
     uint16_t sum;
@@ -72,6 +81,7 @@ static void zw101_set_checksum(uint8_t *packet, uint16_t size)
     packet[size - 1] = (uint8_t)sum;
 }
 
+/* 提取帧偏移 [7..8] 的大端长度字段。 */
 static uint16_t zw101_get_packet_data_size(const uint8_t *packet, uint16_t size)
 {
     if ((packet == NULL) || (size < 9)) {
@@ -81,6 +91,7 @@ static uint16_t zw101_get_packet_data_size(const uint8_t *packet, uint16_t size)
     return (uint16_t)(((uint16_t)packet[7] << 8) | packet[8]);
 }
 
+/* 初始化运行时上下文，并绑定 HAL 回调。 */
 void zw101_init(zw101_context_t *ctx, const zw101_hal_t *hal)
 {
     if ((ctx == NULL) || (hal == NULL)) {
@@ -95,6 +106,7 @@ void zw101_init(zw101_context_t *ctx, const zw101_hal_t *hal)
     ctx->rcv_state = ZW101_RCV_FIRST_HEAD;
 }
 
+/* 注册 ACK 事件回调与整包回调。 */
 void zw101_set_callbacks(zw101_context_t *ctx, zw101_ack_callback_t ack_cb, zw101_packet_callback_t packet_cb)
 {
     if (ctx == NULL) {
@@ -105,6 +117,7 @@ void zw101_set_callbacks(zw101_context_t *ctx, zw101_ack_callback_t ack_cb, zw10
     ctx->packet_cb = packet_cb;
 }
 
+/* 在整帧完成或解析失败后，重置串流解析状态。 */
 void zw101_reset_protocol_parse(zw101_context_t *ctx)
 {
     if (ctx == NULL) {
@@ -117,6 +130,7 @@ void zw101_reset_protocol_parse(zw101_context_t *ctx)
     ctx->rcv_state = ZW101_RCV_FIRST_HEAD;
 }
 
+/* 构建一帧通用命令并通过 HAL 串口发送。 */
 int zw101_send_command(zw101_context_t *ctx, uint8_t cmd, const uint8_t *params, uint16_t params_len)
 {
     uint16_t frame_size;
@@ -126,7 +140,9 @@ int zw101_send_command(zw101_context_t *ctx, uint8_t cmd, const uint8_t *params,
         return -1;
     }
 
+    /* data_len 包含: 命令(1) + 参数(N) + 校验和(2)。 */
     data_len = (uint16_t)(params_len + 3);
+    /* 完整帧还包含固定前缀字段 9 字节。 */
     frame_size = (uint16_t)(params_len + 12);
 
     if (frame_size > ZW101_PROTOCOL_CMD_BUFFER_SIZE) {
@@ -153,6 +169,7 @@ int zw101_send_command(zw101_context_t *ctx, uint8_t cmd, const uint8_t *params,
 
     zw101_set_checksum(ctx->cmd_buf, frame_size);
 
+    /* 发送前先记录等待状态，便于 RX 路径匹配 ACK。 */
     ctx->cmd_size = frame_size;
     ctx->ack_cmd = cmd;
     ctx->waiting_ack = true;
@@ -167,6 +184,7 @@ int zw101_send_command(zw101_context_t *ctx, uint8_t cmd, const uint8_t *params,
     return 0;
 }
 
+/* 阻塞轮询等待目标 ACK 完成或超时。 */
 int zw101_wait_ack(zw101_context_t *ctx, uint8_t cmd, uint32_t timeout_ms, uint8_t *ack_code)
 {
     uint32_t start_ms;
@@ -181,6 +199,7 @@ int zw101_wait_ack(zw101_context_t *ctx, uint8_t cmd, uint32_t timeout_ms, uint8
 
     start_ms = ctx->hal.get_tick_ms();
     while (!ctx->ack_done) {
+        /* 使用无符号差值，常见计时回绕场景下更安全。 */
         if ((uint32_t)(ctx->hal.get_tick_ms() - start_ms) >= timeout_ms) {
             ctx->waiting_ack = false;
             return -1;
@@ -196,6 +215,12 @@ int zw101_wait_ack(zw101_context_t *ctx, uint8_t cmd, uint32_t timeout_ms, uint8
     return (ctx->ack_code == ZW101_ACK_SUCCESS) ? 0 : -1;
 }
 
+/*
+ * 处理一帧已通过基础校验的报文:
+ * 1) 校验声明长度与实际帧长一致；
+ * 2) 触发整包回调；
+ * 3) 仅当包类型为 ACK(0x07) 时更新等待状态。
+ */
 int zw101_pkg_handle(zw101_context_t *ctx, const uint8_t *data, uint16_t size)
 {
     uint8_t pkg_identification;
@@ -209,6 +234,7 @@ int zw101_pkg_handle(zw101_context_t *ctx, const uint8_t *data, uint16_t size)
     }
 
     data_size = zw101_get_packet_data_size(data, size);
+    /* 完整帧长度必须为 9 字节前缀 + 声明 data_size。 */
     if ((data_size < 3) || ((uint32_t)data_size + 9U != size)) {
         return -1;
     }
@@ -238,6 +264,13 @@ int zw101_pkg_handle(zw101_context_t *ctx, const uint8_t *data, uint16_t size)
     return 0;
 }
 
+/*
+ * UART 字节流解析状态机。
+ *
+ * 状态流转:
+ *   FIRST_HEAD -> SECOND_HEAD -> PKG_SIZE -> DATA -> 整帧完成
+ * 任意异常都会重置到“重新找帧头”状态。
+ */
 void zw101_protocol_parse(zw101_context_t *ctx, const uint8_t *data, uint16_t len)
 {
     uint16_t i;
@@ -278,6 +311,7 @@ void zw101_protocol_parse(zw101_context_t *ctx, const uint8_t *data, uint16_t le
 
                 ctx->rcv_buf[ctx->rcv_size++] = byte;
                 if (ctx->rcv_size >= 9) {
+                    /* 声明长度包含载荷与校验和(2)。 */
                     ctx->rcv_pkg_dlen = (uint16_t)((ctx->rcv_buf[7] << 8) + ctx->rcv_buf[8]);
                     if ((uint32_t)ctx->rcv_pkg_dlen + 9U > ZW101_PROTOCOL_RCV_BUFFER_SIZE) {
                         zw101_reset_protocol_parse(ctx);
@@ -299,6 +333,7 @@ void zw101_protocol_parse(zw101_context_t *ctx, const uint8_t *data, uint16_t le
                     uint8_t sum_h;
                     uint8_t sum_l;
 
+                    /* 校验和覆盖范围: 从包标识到载荷末尾。 */
                     calc_sum = zw101_calc_sum(&ctx->rcv_buf[ZW101_CALC_SUM_START_POS],
                         (uint16_t)(ctx->rcv_size - 8));
                     sum_h = (uint8_t)(calc_sum >> 8);
@@ -323,6 +358,7 @@ void zw101_protocol_parse(zw101_context_t *ctx, const uint8_t *data, uint16_t le
     }
 }
 
+/* 带可变参数区的模板命令发送通用辅助函数。 */
 static int zw101_send_variable_cmd(zw101_context_t *ctx, const uint8_t *base_cmd, uint16_t cmd_size,
     const uint8_t *var_data, uint16_t var_len)
 {
@@ -357,6 +393,7 @@ static int zw101_send_variable_cmd(zw101_context_t *ctx, const uint8_t *base_cmd
     return 0;
 }
 
+/* 握手命令 0x35。 */
 int zw101_cmd_handshake(zw101_context_t *ctx, uint8_t *ack_code)
 {
     if (zw101_send_command(ctx, ZW101_CMD_HANDSHAKE, NULL, 0) != 0) {
@@ -365,6 +402,7 @@ int zw101_cmd_handshake(zw101_context_t *ctx, uint8_t *ack_code)
     return zw101_wait_ack(ctx, ZW101_CMD_HANDSHAKE, ZW101_COMMON_TIMEOUT, ack_code);
 }
 
+/* 传感器健康检测命令 0x36。 */
 int zw101_cmd_check_sensor(zw101_context_t *ctx)
 {
     if (zw101_send_command(ctx, ZW101_CMD_CHECK_SENSOR, NULL, 0) != 0) {
@@ -373,11 +411,13 @@ int zw101_cmd_check_sensor(zw101_context_t *ctx)
     return zw101_wait_ack(ctx, ZW101_CMD_CHECK_SENSOR, ZW101_COMMON_TIMEOUT, NULL);
 }
 
+/* 兼容历史 API 命名的别名接口。 */
 int zw101_cmd_check_finger(zw101_context_t *ctx)
 {
     return zw101_cmd_check_sensor(ctx);
 }
 
+/* 使用固定模板发送休眠命令 0x33。 */
 int zw101_cmd_into_sleep(zw101_context_t *ctx)
 {
     if ((ctx == NULL) || (ctx->hal.uart_send == NULL)) {
@@ -402,6 +442,7 @@ int zw101_cmd_into_sleep(zw101_context_t *ctx)
     return zw101_wait_ack(ctx, ZW101_CMD_INTO_SLEEP, ZW101_SLEEP_TIMEOUT, NULL);
 }
 
+/* RGB 控制命令 0x3C。 */
 int zw101_cmd_rgb_ctrl(zw101_context_t *ctx, zw101_rgb_func_t func_code, zw101_rgb_color_t start_color,
     uint8_t end_color_or_duty, uint8_t loop_times, uint8_t cycle)
 {
@@ -421,6 +462,7 @@ int zw101_cmd_rgb_ctrl(zw101_context_t *ctx, zw101_rgb_func_t func_code, zw101_r
     return zw101_wait_ack(ctx, ZW101_CMD_RGB_CTRL, ZW101_RGBCTRL_TIMEOUT, NULL);
 }
 
+/* 取图命令，根据 operate_cmd 选择比对/录入子命令。 */
 int zw101_cmd_capture_image(zw101_context_t *ctx, uint8_t operate_cmd)
 {
     const uint8_t *cmd = g_zw101_fixed_cmd_match_capture_image;
@@ -452,6 +494,7 @@ int zw101_cmd_capture_image(zw101_context_t *ctx, uint8_t operate_cmd)
     return zw101_wait_ack(ctx, ctx->ack_cmd, ZW101_CAPTURE_TIMEOUT, NULL);
 }
 
+/* 提取特征到 CharBuffer1/2。 */
 int zw101_cmd_general_extract(zw101_context_t *ctx, uint8_t buffer_id)
 {
     if (zw101_send_variable_cmd(ctx, g_zw101_variable_cmd_general_extract,
@@ -462,6 +505,7 @@ int zw101_cmd_general_extract(zw101_context_t *ctx, uint8_t buffer_id)
     return zw101_wait_ack(ctx, ZW101_CMD_GEN_EXTRACT, ZW101_COMMON_TIMEOUT, NULL);
 }
 
+/* 合并 CharBuffer1 与 CharBuffer2 生成模板。 */
 int zw101_cmd_general_template(zw101_context_t *ctx)
 {
     if ((ctx == NULL) || (ctx->hal.uart_send == NULL)) {
@@ -486,6 +530,7 @@ int zw101_cmd_general_template(zw101_context_t *ctx)
     return zw101_wait_ack(ctx, ZW101_CMD_GEN_TEMPLATE, ZW101_COMMON_TIMEOUT, NULL);
 }
 
+/* 将缓冲区模板保存到指定页 ID。 */
 int zw101_cmd_store_template(zw101_context_t *ctx, uint8_t buffer_id, uint16_t page_id)
 {
     uint8_t var_data[3];
@@ -502,6 +547,7 @@ int zw101_cmd_store_template(zw101_context_t *ctx, uint8_t buffer_id, uint16_t p
     return zw101_wait_ack(ctx, ZW101_CMD_STORE_TEMPLATE, ZW101_COMMON_TIMEOUT, NULL);
 }
 
+/* 在库区间 [start_page, start_page + page_num) 执行 1:N 搜索。 */
 int zw101_cmd_match1n(zw101_context_t *ctx, uint8_t buffer_id, uint16_t start_page, uint16_t page_num)
 {
     uint8_t var_data[5];
@@ -520,6 +566,7 @@ int zw101_cmd_match1n(zw101_context_t *ctx, uint8_t buffer_id, uint16_t start_pa
     return zw101_wait_ack(ctx, ZW101_CMD_SEARCH_TEMPLATE, ZW101_MATCH_TIMEOUT, NULL);
 }
 
+/* 从 template_id 开始删除一个或多个模板。 */
 int zw101_cmd_del_template(zw101_context_t *ctx, uint16_t template_id, uint16_t template_nums)
 {
     uint8_t var_data[4];
@@ -537,6 +584,7 @@ int zw101_cmd_del_template(zw101_context_t *ctx, uint16_t template_id, uint16_t 
     return zw101_wait_ack(ctx, ZW101_CMD_DEL_TEMPLATE, ZW101_COMMON_TIMEOUT, NULL);
 }
 
+/* 清空整个模板库。 */
 int zw101_cmd_empty_template(zw101_context_t *ctx)
 {
     if ((ctx == NULL) || (ctx->hal.uart_send == NULL)) {
@@ -561,6 +609,7 @@ int zw101_cmd_empty_template(zw101_context_t *ctx)
     return zw101_wait_ack(ctx, ZW101_CMD_EMPTY_TEMPLATE, ZW101_EMPTY_ACK_TIMEOUT, NULL);
 }
 
+/* 读取一个索引表页，用于检查 ID 占用情况。 */
 int zw101_cmd_get_id_availability(zw101_context_t *ctx, uint8_t index)
 {
     if (zw101_send_variable_cmd(ctx, g_zw101_variable_cmd_read_index_table,

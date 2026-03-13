@@ -1,10 +1,11 @@
 /*
  * Copyright (c) HiSilicon (Shanghai) Technologies Co., Ltd.
- * Description: Mine demo - Slave side UART0 <-> SLE bridge.
+ * 描述: Mine 示例 - 从机侧 UART0 <-> SLE 桥接。
  */
 
 #include "sle_uart_slave.h"
 #include "sle_uart_slave_module.h"
+#include "sle_uart_slave_zw101.h"
 
 #include <stdbool.h>
 #include <stdarg.h>
@@ -20,7 +21,6 @@
 #include "uart.h"
 
 #include "LD2402/LD2402.h"
-#include "ZW101/zw101_protocol.h"
 
 #ifndef UART_RX_CONDITION_MASK_IDLE
 #define UART_RX_CONDITION_MASK_IDLE 1
@@ -30,10 +30,10 @@
 #define PRINT(fmt, arg...)
 #endif
 
-/* Multi-UART RX buffers (indexed by UART bus 0/1/2). */
+/* 多路 UART 接收缓冲区（按 UART0/1/2 索引）。 */
 static uint8_t g_mine_uart_rx_buffer[MINE_UART_BUS_COUNT][MINE_UART_RX_BUFFER_SIZE] = {0};
 
-/* UART callback -> task queue. */
+/* UART 回调投递到任务消息队列。 */
 static unsigned long g_mine_uart_msg_queue = 0;
 static unsigned int g_mine_uart_msg_size = sizeof(mine_sle_uart_slave_msg_t);
 
@@ -45,18 +45,7 @@ static volatile bool g_ld2402_status_dirty = false;
 static char g_ld2402_status_text[MINE_LD2402_STATUS_TEXT_LEN] = "RADAR:OFF";
 #endif
 
-#if MINE_ZW101_ENABLE
-static zw101_context_t g_zw101_ctx;
-static bool g_zw101_ready = false;
-static uart_bus_t g_zw101_bus = MINE_ZW101_UART_BUS;
-static volatile bool g_zw101_status_dirty = false;
-static char g_zw101_status_text[MINE_ZW101_STATUS_TEXT_LEN] = "ZW101:OFF";
-
-#define MINE_ZW101_HANDSHAKE_RETRY 3
-#define MINE_ZW101_HANDSHAKE_RETRY_GAP_MS 40
-#endif
-
-/* Keep original OSAL log sink and mirror to PRINT channel. */
+/* 保留原 OSAL 日志出口，并镜像到 PRINT 通道。 */
 static void (*g_mine_raw_osal_printk)(const char *fmt, ...) = osal_printk;
 
 /**
@@ -320,158 +309,6 @@ static bool ld2402_get_status(char *buf, uint16_t buf_len)
 }
 #endif
 
-#if MINE_ZW101_ENABLE
-/**
- * @brief ZW101 HAL 串口发送适配。
- */
-static int zw101_uart_send_adapter(const uint8_t *data, uint16_t len)
-{
-    if ((data == NULL) || (len == 0)) {
-        return -1;
-    }
-
-    if (uapi_uart_write(g_zw101_bus, data, len, 0) < 0) {
-        return -1;
-    }
-
-    return 0;
-}
-
-/**
- * @brief ZW101 HAL 毫秒计时适配。
- */
-static uint32_t zw101_get_tick_ms_adapter(void)
-{
-    return (uint32_t)uapi_systick_get_ms();
-}
-
-/**
- * @brief ZW101 HAL 延时适配。
- */
-static void zw101_delay_ms_adapter(uint32_t ms)
-{
-    (void)osal_msleep(ms);
-}
-
-/**
- * @brief 更新 ZW101 状态文本并置脏。
- */
-static void zw101_set_status(const char *text)
-{
-    if (text == NULL) {
-        return;
-    }
-
-    if (snprintf_s(g_zw101_status_text, sizeof(g_zw101_status_text),
-        sizeof(g_zw101_status_text) - 1, "%s", text) > 0) {
-        g_zw101_status_dirty = true;
-    }
-}
-
-/**
- * @brief ZW101 ACK 回调。
- */
-static void zw101_ack_callback(const zw101_ack_evt_t *evt)
-{
-    if (evt == NULL) {
-        return;
-    }
-
-    if (evt->ack_code == ZW101_ACK_SUCCESS) {
-        zw101_set_status("ZW101:ACK OK");
-    } else if (evt->ack_code == ZW101_ACK_ERR_NO_FINGER) {
-        zw101_set_status("ZW101:NO FINGER");
-    } else {
-        char status[MINE_ZW101_STATUS_TEXT_LEN] = {0};
-        if (snprintf_s(status, sizeof(status), sizeof(status) - 1,
-            "ZW101:C%02X E%02X", evt->cmd, evt->ack_code) > 0) {
-            zw101_set_status(status);
-        }
-    }
-}
-
-/**
- * @brief 初始化 ZW101 模块并执行握手。
- */
-static bool zw101_module_init(uart_bus_t bus)
-{
-    zw101_hal_t hal = {0};
-    uint8_t ack_code = 0xFF;
-    uint8_t retry_idx;
-
-    g_zw101_ready = false;
-    g_zw101_bus = bus;
-
-    if (!mine_slave_uart_bus_enabled(bus)) {
-        zw101_set_status("ZW101:BUS OFF");
-        return false;
-    }
-
-    hal.uart_send = zw101_uart_send_adapter;
-    hal.get_tick_ms = zw101_get_tick_ms_adapter;
-    hal.delay_ms = zw101_delay_ms_adapter;
-
-    zw101_init(&g_zw101_ctx, &hal);
-    zw101_set_callbacks(&g_zw101_ctx, zw101_ack_callback, NULL);
-    zw101_reset_protocol_parse(&g_zw101_ctx);
-
-    /*
-     * 手册建议上电后等待模组初始化完成（无 0x55 信号时 M 系列建议 80ms）。
-     * 这里先等待一个上电窗口，再做握手重试，减少冷启动偶发失败。
-     */
-    (void)osal_msleep(ZW101_PWRON_WAIT_PERIOD);
-
-    for (retry_idx = 0; retry_idx < MINE_ZW101_HANDSHAKE_RETRY; retry_idx++) {
-        if (zw101_cmd_handshake(&g_zw101_ctx, &ack_code) == 0) {
-            /* 校验传感器失败码 0x29 按手册定义为模块异常。 */
-            if ((zw101_cmd_check_sensor(&g_zw101_ctx) != 0) &&
-                (g_zw101_ctx.ack_code == 0x29)) {
-                zw101_set_status("ZW101:SENSOR ERR");
-                return false;
-            }
-
-            zw101_set_status("ZW101:READY");
-            g_zw101_ready = true;
-            return true;
-        }
-
-        (void)osal_msleep(MINE_ZW101_HANDSHAKE_RETRY_GAP_MS);
-    }
-
-    zw101_set_status("ZW101:WAIT HS");
-    return false;
-}
-
-/**
- * @brief 向 ZW101 协议解析器喂入串口数据。
- */
-static void zw101_feed(uart_bus_t bus, const uint8_t *data, uint16_t len)
-{
-    if ((bus != g_zw101_bus) || (data == NULL) || (len == 0)) {
-        return;
-    }
-
-    zw101_protocol_parse(&g_zw101_ctx, data, len);
-}
-
-/**
- * @brief 获取待刷新的 ZW101 状态文本。
- */
-static bool zw101_get_status(char *buf, uint16_t buf_len)
-{
-    if ((buf == NULL) || (buf_len == 0) || (!g_zw101_status_dirty)) {
-        return false;
-    }
-
-    if (snprintf_s(buf, buf_len, buf_len - 1, "%s", g_zw101_status_text) <= 0) {
-        return false;
-    }
-
-    g_zw101_status_dirty = false;
-    return true;
-}
-#endif
-
 /**
  * @brief 统一处理 UART 回调数据并投递到 Slave 任务消息队列。
  *
@@ -496,7 +333,7 @@ static void mine_sle_uart_slave_read_handler_common(uart_bus_t bus, const void *
     ld2402_feed(bus, (const uint8_t *)buffer, length);
 #endif
 #if MINE_ZW101_ENABLE
-    zw101_feed(bus, (const uint8_t *)buffer, length);
+    mine_zw101_feed(bus, (const uint8_t *)buffer, length);
 #endif
 
     buffer_copy = osal_vmalloc(length);
@@ -677,8 +514,13 @@ static void *mine_sle_uart_slave_task(const char *arg)
     }
 #endif
 #if MINE_ZW101_ENABLE
-    if (zw101_module_init(MINE_ZW101_UART_BUS)) {
+    if (mine_zw101_init(MINE_ZW101_UART_BUS)) {
         mine_slave_oled_push_state("ZW101 READY");
+#if MINE_ZW101_AUTO_ENROLL_ENABLE
+        (void)mine_zw101_request_enroll(MINE_ZW101_AUTO_ENROLL_ID);
+#elif MINE_ZW101_AUTO_VERIFY_ENABLE
+        (void)mine_zw101_request_verify();
+#endif
     } else {
         mine_slave_oled_push_state("ZW101 WAIT");
     }
@@ -701,9 +543,10 @@ static void *mine_sle_uart_slave_task(const char *arg)
         }
 #endif
 #if MINE_ZW101_ENABLE
-    if (zw101_get_status(zw101_status, sizeof(zw101_status))) {
-        mine_slave_oled_push_state(zw101_status);
-    }
+        mine_zw101_process();
+        if (mine_zw101_get_status(zw101_status, sizeof(zw101_status))) {
+            mine_slave_oled_push_state(zw101_status);
+        }
 #endif
         mine_slave_oled_flush_pending();
         if (read_ret != OSAL_SUCCESS) {
