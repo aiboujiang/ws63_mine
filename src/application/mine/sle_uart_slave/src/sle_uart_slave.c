@@ -334,6 +334,12 @@ static void mine_sle_uart_slave_read_handler_common(uart_bus_t bus, const void *
 #endif
 #if MINE_ZW101_ENABLE
     mine_zw101_feed(bus, (const uint8_t *)buffer, length);
+#if MINE_ZW101_DEBUG_CMD_ENABLE
+    /* 调试命令由本地解析消费，避免继续透传到 Host。 */
+    if (mine_zw101_try_handle_debug_cmd(bus, (const uint8_t *)buffer, length)) {
+        return;
+    }
+#endif
 #endif
 
     buffer_copy = osal_vmalloc(length);
@@ -434,6 +440,13 @@ static bool mine_sle_uart_slave_uart_init_one(uart_bus_t bus)
         osal_printk("[mine slave] %s pin not configured, skip\r\n", mine_slave_uart_bus_name(bus_index));
         return false;
     }
+
+#if MINE_ZW101_ENABLE
+    /* 仅对 ZW101 所在 UART 总线使用专用波特率，其他总线保持默认值。 */
+    if (bus == MINE_ZW101_UART_BUS) {
+        attr.baud_rate = MINE_ZW101_UART_BAUD;
+    }
+#endif
 
     uart_buffer_cfg.rx_buffer = g_mine_uart_rx_buffer[bus_index];
     uart_buffer_cfg.rx_buffer_size = MINE_UART_RX_BUFFER_SIZE;

@@ -98,4 +98,22 @@ python build.py menuconfig
 - 默认开关与总线配置位于 `application/mine/sle_uart_slave/inc/sle_uart_slave.h`：
   - `MINE_ZW101_ENABLE`
   - `MINE_ZW101_UART_BUS`
+- ZW101 所在 UART 总线可单独配置波特率（默认 57600）：
+  - `MINE_ZW101_UART_BAUD`
+- 串口命令调试开关与输入总线配置：
+  - `MINE_ZW101_DEBUG_CMD_ENABLE`
+  - `MINE_ZW101_DEBUG_UART_BUS`
 - 协议解析与握手初始化在从机主逻辑中完成，按总线接收字节流自动喂入解析器。
+
+### 6.1 串口命令调试（无需改宏重编译）
+
+- 在 `MINE_ZW101_DEBUG_UART_BUS` 对应串口发送文本命令，并以回车换行结束。
+- 命令前缀支持 `FP` 或 `ZW101`，不区分大小写。
+- 支持命令如下：
+  - `FP HELP`：打印帮助。
+  - `FP STATUS`：打印当前状态。
+  - `FP VERIFY`：触发一次验证（1:N 识别）。
+  - `FP ENROLL <id>`：录入并保存到指定模板 ID。
+  - `FP LIST`：列出已占用模板 ID。
+  - `FP DEL <id> [count]`：从指定 ID 开始删除，默认删除 1 个。
+  - `FP CLEAR`：清空模板库。

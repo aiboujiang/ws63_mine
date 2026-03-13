@@ -113,6 +113,11 @@ extern "C" {
 #define MINE_ZW101_UART_BUS MINE_UART2_BUS
 
 /**
+ * @brief ZW101 串口波特率（仅作用于指纹模块所在总线）。
+ */
+#define MINE_ZW101_UART_BAUD 57600
+
+/**
  * @brief ZW101 自动录入开关，1=启用，0=禁用。
  */
 #define MINE_ZW101_AUTO_ENROLL_ENABLE 0
@@ -141,6 +146,16 @@ extern "C" {
  * @brief 指纹库检索页数。
  */
 #define MINE_ZW101_SEARCH_PAGE_NUM 300
+
+/**
+ * @brief ZW101 串口调试命令开关，1=启用，0=禁用。
+ */
+#define MINE_ZW101_DEBUG_CMD_ENABLE 1
+
+/**
+ * @brief ZW101 串口调试命令输入总线。
+ */
+#define MINE_ZW101_DEBUG_UART_BUS MINE_UART0_BUS
 
 /**
  * @brief UART 与 SLE 之间转发的数据结构。

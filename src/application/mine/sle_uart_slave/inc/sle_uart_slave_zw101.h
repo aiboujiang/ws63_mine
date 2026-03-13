@@ -36,6 +36,19 @@ bool mine_zw101_init(uart_bus_t bus);
 void mine_zw101_feed(uart_bus_t bus, const uint8_t *data, uint16_t len);
 
 /**
+ * @brief 尝试处理 ZW101 串口调试命令。
+ *
+ * 支持通过串口输入文本命令触发录入、列表、删除、清空、验证等调试动作。
+ *
+ * @param bus  数据来源 UART 总线。
+ * @param data 输入数据缓冲区。
+ * @param len  输入数据长度。
+ * @return true  本次数据已作为调试命令消费，不再透传。
+ * @return false 非调试命令数据，保持原流程透传。
+ */
+bool mine_zw101_try_handle_debug_cmd(uart_bus_t bus, const uint8_t *data, uint16_t len);
+
+/**
  * @brief 请求执行一次指纹录入（注册）。
  *
  * @param template_id 目标模板 ID。
