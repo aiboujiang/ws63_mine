@@ -998,12 +998,11 @@ bool mine_zw101_request_verify(void)
  */
 void mine_zw101_process(void)
 {
-    if (!g_mine_zw101_ready) {
-        return;
-    }
-
 #if MINE_ZW101_DEBUG_CMD_ENABLE
-    /* 调试命令在任务线程串行执行，避免与中断回调并发访问协议上下文。 */
+    /*
+     * 调试命令在任务线程串行执行，避免与中断回调并发访问协议上下文。
+     * 注意：命令分发必须放在 ready 判断之前，这样 HELP/STATUS 才能在设备未就绪时响应。
+     */
     if (g_mine_zw101_dbg_cmd.op != MINE_ZW101_DBG_OP_NONE) {
         mine_zw101_dbg_cmd_t cmd = g_mine_zw101_dbg_cmd;
         g_mine_zw101_dbg_cmd.op = MINE_ZW101_DBG_OP_NONE;
@@ -1012,6 +1011,10 @@ void mine_zw101_process(void)
         mine_zw101_exec_debug_cmd(&cmd);
     }
 #endif
+
+    if (!g_mine_zw101_ready) {
+        return;
+    }
 
 #if MINE_ZW101_AUTO_VERIFY_ENABLE
     uint32_t now_ms;
