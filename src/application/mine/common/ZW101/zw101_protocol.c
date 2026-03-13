@@ -72,6 +72,15 @@ static void zw101_set_checksum(uint8_t *packet, uint16_t size)
     packet[size - 1] = (uint8_t)sum;
 }
 
+static uint16_t zw101_get_packet_data_size(const uint8_t *packet, uint16_t size)
+{
+    if ((packet == NULL) || (size < 9)) {
+        return 0;
+    }
+
+    return (uint16_t)(((uint16_t)packet[7] << 8) | packet[8]);
+}
+
 void zw101_init(zw101_context_t *ctx, const zw101_hal_t *hal)
 {
     if ((ctx == NULL) || (hal == NULL)) {
@@ -189,7 +198,8 @@ int zw101_wait_ack(zw101_context_t *ctx, uint8_t cmd, uint32_t timeout_ms, uint8
 
 int zw101_pkg_handle(zw101_context_t *ctx, const uint8_t *data, uint16_t size)
 {
-    const zw101_pkg_t *pkg;
+    uint8_t pkg_identification;
+    uint16_t data_size;
     uint16_t payload_len;
     const uint8_t *payload;
     zw101_ack_evt_t evt;
@@ -198,30 +208,31 @@ int zw101_pkg_handle(zw101_context_t *ctx, const uint8_t *data, uint16_t size)
         return -1;
     }
 
-    pkg = (const zw101_pkg_t *)data;
-    if (pkg->data_size < 2) {
+    data_size = zw101_get_packet_data_size(data, size);
+    if ((data_size < 3) || ((uint32_t)data_size + 9U != size)) {
         return -1;
     }
 
-    payload_len = (uint16_t)(pkg->data_size - 2);
-    payload = pkg->data;
-
-    if (payload_len > 0) {
-        ctx->ack_code = payload[0];
-        ctx->ack_done = true;
-    }
+    pkg_identification = data[6];
+    payload_len = (uint16_t)(data_size - 2);
+    payload = &data[9];
 
     if (ctx->packet_cb != NULL) {
         ctx->packet_cb(data, size);
     }
 
-    if ((ctx->ack_cb != NULL) && (payload_len > 0)) {
-        evt.cmd = ctx->ack_cmd;
-        evt.ack_code = payload[0];
-        evt.pkg_identification = pkg->pkg_identification;
-        evt.payload = payload;
-        evt.payload_len = payload_len;
-        ctx->ack_cb(&evt);
+    if ((pkg_identification == ZW101_ACK_PKG) && (payload_len > 0)) {
+        ctx->ack_code = payload[0];
+        ctx->ack_done = true;
+
+        if (ctx->ack_cb != NULL) {
+            evt.cmd = ctx->ack_cmd;
+            evt.ack_code = payload[0];
+            evt.pkg_identification = pkg_identification;
+            evt.payload = payload;
+            evt.payload_len = payload_len;
+            ctx->ack_cb(&evt);
+        }
     }
 
     return 0;
@@ -354,12 +365,17 @@ int zw101_cmd_handshake(zw101_context_t *ctx, uint8_t *ack_code)
     return zw101_wait_ack(ctx, ZW101_CMD_HANDSHAKE, ZW101_COMMON_TIMEOUT, ack_code);
 }
 
-int zw101_cmd_check_finger(zw101_context_t *ctx)
+int zw101_cmd_check_sensor(zw101_context_t *ctx)
 {
-    if (zw101_send_command(ctx, ZW101_CMD_CHECK_FINGER, NULL, 0) != 0) {
+    if (zw101_send_command(ctx, ZW101_CMD_CHECK_SENSOR, NULL, 0) != 0) {
         return -1;
     }
-    return zw101_wait_ack(ctx, ZW101_CMD_CHECK_FINGER, ZW101_COMMON_TIMEOUT, NULL);
+    return zw101_wait_ack(ctx, ZW101_CMD_CHECK_SENSOR, ZW101_COMMON_TIMEOUT, NULL);
+}
+
+int zw101_cmd_check_finger(zw101_context_t *ctx)
+{
+    return zw101_cmd_check_sensor(ctx);
 }
 
 int zw101_cmd_into_sleep(zw101_context_t *ctx)

@@ -21,7 +21,7 @@ extern "C" {
 #define ZW101_COMMON_TIMEOUT (1000)
 #define ZW101_MATCH_TIMEOUT 2300
 #define ZW101_DEFAULT_BAUD (57600)
-#define ZW101_PWRON_WAIT_PERIOD (300)
+#define ZW101_PWRON_WAIT_PERIOD (80)
 #define ZW101_SLEEP_TIMEOUT (400)
 #define ZW101_CAPTURE_TIMEOUT (480)
 #define ZW101_RGBCTRL_TIMEOUT (780)
@@ -30,8 +30,11 @@ extern "C" {
 #define ZW101_SECOND_HEAD (0x01)
 
 #define ZW101_CMD_PKG (0x01)
+#define ZW101_ACK_PKG (0x07)
 #define ZW101_DATA_PKG (0x02)
 #define ZW101_EOF_PKG (0x08)
+
+#define ZW101_PWRON_READY_SIGNAL (0x55)
 
 #define ZW101_CALC_SUM_START_POS (6)
 #define ZW101_CMD_CODE_START_POS (9)
@@ -76,8 +79,10 @@ typedef enum {
     ZW101_CMD_AUTO_MATCH = 0x32,
     ZW101_CMD_INTO_SLEEP = 0x33,
     ZW101_CMD_HANDSHAKE = 0x35,
+    ZW101_CMD_CHECK_SENSOR = 0x36,
     ZW101_CMD_RGB_CTRL = 0x3C,
-    ZW101_CMD_CHECK_FINGER = 0x9D,
+    ZW101_CMD_SEARCH_NOW = 0x3E,
+    ZW101_CMD_CHECK_FINGER = ZW101_CMD_CHECK_SENSOR,
 } zw101_cmd_t;
 
 typedef enum {
@@ -184,6 +189,7 @@ int zw101_send_command(zw101_context_t *ctx, uint8_t cmd, const uint8_t *params,
 int zw101_wait_ack(zw101_context_t *ctx, uint8_t cmd, uint32_t timeout_ms, uint8_t *ack_code);
 
 int zw101_cmd_handshake(zw101_context_t *ctx, uint8_t *ack_code);
+int zw101_cmd_check_sensor(zw101_context_t *ctx);
 int zw101_cmd_check_finger(zw101_context_t *ctx);
 int zw101_cmd_into_sleep(zw101_context_t *ctx);
 int zw101_cmd_rgb_ctrl(zw101_context_t *ctx, zw101_rgb_func_t func_code, zw101_rgb_color_t start_color,

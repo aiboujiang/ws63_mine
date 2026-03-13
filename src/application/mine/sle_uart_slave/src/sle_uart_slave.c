@@ -51,6 +51,9 @@ static bool g_zw101_ready = false;
 static uart_bus_t g_zw101_bus = MINE_ZW101_UART_BUS;
 static volatile bool g_zw101_status_dirty = false;
 static char g_zw101_status_text[MINE_ZW101_STATUS_TEXT_LEN] = "ZW101:OFF";
+
+#define MINE_ZW101_HANDSHAKE_RETRY 3
+#define MINE_ZW101_HANDSHAKE_RETRY_GAP_MS 40
 #endif
 
 /* Keep original OSAL log sink and mirror to PRINT channel. */
@@ -394,6 +397,7 @@ static bool zw101_module_init(uart_bus_t bus)
 {
     zw101_hal_t hal = {0};
     uint8_t ack_code = 0xFF;
+    uint8_t retry_idx;
 
     g_zw101_ready = false;
     g_zw101_bus = bus;
@@ -411,13 +415,30 @@ static bool zw101_module_init(uart_bus_t bus)
     zw101_set_callbacks(&g_zw101_ctx, zw101_ack_callback, NULL);
     zw101_reset_protocol_parse(&g_zw101_ctx);
 
-    if (zw101_cmd_handshake(&g_zw101_ctx, &ack_code) == 0) {
-        zw101_set_status("ZW101:READY");
-        g_zw101_ready = true;
-        return true;
+    /*
+     * 手册建议上电后等待模组初始化完成（无 0x55 信号时 M 系列建议 80ms）。
+     * 这里先等待一个上电窗口，再做握手重试，减少冷启动偶发失败。
+     */
+    (void)osal_msleep(ZW101_PWRON_WAIT_PERIOD);
+
+    for (retry_idx = 0; retry_idx < MINE_ZW101_HANDSHAKE_RETRY; retry_idx++) {
+        if (zw101_cmd_handshake(&g_zw101_ctx, &ack_code) == 0) {
+            /* 校验传感器失败码 0x29 按手册定义为模块异常。 */
+            if ((zw101_cmd_check_sensor(&g_zw101_ctx) != 0) &&
+                (g_zw101_ctx.ack_code == 0x29)) {
+                zw101_set_status("ZW101:SENSOR ERR");
+                return false;
+            }
+
+            zw101_set_status("ZW101:READY");
+            g_zw101_ready = true;
+            return true;
+        }
+
+        (void)osal_msleep(MINE_ZW101_HANDSHAKE_RETRY_GAP_MS);
     }
 
-    zw101_set_status("ZW101:WAIT");
+    zw101_set_status("ZW101:WAIT HS");
     return false;
 }
 
@@ -426,7 +447,7 @@ static bool zw101_module_init(uart_bus_t bus)
  */
 static void zw101_feed(uart_bus_t bus, const uint8_t *data, uint16_t len)
 {
-    if ((!g_zw101_ready) || (bus != g_zw101_bus) || (data == NULL) || (len == 0)) {
+    if ((bus != g_zw101_bus) || (data == NULL) || (len == 0)) {
         return;
     }
 
