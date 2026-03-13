@@ -184,8 +184,11 @@ static int mine_zw101_capture_with_retry(uint8_t operate_cmd)
             return 0;
         }
 
-        if ((g_mine_zw101_ctx.ack_code == ZW101_ACK_ERR_NO_FINGER) ||
-            (g_mine_zw101_ctx.ack_code == ZW101_PS_NO_FINGER)) {
+        /*
+         * 无手指错误码在当前协议定义中统一为 0x02，
+         * 这里使用单一判断，避免重复条件触发编译告警。
+         */
+        if (g_mine_zw101_ctx.ack_code == ZW101_PS_NO_FINGER) {
             (void)osal_msleep(MINE_ZW101_CAPTURE_RETRY_GAP_MS);
             continue;
         }
@@ -406,13 +409,13 @@ bool mine_zw101_request_verify(void)
  */
 void mine_zw101_process(void)
 {
-    uint32_t now_ms;
-
     if (!g_mine_zw101_ready) {
         return;
     }
 
 #if MINE_ZW101_AUTO_VERIFY_ENABLE
+    uint32_t now_ms;
+
     if (g_mine_zw101_work == MINE_ZW101_WORK_IDLE) {
         now_ms = (uint32_t)uapi_systick_get_ms();
         if ((int32_t)(now_ms - g_mine_zw101_next_verify_ms) >= 0) {

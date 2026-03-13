@@ -105,7 +105,7 @@ extern "C" {
 /**
  * @brief ZW101 启用开关，1=启用，0=禁用。
  */
-#define MINE_ZW101_ENABLE 0
+#define MINE_ZW101_ENABLE 1
 
 /**
  * @brief ZW101 所在 UART 总线。
