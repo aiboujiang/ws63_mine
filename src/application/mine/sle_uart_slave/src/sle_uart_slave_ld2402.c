@@ -443,6 +443,7 @@ static void mine_ld2402_exec_debug_cmd(const mine_ld2402_dbg_cmd_t *cmd)
 
     if ((!g_mine_ld2402_ready) && (cmd->op != MINE_LD2402_DBG_OP_HELP) &&
         (cmd->op != MINE_LD2402_DBG_OP_STATUS)) {
+        /* 未就绪时仅允许查看帮助/状态，避免触发无效串口命令。 */
         mine_ld2402_set_status("RADAR:NOT READY");
         return;
     }
@@ -526,6 +527,7 @@ static void mine_ld2402_exec_debug_cmd(const mine_ld2402_dbg_cmd_t *cmd)
             }
             break;
         case MINE_LD2402_DBG_OP_AUTO_THRESHOLD:
+            /* 自动门限命令较耗时，先启动，进度通过 PROGRESS 单独查询。 */
             if (LD2402_StartAutoThreshold(&g_mine_ld2402_handle,
                 cmd->value0, cmd->value1, cmd->value2) == 0) {
                 mine_ld2402_set_status_fmt("RADAR:AUTO %u/%u/%u",
@@ -771,6 +773,7 @@ bool mine_ld2402_init(uart_bus_t bus)
     g_mine_ld2402_dbg_line_len = 0;
     (void)memset_s(g_mine_ld2402_dbg_line, sizeof(g_mine_ld2402_dbg_line), 0, sizeof(g_mine_ld2402_dbg_line));
 
+    /* 先做总线可用性检查，避免向未初始化 UART 下发命令。 */
     if (!mine_slave_uart_bus_enabled(bus)) {
         mine_ld2402_set_status("RADAR:BUS OFF");
         return false;
@@ -861,6 +864,7 @@ bool mine_ld2402_try_handle_debug_cmd(uart_bus_t bus, const uint8_t *data, uint1
                 continue;
             }
 
+            /* 非 LD 前缀直接放行，交给原有透传流程处理。 */
             if ((ch != 'L') && (ch != 'l')) {
                 return false;
             }
@@ -924,6 +928,7 @@ bool mine_ld2402_try_handle_debug_cmd(uart_bus_t bus, const uint8_t *data, uint1
 void mine_ld2402_process(void)
 {
     if (g_mine_ld2402_dbg_cmd.op != MINE_LD2402_DBG_OP_NONE) {
+        /* 单槽位命令队列：先拷贝再清空，防止执行过程中被重复消费。 */
         mine_ld2402_dbg_cmd_t cmd = g_mine_ld2402_dbg_cmd;
         g_mine_ld2402_dbg_cmd.op = MINE_LD2402_DBG_OP_NONE;
         g_mine_ld2402_dbg_cmd.value0 = 0;
