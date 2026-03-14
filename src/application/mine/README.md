@@ -1,119 +1,173 @@
-# Mine: UART0 <-> SLE 双向透传 Demo
+# Mine 应用说明
 
-本目录提供两个可独立编译的示例：
+本目录包含 mine 自定义应用，核心是基于 SLE 的主从 UART 双向透传，并在从机侧按模块化方式挂载外设业务（LD2402、ZW101）。
 
-- `sle_uart_host`：主机（SLE Server）
-- `sle_uart_slave`：从机（SLE Client）
+## 1. 功能概览
 
-两端都使用 `UART0`，功能如下：
+1. `sle_uart_host`（主机，SLE Server）：
+   - 负责广播、建链、服务端特征通知。
+   - 将主机 UART 数据转发到从机。
+2. `sle_uart_slave`（从机，SLE Client）：
+   - 负责扫描、连接、订阅主机服务。
+   - 将从机 UART 数据转发到主机。
+   - 可选挂载 LD2402 雷达与 ZW101 指纹业务模块。
 
-1. 主机串口收到数据 -> 通过 SLE 发送给从机 -> 从机从 UART0 打印输出。  
-2. 从机串口收到数据 -> 通过 SLE 发送给主机 -> 主机从 UART0 打印输出。
+## 2. 目录结构
 
----
+- `application/mine/sle_uart_host`
+  - `src/sle_uart_host.c`：主机主流程。
+  - `src/sle_uart_host_adv.c`：广播参数配置。
+  - `src/sle_uart_host_ssaps.c`：SSAPS 服务相关。
+  - `src/sle_uart_host_oled.c`：主机 OLED 调试显示。
+- `application/mine/sle_uart_slave`
+  - `src/sle_uart_slave.c`：从机主流程与模块调度。
+  - `src/sle_uart_slave_ld2402.c`：LD2402 业务模块。
+  - `src/sle_uart_slave_zw101.c`：ZW101 业务模块。
+  - `src/sle_uart_slave_ssapc.c`：SSAP 客户端流程。
+  - `src/sle_uart_slave_oled.c`：从机 OLED 调试显示。
+- `application/mine/common/LD2402`
+  - LD2402 协议栈与命令封装。
+- `application/mine/common/ZW101`
+  - ZW101 协议栈与命令封装。
+- `application/mine/common/ssd1306`
+  - SSD1306 OLED 驱动。
 
-## 1. 菜单配置
+## 3. 编译配置
 
 在 `src` 目录执行：
 
 ```bash
-python build.py menuconfig
+python3 build.py menuconfig
 ```
 
-在菜单中启用：
+在菜单中选择：
 
-- `Application -> Enable Mine Demos`
-- `Application -> Mine SLE UART Demo Role`
-  - 编译主机时选择 `Support Mine SLE UART Host Demo.`
-  - 编译从机时选择 `Support Mine SLE UART Slave Demo.`
+1. `Application -> Enable Mine Demos`
+2. `Application -> Mine SLE UART Demo Role`
+   - 主机镜像：`Support Mine SLE UART Host Demo.`
+   - 从机镜像：`Support Mine SLE UART Slave Demo.`
 
-> 注意：主机和从机需要分别编译、分别烧录到两块芯片。
+注意：主机与从机需分别编译并烧录到不同板卡。
 
----
+## 4. 默认关键参数
 
-## 2. 代码位置
+1. SLE 参数
+   - Host 名称：`mine_sle_host`
+   - Slave 名称：`mine_sle_slave`
+   - Service UUID：`0xABCD`
+   - Property UUID：`0xBCDE`
+2. UART 参数
+   - `UART0`：主链路调试与透传（默认调试口）。
+   - `UART2`：默认用于外挂模块（LD2402/ZW101）。
+   - 默认使能掩码：`UART0 + UART2`。
+3. 从机业务默认开关（见 `sle_uart_slave/inc/sle_uart_slave.h`）
+   - `MINE_LD2402_ENABLE = 1`
+   - `MINE_LD2402_UART_BUS = UART2`
+   - `MINE_LD2402_DEBUG_CMD_ENABLE = 1`
+   - `MINE_LD2402_DEBUG_UART_BUS = UART0`
+   - `MINE_ZW101_ENABLE = 0`
 
-- 主机：`application/mine/sle_uart_host`
-  - `src/mine_sle_uart_host.c`：SLE 服务端 + UART0 桥接主逻辑
-  - `src/mine_sle_uart_host_adv.c`：广播参数与广播数据配置
-- 从机：`application/mine/sle_uart_slave`
-  - `src/mine_sle_uart_slave.c`：SLE 客户端 + UART0 桥接主逻辑
-- OLED 驱动（已迁移到 mine，本目录独立维护）
-  - `application/mine/common/ssd1306/hal_bsp_ssd1306.c`
-  - `application/mine/common/ssd1306/hal_bsp_ssd1306.h`
+## 5. 从机模块化主流程
 
----
+从机 `sle_uart_slave.c` 主循环仅负责调度，业务能力下沉到独立模块：
 
-## 3. 关键参数
+1. UART 回调收到数据后，先按设备总线喂入对应协议解析器。
+2. 若命中调试命令前缀（例如 LD2402 的 `LD`），本地消费，不透传。
+3. 非命令数据继续走原有 UART <-> SLE 双向透传链路。
+4. 主循环周期调用各业务模块 `process`，串行执行调试命令，避免并发访问协议上下文。
 
-- 广播名：`mine_sle_host`
-- Service UUID：`0xABCD`
-- Property UUID：`0xBCDE`
-- UART：`UART0`
-- 波特率：`115200`
-- 数据格式：`8N1`
+## 6. LD2402 雷达模块（从机）
 
-### 主机 OLED 调试显示（0.96 寸 SSD1306）
+### 6.1 模块说明
 
-- 仅主机端 `sle_uart_host` 集成了 OLED 调试显示。
-- SSD1306 驱动已复制到 `application/mine/common/ssd1306`，不再依赖 `samples` 路径。
-- 默认使用 I2C1：
-  - `SCL`：`GPIO16`
-  - `SDA`：`GPIO15`
-- OLED 会滚动显示最近 4 条关键事件，例如：
-  - 主机启动、UART 初始化状态
-  - SLE 初始化状态
-  - 连接/断开状态
-  - `UART -> SLE` 发送字节数、`SLE -> UART` 接收字节数
+1. 协议封装目录：`application/mine/common/LD2402`
+2. 业务接入目录：`application/mine/sle_uart_slave/src/sle_uart_slave_ld2402.c`
+3. 已支持能力（按手册 V1.08 对齐）：
+   - 版本号与 SN 读取。
+   - 工作模式切换（普通/工程）。
+   - 最大距离、消失延时、自动增益、参数保存。
+   - 自动门限触发、进度查询、干扰状态查询。
+   - 电源干扰参数查询。
+   - `0x003F` 刷新后保存流程（`SAVE3F`）。
 
----
+### 6.2 LD2402 串口调试命令
 
-## 4. 联调建议
+在 `MINE_LD2402_DEBUG_UART_BUS` 对应串口输入文本命令并回车。命令前缀支持 `LD` 或 `LD2402`，不区分大小写。
 
-1. 先烧录并启动主机，确认串口日志出现 host 初始化成功。  
-2. 再烧录并启动从机，确认从机能扫描并连接到 `mine_sle_host`。  
+```text
+LD HELP
+LD STATUS
+LD VERSION
+LD SN
+LD MODE NORMAL
+LD MODE ENGINEERING
+LD DIST <0.7~10.0>
+LD DELAY <sec>
+LD GAIN
+LD SAVE
+LD AUTO <trig10x> <hold10x> [static10x]
+LD PROGRESS
+LD ALARM
+LD PWR
+LD SAVE3F
+```
+
+参数说明：
+
+1. `LD DIST`：单位米，允许一位小数，范围 `0.7~10.0`。
+2. `LD AUTO`：三个参数为 10 倍系数，范围 `10~200`；第三个参数可省略，省略时默认等于第二个参数。
+3. `LD PROGRESS`：查询自动门限进度（百分比）。
+4. `LD ALARM`：查询自动门限干扰状态与门位图。
+5. `LD SAVE3F`：执行 `0x003F` 读后回写，再执行保存。
+
+### 6.3 推荐联调顺序
+
+1. `LD STATUS`
+2. `LD VERSION`
+3. `LD SN`
+4. `LD MODE ENGINEERING`
+5. `LD AUTO 120 100 100`
+6. 每隔 1~2 秒执行 `LD PROGRESS`
+7. `LD ALARM` + `LD PWR`
+8. `LD SAVE3F`
+9. `LD SAVE`
+10. `LD MODE NORMAL`
+
+## 7. ZW101 指纹模块（从机）
+
+1. 协议封装目录：`application/mine/common/ZW101`
+2. 业务接入目录：`application/mine/sle_uart_slave/src/sle_uart_slave_zw101.c`
+3. 常用配置宏：
+   - `MINE_ZW101_ENABLE`
+   - `MINE_ZW101_UART_BUS`
+   - `MINE_ZW101_UART_BAUD`
+   - `MINE_ZW101_DEBUG_CMD_ENABLE`
+   - `MINE_ZW101_DEBUG_UART_BUS`
+4. 调试命令前缀：`FP` 或 `ZW101`。
+5. 典型命令：
+   - `FP HELP`
+   - `FP STATUS`
+   - `FP VERIFY`
+   - `FP ENROLL <id>`
+   - `FP LIST`
+   - `FP DEL <id> [count]`
+   - `FP CLEAR`
+
+## 8. 快速联调步骤
+
+1. 分别编译主机与从机镜像并烧录。
+2. 先上电主机，再上电从机，确认从机完成扫描并连接主机。
 3. 打开两路串口工具：
-   - 给主机串口发数据，观察从机串口输出。
-   - 给从机串口发数据，观察主机串口输出。
+   - 主机串口发数据，观察从机串口输出。
+   - 从机串口发数据，观察主机串口输出。
+4. 若启用 LD2402，在从机调试串口执行 `LD HELP` 验证命令通道是否正常。
 
----
+## 9. 常见问题
 
-## 5. 说明
-
-- 代码中已对主要函数加中文注释，包括：
-  - 函数作用
-  - 参数解释
-  - 关键流程说明
-- 使用了消息队列把 UART 中断回调与 SLE 发送逻辑解耦，便于初学者理解“回调采集 + 任务发送”的常见设计模式。
-- 主机与从机都补充了 `osal_printk` 调试输出，便于串口观察以下阶段：
-  - 初始化（任务创建、UART/SLE 初始化）
-  - 链路管理（扫描、连接、配对、发现）
-  - 数据路径（UART 入队、UART->SLE 发送、SLE->UART 接收）
-
----
-
-## 6. ZW101 指纹模块（从机）
-
-- 从机侧已接入 `ZW101` 指纹协议模块（目录：`application/mine/common/ZW101`）。
-- 默认开关与总线配置位于 `application/mine/sle_uart_slave/inc/sle_uart_slave.h`：
-  - `MINE_ZW101_ENABLE`
-  - `MINE_ZW101_UART_BUS`
-- ZW101 所在 UART 总线可单独配置波特率（默认 57600）：
-  - `MINE_ZW101_UART_BAUD`
-- 串口命令调试开关与输入总线配置：
-  - `MINE_ZW101_DEBUG_CMD_ENABLE`
-  - `MINE_ZW101_DEBUG_UART_BUS`
-- 协议解析与握手初始化在从机主逻辑中完成，按总线接收字节流自动喂入解析器。
-
-### 6.1 串口命令调试（无需改宏重编译）
-
-- 在 `MINE_ZW101_DEBUG_UART_BUS` 对应串口发送文本命令，并以回车换行结束。
-- 命令前缀支持 `FP` 或 `ZW101`，不区分大小写。
-- 支持命令如下：
-  - `FP HELP`：打印帮助。
-  - `FP STATUS`：打印当前状态。
-  - `FP VERIFY`：触发一次验证（1:N 识别）。
-  - `FP ENROLL <id>`：录入并保存到指定模板 ID。
-  - `FP LIST`：列出已占用模板 ID。
-  - `FP DEL <id> [count]`：从指定 ID 开始删除，默认删除 1 个。
-  - `FP CLEAR`：清空模板库。
+1. 现象：`LD` 命令无响应。
+   - 排查 `MINE_LD2402_DEBUG_CMD_ENABLE` 与 `MINE_LD2402_DEBUG_UART_BUS`。
+   - 确认命令以回车换行结束。
+2. 现象：`RADAR:NOT READY`。
+   - 排查 LD2402 所在 UART 引脚、波特率、供电与连线。
+3. 现象：同时启用 LD2402 与 ZW101 后编译失败。
+   - 两者若配置在同一 UART 总线，会触发编译期冲突保护；请分配不同总线或仅启用一个模块。
