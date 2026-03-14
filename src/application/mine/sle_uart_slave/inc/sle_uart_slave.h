@@ -95,7 +95,7 @@ extern "C" {
 /**
  * @brief LD2402 启用开关，1=启用，0=禁用。
  */
-#define MINE_LD2402_ENABLE 0
+#define MINE_LD2402_ENABLE 1
 
 /**
  * @brief LD2402 所在 UART 总线。
@@ -103,14 +103,29 @@ extern "C" {
 #define MINE_LD2402_UART_BUS MINE_UART2_BUS
 
 /**
+ * @brief LD2402 串口调试命令开关，1=启用，0=禁用。
+ */
+#define MINE_LD2402_DEBUG_CMD_ENABLE 1
+
+/**
+ * @brief LD2402 串口调试命令输入总线。
+ */
+#define MINE_LD2402_DEBUG_UART_BUS MINE_UART0_BUS
+
+/**
  * @brief ZW101 启用开关，1=启用，0=禁用。
  */
-#define MINE_ZW101_ENABLE 1
+#define MINE_ZW101_ENABLE 0
 
 /**
  * @brief ZW101 所在 UART 总线。
  */
 #define MINE_ZW101_UART_BUS MINE_UART2_BUS
+
+/* 同一 UART 总线不支持同时挂载 LD2402 与 ZW101。 */
+#if (MINE_LD2402_ENABLE == 1) && (MINE_ZW101_ENABLE == 1) && (MINE_LD2402_UART_BUS == MINE_ZW101_UART_BUS)
+#error "LD2402 and ZW101 cannot share the same UART bus when both are enabled"
+#endif
 
 /**
  * @brief ZW101 串口波特率（仅作用于指纹模块所在总线）。

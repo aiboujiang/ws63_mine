@@ -384,6 +384,12 @@ void LD2402_ExitConfigMode(LD2402_Handle_t *h)
     }
 }
 
+static bool LD2402_IsAutoThresholdCoefValid(uint16_t coef_10x)
+{
+    return ((coef_10x >= LD2402_AUTO_THRESHOLD_COEF_MIN) &&
+        (coef_10x <= LD2402_AUTO_THRESHOLD_COEF_MAX));
+}
+
 int LD2402_SetParam(LD2402_Handle_t *h, uint16_t param_id, uint32_t value)
 {
     uint8_t cmd_data[6] = {0};
@@ -393,13 +399,13 @@ int LD2402_SetParam(LD2402_Handle_t *h, uint16_t param_id, uint32_t value)
         return -1;
     }
 
+    WriteUint16_LE(&cmd_data[0], param_id);
+    WriteUint32_LE(&cmd_data[2], value);
+
     LD2402_EnterConfigMode(h);
     if (!h->is_in_config_mode) {
         return -1;
     }
-
-    WriteUint16_LE(&cmd_data[0], param_id);
-    WriteUint32_LE(&cmd_data[2], value);
 
     ret = LD2402_SendCommand(h, LD2402_CMD_SET_PARAM, cmd_data, sizeof(cmd_data));
     LD2402_ExitConfigMode(h);
@@ -415,12 +421,13 @@ int LD2402_ReadParam(LD2402_Handle_t *h, uint16_t param_id, uint32_t *value)
         return -1;
     }
 
+    WriteUint16_LE(&cmd_data[0], param_id);
+
     LD2402_EnterConfigMode(h);
     if (!h->is_in_config_mode) {
         return -1;
     }
 
-    WriteUint16_LE(&cmd_data[0], param_id);
     ret = LD2402_SendCommand(h, LD2402_CMD_GET_PARAM, cmd_data, sizeof(cmd_data));
     if ((ret == 0) && (h->cmd_last_payload_len >= 4)) {
         *value = ReadUint32_LE(h->cmd_last_payload);
@@ -461,13 +468,13 @@ int LD2402_SetEngineeringMode(LD2402_Handle_t *h)
         return -1;
     }
 
+    WriteUint16_LE(&cmd_data[0], 0x0000);
+    WriteUint32_LE(&cmd_data[2], LD2402_MODE_ENGINEERING);
+
     LD2402_EnterConfigMode(h);
     if (!h->is_in_config_mode) {
         return -1;
     }
-
-    WriteUint16_LE(&cmd_data[0], 0x0000);
-    WriteUint32_LE(&cmd_data[2], LD2402_MODE_ENGINEERING);
 
     ret = LD2402_SendCommand(h, LD2402_CMD_OUTPUT_MODE, cmd_data, sizeof(cmd_data));
     LD2402_ExitConfigMode(h);
@@ -483,13 +490,13 @@ int LD2402_SetNormalMode(LD2402_Handle_t *h)
         return -1;
     }
 
+    WriteUint16_LE(&cmd_data[0], 0x0000);
+    WriteUint32_LE(&cmd_data[2], LD2402_MODE_NORMAL);
+
     LD2402_EnterConfigMode(h);
     if (!h->is_in_config_mode) {
         return -1;
     }
-
-    WriteUint16_LE(&cmd_data[0], 0x0000);
-    WriteUint32_LE(&cmd_data[2], LD2402_MODE_NORMAL);
 
     ret = LD2402_SendCommand(h, LD2402_CMD_OUTPUT_MODE, cmd_data, sizeof(cmd_data));
     LD2402_ExitConfigMode(h);
@@ -516,89 +523,230 @@ int LD2402_SaveParams(LD2402_Handle_t *h)
 
 int LD2402_AutoGainAdjust(LD2402_Handle_t *h)
 {
-    return LD2402_SendCommand(h, LD2402_CMD_AUTO_GAIN, NULL, 0);
+    int ret;
+
+    if (h == NULL) {
+        return -1;
+    }
+
+    /*
+     * 手册要求除使能配置外的命令均在配置模式下执行，
+     * 这里统一走 Enter/Exit，避免不同固件版本行为差异。
+     */
+    LD2402_EnterConfigMode(h);
+    if (!h->is_in_config_mode) {
+        return -1;
+    }
+
+    ret = LD2402_SendCommand(h, LD2402_CMD_AUTO_GAIN, NULL, 0);
+    LD2402_ExitConfigMode(h);
+    return ret;
+}
+
+int LD2402_StartAutoThreshold(LD2402_Handle_t *h, uint16_t trig_coef_10x,
+    uint16_t hold_coef_10x, uint16_t static_coef_10x)
+{
+    uint8_t cmd_data[6] = {0};
+    int ret;
+
+    if ((h == NULL) ||
+        (!LD2402_IsAutoThresholdCoefValid(trig_coef_10x)) ||
+        (!LD2402_IsAutoThresholdCoefValid(hold_coef_10x)) ||
+        (!LD2402_IsAutoThresholdCoefValid(static_coef_10x))) {
+        return -1;
+    }
+
+    WriteUint16_LE(&cmd_data[0], trig_coef_10x);
+    WriteUint16_LE(&cmd_data[2], hold_coef_10x);
+    WriteUint16_LE(&cmd_data[4], static_coef_10x);
+
+    LD2402_EnterConfigMode(h);
+    if (!h->is_in_config_mode) {
+        return -1;
+    }
+
+    ret = LD2402_SendCommand(h, LD2402_CMD_AUTO_THRESHOLD, cmd_data, sizeof(cmd_data));
+    LD2402_ExitConfigMode(h);
+    return ret;
+}
+
+int LD2402_GetAutoThresholdProgress(LD2402_Handle_t *h, uint16_t *progress_percent)
+{
+    int ret;
+
+    if ((h == NULL) || (progress_percent == NULL)) {
+        return -1;
+    }
+
+    LD2402_EnterConfigMode(h);
+    if (!h->is_in_config_mode) {
+        return -1;
+    }
+
+    ret = LD2402_SendCommand(h, LD2402_CMD_AUTO_THRESHOLD_PROGRESS, NULL, 0);
+    if ((ret == 0) && (h->cmd_last_payload_len >= 2)) {
+        *progress_percent = ReadUint16_LE(h->cmd_last_payload);
+    } else {
+        ret = -1;
+    }
+
+    LD2402_ExitConfigMode(h);
+    return ret;
+}
+
+int LD2402_GetAutoThresholdAlarm(LD2402_Handle_t *h, LD2402_AutoThresholdAlarm_t *alarm)
+{
+    int ret;
+
+    if ((h == NULL) || (alarm == NULL)) {
+        return -1;
+    }
+
+    LD2402_EnterConfigMode(h);
+    if (!h->is_in_config_mode) {
+        return -1;
+    }
+
+    ret = LD2402_SendCommand(h, LD2402_CMD_AUTO_THRESHOLD_ALARM, NULL, 0);
+    if ((ret == 0) && (h->cmd_last_payload_len >= 4)) {
+        alarm->alarm_status = ReadUint16_LE(&h->cmd_last_payload[0]);
+        alarm->gate_bitmap = ReadUint16_LE(&h->cmd_last_payload[2]);
+    } else {
+        ret = -1;
+    }
+
+    LD2402_ExitConfigMode(h);
+    return ret;
+}
+
+int LD2402_GetPowerInterference(LD2402_Handle_t *h, uint32_t *value)
+{
+    return LD2402_ReadParam(h, LD2402_PARAM_POWER_INTER, value);
+}
+
+int LD2402_RefreshSaveFlag(LD2402_Handle_t *h)
+{
+    uint32_t save_flag = 0;
+
+    if (LD2402_ReadParam(h, LD2402_PARAM_SAVE_FLAG, &save_flag) != 0) {
+        return -1;
+    }
+
+    return LD2402_SetParam(h, LD2402_PARAM_SAVE_FLAG, save_flag);
 }
 
 int LD2402_GetVersion(LD2402_Handle_t *h, char *buf, uint16_t buf_len)
 {
     uint16_t ver_len;
+    int ret = -1;
 
     if ((h == NULL) || (buf == NULL) || (buf_len < 2)) {
         return -1;
     }
 
-    if (LD2402_SendCommand(h, LD2402_CMD_VERSION, NULL, 0) != 0) {
+    LD2402_EnterConfigMode(h);
+    if (!h->is_in_config_mode) {
         return -1;
     }
 
+    if (LD2402_SendCommand(h, LD2402_CMD_VERSION, NULL, 0) != 0) {
+        goto exit;
+    }
+
     if (h->cmd_last_payload_len < 2) {
-        return -1;
+        goto exit;
     }
 
     ver_len = ReadUint16_LE(h->cmd_last_payload);
     if ((ver_len == 0) || ((uint16_t)(2 + ver_len) > h->cmd_last_payload_len) || (ver_len >= buf_len)) {
-        return -1;
+        goto exit;
     }
 
     if (memcpy_s(buf, buf_len, &h->cmd_last_payload[2], ver_len) != EOK) {
-        return -1;
+        goto exit;
     }
+
     buf[ver_len] = '\0';
-    return 0;
+    ret = 0;
+
+exit:
+    LD2402_ExitConfigMode(h);
+    return ret;
 }
 
 int LD2402_GetSN_Hex(LD2402_Handle_t *h, uint8_t *buf, uint16_t buf_len)
 {
     uint16_t sn_len;
+    int ret = -1;
 
     if ((h == NULL) || (buf == NULL) || (buf_len == 0)) {
         return -1;
     }
 
-    if (LD2402_SendCommand(h, LD2402_CMD_READ_SN_HEX, NULL, 0) != 0) {
+    LD2402_EnterConfigMode(h);
+    if (!h->is_in_config_mode) {
         return -1;
     }
 
+    if (LD2402_SendCommand(h, LD2402_CMD_READ_SN_HEX, NULL, 0) != 0) {
+        goto exit;
+    }
+
     if (h->cmd_last_payload_len < 2) {
-        return -1;
+        goto exit;
     }
 
     sn_len = ReadUint16_LE(h->cmd_last_payload);
     if ((sn_len == 0) || ((uint16_t)(2 + sn_len) > h->cmd_last_payload_len) || (sn_len > buf_len)) {
-        return -1;
+        goto exit;
     }
 
     if (memcpy_s(buf, buf_len, &h->cmd_last_payload[2], sn_len) != EOK) {
-        return -1;
+        goto exit;
     }
 
-    return (int)sn_len;
+    ret = (int)sn_len;
+
+exit:
+    LD2402_ExitConfigMode(h);
+    return ret;
 }
 
 int LD2402_GetSN_Char(LD2402_Handle_t *h, char *buf, uint16_t buf_len)
 {
     uint16_t sn_len;
+    int ret = -1;
 
     if ((h == NULL) || (buf == NULL) || (buf_len < 2)) {
         return -1;
     }
 
-    if (LD2402_SendCommand(h, LD2402_CMD_READ_SN_CHAR, NULL, 0) != 0) {
+    LD2402_EnterConfigMode(h);
+    if (!h->is_in_config_mode) {
         return -1;
     }
 
+    if (LD2402_SendCommand(h, LD2402_CMD_READ_SN_CHAR, NULL, 0) != 0) {
+        goto exit;
+    }
+
     if (h->cmd_last_payload_len < 2) {
-        return -1;
+        goto exit;
     }
 
     sn_len = ReadUint16_LE(h->cmd_last_payload);
     if ((sn_len == 0) || ((uint16_t)(2 + sn_len) > h->cmd_last_payload_len) || (sn_len >= buf_len)) {
-        return -1;
+        goto exit;
     }
 
     if (memcpy_s(buf, buf_len, &h->cmd_last_payload[2], sn_len) != EOK) {
-        return -1;
+        goto exit;
     }
+
     buf[sn_len] = '\0';
-    return 0;
+    ret = 0;
+
+exit:
+    LD2402_ExitConfigMode(h);
+    return ret;
 }

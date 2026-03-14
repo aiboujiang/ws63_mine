@@ -4,6 +4,7 @@
  */
 
 #include "sle_uart_slave.h"
+#include "sle_uart_slave_ld2402.h"
 #include "sle_uart_slave_module.h"
 #include "sle_uart_slave_zw101.h"
 
@@ -20,8 +21,6 @@
 #include "systick.h"
 #include "uart.h"
 
-#include "LD2402/LD2402.h"
-
 #ifndef UART_RX_CONDITION_MASK_IDLE
 #define UART_RX_CONDITION_MASK_IDLE 1
 #endif
@@ -36,14 +35,6 @@ static uint8_t g_mine_uart_rx_buffer[MINE_UART_BUS_COUNT][MINE_UART_RX_BUFFER_SI
 /* UART 回调投递到任务消息队列。 */
 static unsigned long g_mine_uart_msg_queue = 0;
 static unsigned int g_mine_uart_msg_size = sizeof(mine_sle_uart_slave_msg_t);
-
-#if MINE_LD2402_ENABLE
-static LD2402_Handle_t g_ld2402_handle;
-static bool g_ld2402_ready = false;
-static uart_bus_t g_ld2402_bus = MINE_LD2402_UART_BUS;
-static volatile bool g_ld2402_status_dirty = false;
-static char g_ld2402_status_text[MINE_LD2402_STATUS_TEXT_LEN] = "RADAR:OFF";
-#endif
 
 /* 保留原 OSAL 日志出口，并镜像到 PRINT 通道。 */
 static void (*g_mine_raw_osal_printk)(const char *fmt, ...) = osal_printk;
@@ -140,175 +131,6 @@ void mine_slave_uart_write_enabled_buses(const uint8_t *data, uint16_t len)
     }
 }
 
-#if MINE_LD2402_ENABLE
-/**
- * @brief LD2402 HAL 层串口发送实现。
- *
- * @param data 发送数据。
- * @param len  数据长度。
- * @return int 0 成功，-1 失败。
- */
-static int ld2402_uart_send(const uint8_t *data, uint16_t len)
-{
-    if ((data == NULL) || (len == 0)) {
-        return -1;
-    }
-
-    if (uapi_uart_write(g_ld2402_bus, data, len, 0) < 0) {
-        return -1;
-    }
-
-    return 0;
-}
-
-/**
- * @brief 提供 LD2402 使用的毫秒时间基。
- *
- * @return uint32_t 当前系统毫秒计数。
- */
-static uint32_t ld2402_get_tick_ms(void)
-{
-    return (uint32_t)uapi_systick_get_ms();
-}
-
-/**
- * @brief 提供 LD2402 使用的阻塞延时。
- *
- * @param ms 延时毫秒数。
- */
-static void ld2402_delay_ms(uint32_t ms)
-{
-    (void)osal_msleep(ms);
-}
-
-/**
- * @brief 更新 LD2402 状态字符串并置脏标记。
- *
- * @param text 状态文本。
- */
-static void ld2402_set_status(const char *text)
-{
-    if (text == NULL) {
-        return;
-    }
-
-    if (snprintf_s(g_ld2402_status_text, sizeof(g_ld2402_status_text),
-        sizeof(g_ld2402_status_text) - 1, "%s", text) > 0) {
-        g_ld2402_status_dirty = true;
-    }
-}
-
-/**
- * @brief LD2402 数据帧回调。
- *
- * 将运动状态与距离压缩为 OLED 可显示文本。
- *
- * @param data 解析后的雷达数据帧。
- */
-static void ld2402_data_callback(LD2402_DataFrame_t *data)
-{
-    if (data == NULL) {
-        return;
-    }
-
-    if (snprintf_s(g_ld2402_status_text, sizeof(g_ld2402_status_text),
-        sizeof(g_ld2402_status_text) - 1, "RADAR:S%u D:%u",
-        (unsigned int)data->status, (unsigned int)data->distance_cm) > 0) {
-        g_ld2402_status_dirty = true;
-    }
-}
-
-/**
- * @brief 初始化 LD2402 模块并读取基础信息。
- *
- * @param bus 雷达所在 UART 总线。
- * @return true  初始化成功。
- * @return false 初始化失败。
- */
-static bool ld2402_init(uart_bus_t bus)
-{
-    LD2402_HAL_t hal = {0};
-    char version[24] = {0};
-    uint8_t sn_buf[MINE_LD2402_SN_MAX_LEN] = {0};
-    int sn_len;
-
-    g_ld2402_ready = false;
-    g_ld2402_bus = bus;
-
-    if (!mine_slave_uart_bus_enabled(bus)) {
-        ld2402_set_status("RADAR:BUS OFF");
-        return false;
-    }
-
-    hal.uart_send = ld2402_uart_send;
-    hal.get_tick_ms = ld2402_get_tick_ms;
-    hal.delay_ms = ld2402_delay_ms;
-    hal.uart_rx_irq_ctrl = NULL;
-
-    LD2402_Init(&g_ld2402_handle, &hal);
-    g_ld2402_handle.on_data_received = ld2402_data_callback;
-    g_ld2402_ready = true;
-
-    if (LD2402_GetVersion(&g_ld2402_handle, version, sizeof(version)) == 0) {
-        osal_printk("[mine slave] ld2402 version:%s\r\n", version);
-        ld2402_set_status("RADAR:READY");
-    } else {
-        osal_printk("[mine slave] ld2402 version query timeout\r\n");
-        ld2402_set_status("RADAR:NO ACK");
-        return false;
-    }
-
-    sn_len = LD2402_GetSN_Hex(&g_ld2402_handle, sn_buf, sizeof(sn_buf));
-    if (sn_len > 0) {
-        osal_printk("[mine slave] ld2402 sn(hex) len:%d\r\n", sn_len);
-    }
-
-    return true;
-}
-
-/**
- * @brief 将 UART 原始字节流喂给 LD2402 协议解析器。
- *
- * @param bus  数据来源总线。
- * @param data 字节流数据。
- * @param len  数据长度。
- */
-static void ld2402_feed(uart_bus_t bus, const uint8_t *data, uint16_t len)
-{
-    uint16_t idx;
-
-    if ((!g_ld2402_ready) || (bus != g_ld2402_bus) || (data == NULL) || (len == 0)) {
-        return;
-    }
-
-    for (idx = 0; idx < len; idx++) {
-        LD2402_InputByte(&g_ld2402_handle, data[idx]);
-    }
-}
-
-/**
- * @brief 读取一份待刷新的 LD2402 状态文本。
- *
- * @param buf     输出缓冲区。
- * @param buf_len 缓冲区长度。
- * @return true  读取成功且有新状态。
- * @return false 无新状态或读取失败。
- */
-static bool ld2402_get_status(char *buf, uint16_t buf_len)
-{
-    if ((buf == NULL) || (buf_len == 0) || (!g_ld2402_status_dirty)) {
-        return false;
-    }
-
-    if (snprintf_s(buf, buf_len, buf_len - 1, "%s", g_ld2402_status_text) <= 0) {
-        return false;
-    }
-
-    g_ld2402_status_dirty = false;
-    return true;
-}
-#endif
-
 /**
  * @brief 统一处理 UART 回调数据并投递到 Slave 任务消息队列。
  *
@@ -330,7 +152,13 @@ static void mine_sle_uart_slave_read_handler_common(uart_bus_t bus, const void *
     }
 
 #if MINE_LD2402_ENABLE
-    ld2402_feed(bus, (const uint8_t *)buffer, length);
+    mine_ld2402_feed(bus, (const uint8_t *)buffer, length);
+#if MINE_LD2402_DEBUG_CMD_ENABLE
+    /* LD2402 调试命令由本地解析消费，避免继续透传到 Host。 */
+    if (mine_ld2402_try_handle_debug_cmd(bus, (const uint8_t *)buffer, length)) {
+        return;
+    }
+#endif
 #endif
 #if MINE_ZW101_ENABLE
     mine_zw101_feed(bus, (const uint8_t *)buffer, length);
@@ -526,7 +354,7 @@ static void *mine_sle_uart_slave_task(const char *arg)
     mine_slave_oled_init();
     mine_sle_uart_slave_uart_init();
 #if MINE_LD2402_ENABLE
-    if (ld2402_init(MINE_LD2402_UART_BUS)) {
+    if (mine_ld2402_init(MINE_LD2402_UART_BUS)) {
         mine_slave_oled_push_state("LD2402 READY");
     } else {
         mine_slave_oled_push_state("LD2402 WAIT");
@@ -557,7 +385,8 @@ static void *mine_sle_uart_slave_task(const char *arg)
         read_ret = osal_msg_queue_read_copy(g_mine_uart_msg_queue, &msg,
             &g_mine_uart_msg_size, MINE_TASK_LOOP_WAIT_MS);
 #if MINE_LD2402_ENABLE
-        if (ld2402_get_status(radar_status, sizeof(radar_status))) {
+        mine_ld2402_process();
+        if (mine_ld2402_get_status(radar_status, sizeof(radar_status))) {
             mine_slave_oled_push_state(radar_status);
         }
 #endif

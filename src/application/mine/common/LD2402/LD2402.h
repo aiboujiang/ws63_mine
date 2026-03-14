@@ -37,6 +37,9 @@
 #define LD2402_MODE_ENGINEERING     0x00000004
 #define LD2402_MODE_NORMAL          0x00000064
 
+#define LD2402_AUTO_THRESHOLD_COEF_MIN 10
+#define LD2402_AUTO_THRESHOLD_COEF_MAX 200
+
 #define LD2402_FRAME_BUFFER_SIZE    256
 #define LD2402_CMD_TIMEOUT_MS       1000
 #define LD2402_MAX_GATES            32
@@ -58,6 +61,11 @@ typedef struct {
     uint16_t distance_cm;
     int32_t move_energy[LD2402_MAX_GATES];
 } LD2402_DataFrame_t;
+
+typedef struct {
+    uint16_t alarm_status;
+    uint16_t gate_bitmap;
+} LD2402_AutoThresholdAlarm_t;
 
 typedef struct {
     uint16_t cmd_id;
@@ -108,6 +116,12 @@ int LD2402_SetEngineeringMode(LD2402_Handle_t *handle);
 int LD2402_SetNormalMode(LD2402_Handle_t *handle);
 int LD2402_SaveParams(LD2402_Handle_t *handle);
 int LD2402_AutoGainAdjust(LD2402_Handle_t *handle);
+int LD2402_StartAutoThreshold(LD2402_Handle_t *handle, uint16_t trig_coef_10x,
+    uint16_t hold_coef_10x, uint16_t static_coef_10x);
+int LD2402_GetAutoThresholdProgress(LD2402_Handle_t *handle, uint16_t *progress_percent);
+int LD2402_GetAutoThresholdAlarm(LD2402_Handle_t *handle, LD2402_AutoThresholdAlarm_t *alarm);
+int LD2402_GetPowerInterference(LD2402_Handle_t *handle, uint32_t *value);
+int LD2402_RefreshSaveFlag(LD2402_Handle_t *handle);
 
 int LD2402_GetVersion(LD2402_Handle_t *handle, char *buf, uint16_t buf_len);
 int LD2402_GetSN_Hex(LD2402_Handle_t *handle, uint8_t *buf, uint16_t buf_len);
