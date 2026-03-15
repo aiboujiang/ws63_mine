@@ -40,6 +40,24 @@ static unsigned int g_mine_uart_msg_size = sizeof(mine_sle_uart_slave_msg_t);
 static void (*g_mine_raw_osal_printk)(const char *fmt, ...) = osal_printk;
 
 /**
+ * @brief 将日志同步镜像到 UART0，保证串口调试口持续可见。
+ *
+ * 采用“尽力发送”策略：不额外打印失败日志，避免日志回路递归。
+ *
+ * @param log_buf    日志缓冲区。
+ * @param format_len 已格式化日志长度。
+ */
+static void mine_slave_log_mirror_uart0(const char *log_buf, int32_t format_len)
+{
+    if ((log_buf == NULL) || (format_len <= 0)) {
+        return;
+    }
+
+    /* 保持 UART0 与系统日志同步输出，不因串口未就绪中断主流程。 */
+    (void)uapi_uart_write(UART_BUS_0, (const uint8_t *)log_buf, (uint16_t)format_len, 0);
+}
+
+/**
  * @brief Slave 统一日志接口，双路输出到 OSAL 与 PRINT。
  *
  * @param fmt printf 风格格式串。
@@ -63,6 +81,7 @@ void mine_slave_log(const char *fmt, ...)
 
     g_mine_raw_osal_printk("%s", log_buf);
     PRINT("%s", log_buf);
+    mine_slave_log_mirror_uart0(log_buf, format_len);
 }
 
 #define osal_printk mine_slave_log
