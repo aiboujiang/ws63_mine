@@ -4,6 +4,7 @@
 
 choice
     prompt "Mine SLE UART Demo Role"
+    optional
 
 config MINE_SUPPORT_SLE_UART_HOST_DEMO
     bool "Support Mine SLE UART Host Demo."
@@ -16,3 +17,11 @@ config MINE_SUPPORT_SLE_UART_SLAVE_DEMO
         Build slave side demo (SLE client + UART0 bridge).
 
 endchoice
+
+config MINE_SUPPORT_UART2_EXT_WK2114
+    bool "Support Mine UART2 Expand via WK2114."
+    default n
+    help
+        Build the Mine WK2114 UART2 extension skeleton module.
+        This module provides a software framework for extending one UART2
+        host port into four sub UART channels via WK2114.

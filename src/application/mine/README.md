@@ -153,7 +153,21 @@ LD SAVE3F
    - `FP DEL <id> [count]`
    - `FP CLEAR`
 
-## 8. 快速联调步骤
+## 8. WK2114 UART2 扩展模块（可选）
+
+1. 目录：`application/mine/wk2114_uart2_ext`
+2. 功能：使用 `UART2` 作为 WK2114 主口，将单路主 UART 扩展为 4 路子 UART。
+3. 使能开关：
+   - `Application -> Mine -> Support Mine UART2 Expand via WK2114.`
+4. OLED 调试输出：
+   - 标题与状态：当前初始化进度、错误状态。
+   - 数据预览：最近一条主口 RX/TX 命令帧（ASCII 可见字符 + 截断显示）。
+   - 统计信息：RX/TX 最近长度与累计次数。
+   - 通道信息：当前子串口号与波特率（例如 `CH:U1 B:115200`）。
+
+## 9. 快速联调步骤
+
+
 
 1. 分别编译主机与从机镜像并烧录。
 2. 先上电主机，再上电从机，确认从机完成扫描并连接主机。
@@ -162,7 +176,7 @@ LD SAVE3F
    - 从机串口发数据，观察主机串口输出。
 4. 若启用 LD2402，在从机调试串口执行 `LD HELP` 验证命令通道是否正常。
 
-## 9. 常见问题
+## 10. 常见问题
 
 1. 现象：`LD` 命令无响应。
    - 排查 `MINE_LD2402_DEBUG_CMD_ENABLE` 与 `MINE_LD2402_DEBUG_UART_BUS`。

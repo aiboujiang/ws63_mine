@@ -18,6 +18,10 @@ if(DEFINED CONFIG_MINE_SUPPORT_SLE_UART_SLAVE_DEMO)
     add_subdirectory_if_exist(sle_uart_slave)
 endif()
 
+if(DEFINED CONFIG_MINE_SUPPORT_UART2_EXT_WK2114)
+    add_subdirectory_if_exist(wk2114_uart2_ext)
+endif()
+
 set(PRIVATE_HEADER
 )
 
