@@ -295,6 +295,10 @@ static const char *mine_zw101_ack_desc(uint8_t ack_code)
             return "IMAGE_UNAVAILABLE";
         case 0x40:
             return "ENROLL_TIMES_NOT_ENOUGH";
+        case 0x41:
+            return "COMM_TIMEOUT";
+        case 0xFF:
+            return "WAIT_ACK_TIMEOUT";
         default:
             return "UNKNOWN";
     }
@@ -942,6 +946,7 @@ static bool mine_zw101_run_enroll_flow(uint16_t template_id)
 static bool mine_zw101_run_verify_flow(void)
 {
     uint8_t step_ack = 0xFF;
+    int search_ret;
 
     osal_printk("[mine zw101] verify start\r\n");
     g_mine_zw101_match_id = MINE_ZW101_MATCH_ID_INVALID;
@@ -963,7 +968,15 @@ static bool mine_zw101_run_verify_flow(void)
     }
     mine_zw101_log_step_result("VERIFY", "EXTRACT", ZW101_CMD_GEN_EXTRACT, 0, g_mine_zw101_ctx.ack_code);
 
-    if (zw101_cmd_match1n(&g_mine_zw101_ctx, 1, MINE_ZW101_SEARCH_START_PAGE, MINE_ZW101_SEARCH_PAGE_NUM) != 0) {
+    search_ret = zw101_cmd_match1n(&g_mine_zw101_ctx, 1, MINE_ZW101_SEARCH_START_PAGE, MINE_ZW101_SEARCH_PAGE_NUM);
+    if ((search_ret != 0) && (g_mine_zw101_ctx.ack_code == ZW101_PS_TIME_OUT)) {
+        /* 搜索命令在库量较大时可能接近超时边界，超时后补一次重试降低误判概率。 */
+        osal_printk("[mine zw101] VERIFY SEARCH timeout, retry once\r\n");
+        search_ret = zw101_cmd_match1n(&g_mine_zw101_ctx, 1,
+            MINE_ZW101_SEARCH_START_PAGE, MINE_ZW101_SEARCH_PAGE_NUM);
+    }
+
+    if (search_ret != 0) {
         mine_zw101_log_step_result("VERIFY", "SEARCH", ZW101_CMD_SEARCH_TEMPLATE, -1, g_mine_zw101_ctx.ack_code);
         if ((g_mine_zw101_ctx.ack_code == ZW101_PS_NOT_MATCH) ||
             (g_mine_zw101_ctx.ack_code == ZW101_PS_NOT_SEARCHED)) {

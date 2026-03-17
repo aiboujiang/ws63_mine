@@ -30,8 +30,11 @@ extern "C" {
 
 /* 通用命令响应超时（毫秒）。 */
 #define ZW101_COMMON_TIMEOUT (1000)
-/* 搜索命令需要遍历模板库，超时适当放宽（毫秒）。 */
-#define ZW101_MATCH_TIMEOUT 2300
+/*
+ * 搜索命令需要遍历模板库，耗时受库容量和当前手指图像质量影响较大。
+ * 这里与历史兼容等待窗口保持一致，避免接近 2~3 秒边界时出现误判超时。
+ */
+#define ZW101_MATCH_TIMEOUT ZW101_WAIT_UP_TIME
 /* 手册推荐串口波特率。 */
 #define ZW101_DEFAULT_BAUD (57600)
 /* 未使用上电就绪字节 0x55 时的上电稳定等待（毫秒）。 */

@@ -201,6 +201,11 @@ int zw101_wait_ack(zw101_context_t *ctx, uint8_t cmd, uint32_t timeout_ms, uint8
     while (!ctx->ack_done) {
         /* 使用无符号差值，常见计时回绕场景下更安全。 */
         if ((uint32_t)(ctx->hal.get_tick_ms() - start_ms) >= timeout_ms) {
+            /*
+             * 明确标记为“等待ACK超时”，避免上层继续看到 0xFF(UNKNOWN)。
+             * 该值与手册 TIMEOUT 确认码保持一致，便于日志统一释义。
+             */
+            ctx->ack_code = ZW101_PS_TIME_OUT;
             ctx->waiting_ack = false;
             return -1;
         }
