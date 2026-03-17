@@ -32,10 +32,6 @@
 #define MINE_LD2402_INIT_VERSION_RETRY_MAX 3
 /* 初始化阶段版本查询重试间隔（毫秒）。 */
 #define MINE_LD2402_INIT_VERSION_RETRY_DELAY_MS 80
-/* 初始化失败后的后台重探测间隔（毫秒）。 */
-#define MINE_LD2402_RECOVER_RETRY_INTERVAL_MS 1500
-/* 后台重探测每轮版本查询次数，避免单轮阻塞过长。 */
-#define MINE_LD2402_RECOVER_VERSION_RETRY_MAX 1
 
 /* LD2402 调试命令类型。 */
 typedef enum {
@@ -84,10 +80,6 @@ static mine_ld2402_dbg_cmd_t g_mine_ld2402_dbg_queue[MINE_LD2402_DEBUG_CMD_QUEUE
 static uint8_t g_mine_ld2402_dbg_queue_head = 0;
 static uint8_t g_mine_ld2402_dbg_queue_tail = 0;
 static uint8_t g_mine_ld2402_dbg_queue_count = 0;
-
-/* NO ACK 场景的后台重探测节流状态。 */
-static uint32_t g_mine_ld2402_recover_last_try_ms = 0;
-static bool g_mine_ld2402_recover_started = false;
 
 /**
  * @brief 更新 LD2402 状态文本并置脏标记。
@@ -521,96 +513,6 @@ static void mine_ld2402_data_callback(LD2402_DataFrame_t *data)
 }
 
 /**
- * @brief 探测 LD2402 在线状态并在成功后补齐基础初始化动作。
- *
- * @param retry_max      版本查询重试次数。
- * @param print_identity 是否输出 SN 等设备信息。
- * @return true  探测成功并进入可用状态。
- * @return false 探测失败。
- */
-static bool mine_ld2402_try_probe_online(uint8_t retry_max, bool print_identity)
-{
-    char version[MINE_LD2402_VERSION_TEXT_LEN] = {0};
-    char sn_text[MINE_LD2402_SN_TEXT_MAX_LEN] = {0};
-    uint8_t sn_buf[MINE_LD2402_SN_MAX_LEN] = {0};
-    uint8_t retry;
-    int sn_len;
-
-    if (!mine_slave_uart_bus_enabled(g_mine_ld2402_bus)) {
-        g_mine_ld2402_ready = false;
-        mine_ld2402_set_status("RADAR:BUS OFF");
-        return false;
-    }
-
-    if (retry_max == 0U) {
-        retry_max = 1U;
-    }
-
-    /* 探测期间临时开放 ready，确保 RX 回调可持续解析 ACK。 */
-    g_mine_ld2402_ready = true;
-
-    for (retry = 0; retry < retry_max; retry++) {
-        if (LD2402_GetVersion(&g_mine_ld2402_handle, version, sizeof(version)) == 0) {
-            osal_printk("[mine ld2402] version:%s\r\n", version);
-
-            if (print_identity) {
-                if (LD2402_GetSN_Char(&g_mine_ld2402_handle, sn_text, sizeof(sn_text)) == 0) {
-                    osal_printk("[mine ld2402] sn(char):%s\r\n", sn_text);
-                } else {
-                    sn_len = LD2402_GetSN_Hex(&g_mine_ld2402_handle, sn_buf, sizeof(sn_buf));
-                    mine_ld2402_dump_sn_hex(sn_buf, sn_len);
-                }
-            }
-
-            /* 调试阶段默认切到工程模式，便于接收结构化数据帧。 */
-            if (LD2402_SetEngineeringMode(&g_mine_ld2402_handle) == 0) {
-                mine_ld2402_set_status("RADAR:ENG");
-            } else {
-                mine_ld2402_set_status("RADAR:READY");
-            }
-            return true;
-        }
-
-        if ((uint8_t)(retry + 1U) < retry_max) {
-            (void)osal_msleep(MINE_LD2402_INIT_VERSION_RETRY_DELAY_MS);
-        }
-    }
-
-    g_mine_ld2402_ready = false;
-    return false;
-}
-
-/**
- * @brief 在 NO ACK 状态下按固定节奏执行后台重探测。
- */
-static void mine_ld2402_try_recover_if_needed(void)
-{
-    uint32_t now_ms;
-
-    if (g_mine_ld2402_ready) {
-        g_mine_ld2402_recover_last_try_ms = 0;
-        g_mine_ld2402_recover_started = false;
-        return;
-    }
-
-    now_ms = (uint32_t)uapi_systick_get_ms();
-    if (g_mine_ld2402_recover_started &&
-        ((uint32_t)(now_ms - g_mine_ld2402_recover_last_try_ms) < MINE_LD2402_RECOVER_RETRY_INTERVAL_MS)) {
-        return;
-    }
-
-    g_mine_ld2402_recover_last_try_ms = now_ms;
-    g_mine_ld2402_recover_started = true;
-
-    if (mine_ld2402_try_probe_online(MINE_LD2402_RECOVER_VERSION_RETRY_MAX, false)) {
-        osal_printk("[mine ld2402] recover ack success\r\n");
-        return;
-    }
-
-    mine_ld2402_set_status("RADAR:NO ACK");
-}
-
-/**
  * @brief 执行一条已解析完成的 LD2402 调试命令。
  *
  * @param cmd 调试命令对象。
@@ -946,14 +848,17 @@ static void mine_ld2402_handle_debug_line(const char *line)
 bool mine_ld2402_init(uart_bus_t bus)
 {
     LD2402_HAL_t hal = {0};
+    char version[MINE_LD2402_VERSION_TEXT_LEN] = {0};
+    char sn_text[MINE_LD2402_SN_TEXT_MAX_LEN] = {0};
+    uint8_t sn_buf[MINE_LD2402_SN_MAX_LEN] = {0};
+    uint8_t retry;
+    int sn_len;
 
     g_mine_ld2402_ready = false;
     g_mine_ld2402_bus = bus;
     mine_ld2402_reset_debug_queue();
     g_mine_ld2402_dbg_capture = false;
     g_mine_ld2402_dbg_line_len = 0;
-    g_mine_ld2402_recover_last_try_ms = 0;
-    g_mine_ld2402_recover_started = false;
     (void)memset_s(g_mine_ld2402_dbg_line, sizeof(g_mine_ld2402_dbg_line), 0, sizeof(g_mine_ld2402_dbg_line));
 
     /* 先做总线可用性检查，避免向未初始化 UART 下发命令。 */
@@ -970,10 +875,36 @@ bool mine_ld2402_init(uart_bus_t bus)
     LD2402_Init(&g_mine_ld2402_handle, &hal);
     g_mine_ld2402_handle.on_data_received = mine_ld2402_data_callback;
 
-    if (!mine_ld2402_try_probe_online(MINE_LD2402_INIT_VERSION_RETRY_MAX, true)) {
-        /* 初始化阶段未握手成功，进入后台重探测流程。 */
+    /* 提前置 ready，确保初始化阶段下发命令时 ACK 能被回调解析。 */
+    g_mine_ld2402_ready = true;
+
+    for (retry = 0; retry < MINE_LD2402_INIT_VERSION_RETRY_MAX; retry++) {
+        if (LD2402_GetVersion(&g_mine_ld2402_handle, version, sizeof(version)) == 0) {
+            osal_printk("[mine ld2402] version:%s\r\n", version);
+            break;
+        }
+        (void)osal_msleep(MINE_LD2402_INIT_VERSION_RETRY_DELAY_MS);
+    }
+
+    if (retry >= MINE_LD2402_INIT_VERSION_RETRY_MAX) {
+        /* 版本读取失败说明命令 ACK 未打通，回滚 ready 防止状态误判。 */
+        g_mine_ld2402_ready = false;
         mine_ld2402_set_status("RADAR:NO ACK");
         return false;
+    }
+
+    if (LD2402_GetSN_Char(&g_mine_ld2402_handle, sn_text, sizeof(sn_text)) == 0) {
+        osal_printk("[mine ld2402] sn(char):%s\r\n", sn_text);
+    } else {
+        sn_len = LD2402_GetSN_Hex(&g_mine_ld2402_handle, sn_buf, sizeof(sn_buf));
+        mine_ld2402_dump_sn_hex(sn_buf, sn_len);
+    }
+
+    /* 调试阶段默认切到工程模式，便于接收结构化数据帧。 */
+    if (LD2402_SetEngineeringMode(&g_mine_ld2402_handle) == 0) {
+        mine_ld2402_set_status("RADAR:ENG");
+    } else {
+        mine_ld2402_set_status("RADAR:READY");
     }
 
     return true;
@@ -1098,9 +1029,6 @@ void mine_ld2402_process(void)
         /* 每轮主循环仅执行一条命令，避免耗时操作阻塞其他业务。 */
         mine_ld2402_exec_debug_cmd(&cmd);
     }
-
-    /* 初始化失败后持续后台重探测，避免上电时序抖动导致长期 NO ACK。 */
-    mine_ld2402_try_recover_if_needed();
 }
 
 /**
