@@ -232,6 +232,7 @@ int zw101_pkg_handle(zw101_context_t *ctx, const uint8_t *data, uint16_t size)
     uint16_t data_size;
     uint16_t payload_len;
     const uint8_t *payload;
+    bool finish_waiting_ack;
     zw101_ack_evt_t evt;
 
     if ((ctx == NULL) || (data == NULL) || (size < 12)) {
@@ -252,7 +253,17 @@ int zw101_pkg_handle(zw101_context_t *ctx, const uint8_t *data, uint16_t size)
         ctx->packet_cb(data, size);
     }
 
-    if ((pkg_identification == ZW101_ACK_PKG) && (payload_len > 0)) {
+    finish_waiting_ack = (pkg_identification == ZW101_ACK_PKG);
+    /*
+     * 兼容部分固件在 SEARCH 指令下使用 DATA/EOF 包承载确认码的场景：
+     * 若当前正等待 SEARCH ACK，则允许 DATA/EOF 包结束等待。
+     */
+    if ((!finish_waiting_ack) && ctx->waiting_ack && (ctx->ack_cmd == ZW101_CMD_SEARCH_TEMPLATE) &&
+        ((pkg_identification == ZW101_DATA_PKG) || (pkg_identification == ZW101_EOF_PKG))) {
+        finish_waiting_ack = true;
+    }
+
+    if (finish_waiting_ack && (payload_len > 0)) {
         ctx->ack_code = payload[0];
         ctx->ack_done = true;
 
