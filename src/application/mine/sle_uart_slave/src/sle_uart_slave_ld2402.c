@@ -36,6 +36,8 @@
 #define MINE_LD2402_RECOVER_RETRY_INTERVAL_MS 1500
 /* 后台重探测每轮版本查询次数，避免单轮阻塞过长。 */
 #define MINE_LD2402_RECOVER_VERSION_RETRY_MAX 1
+/* 手册标注的上电自检窗口（毫秒），窗口内模块可能不响应配置命令。 */
+#define MINE_LD2402_POWERON_SELFCHECK_MS 10000
 
 /* LD2402 调试命令类型。 */
 typedef enum {
@@ -88,6 +90,11 @@ static uint8_t g_mine_ld2402_dbg_queue_count = 0;
 /* NO ACK 场景的后台重探测节流状态。 */
 static uint32_t g_mine_ld2402_recover_last_try_ms = 0;
 static bool g_mine_ld2402_recover_started = false;
+/* 初始化时间戳：用于区分上电自检窗口与真实链路异常。 */
+static uint32_t g_mine_ld2402_init_start_ms = 0;
+/* UART2 收包统计：辅助定位“完全无回包”场景。 */
+static volatile uint32_t g_mine_ld2402_rx_total_bytes = 0;
+static volatile uint32_t g_mine_ld2402_rx_total_chunks = 0;
 
 /**
  * @brief 更新 LD2402 状态文本并置脏标记。
@@ -594,6 +601,13 @@ static void mine_ld2402_try_recover_if_needed(void)
     }
 
     now_ms = (uint32_t)uapi_systick_get_ms();
+
+    /* 手册说明上电后存在约 10s 自检窗口，窗口内优先标记为自检状态。 */
+    if ((uint32_t)(now_ms - g_mine_ld2402_init_start_ms) < MINE_LD2402_POWERON_SELFCHECK_MS) {
+        mine_ld2402_set_status("RADAR:SELFTEST");
+        return;
+    }
+
     if (g_mine_ld2402_recover_started &&
         ((uint32_t)(now_ms - g_mine_ld2402_recover_last_try_ms) < MINE_LD2402_RECOVER_RETRY_INTERVAL_MS)) {
         return;
@@ -607,7 +621,12 @@ static void mine_ld2402_try_recover_if_needed(void)
         return;
     }
 
-    mine_ld2402_set_status("RADAR:NO ACK");
+    if (g_mine_ld2402_rx_total_bytes == 0) {
+        /* 完全无回包时优先提示链路层问题（接线/供电/波特率）。 */
+        mine_ld2402_set_status("RADAR:NO RX");
+    } else {
+        mine_ld2402_set_status("RADAR:NO ACK");
+    }
 }
 
 /**
@@ -642,10 +661,14 @@ static void mine_ld2402_exec_debug_cmd(const mine_ld2402_dbg_cmd_t *cmd)
             mine_ld2402_set_status("RADAR:CMD HELP");
             break;
         case MINE_LD2402_DBG_OP_STATUS:
-            osal_printk("[mine ld2402] status ready:%u cfg:%u bus:%s text:%s\r\n",
+            osal_printk("[mine ld2402] status ready:%u cfg:%u bus:%s rx_bytes:%lu rx_chunks:%lu last_ack:0x%04x wait:%u text:%s\r\n",
                 (unsigned int)g_mine_ld2402_ready,
                 (unsigned int)g_mine_ld2402_handle.is_in_config_mode,
                 mine_slave_uart_bus_name((uint8_t)g_mine_ld2402_bus),
+                (unsigned long)g_mine_ld2402_rx_total_bytes,
+                (unsigned long)g_mine_ld2402_rx_total_chunks,
+                (unsigned int)g_mine_ld2402_handle.cmd_last_ack_cmd,
+                (unsigned int)g_mine_ld2402_handle.cmd_waiting,
                 g_mine_ld2402_status_text);
             mine_ld2402_set_status("RADAR:STATUS");
             break;
@@ -946,6 +969,7 @@ static void mine_ld2402_handle_debug_line(const char *line)
 bool mine_ld2402_init(uart_bus_t bus)
 {
     LD2402_HAL_t hal = {0};
+    uint32_t now_ms;
 
     g_mine_ld2402_ready = false;
     g_mine_ld2402_bus = bus;
@@ -954,6 +978,10 @@ bool mine_ld2402_init(uart_bus_t bus)
     g_mine_ld2402_dbg_line_len = 0;
     g_mine_ld2402_recover_last_try_ms = 0;
     g_mine_ld2402_recover_started = false;
+    g_mine_ld2402_rx_total_bytes = 0;
+    g_mine_ld2402_rx_total_chunks = 0;
+    now_ms = (uint32_t)uapi_systick_get_ms();
+    g_mine_ld2402_init_start_ms = now_ms;
     (void)memset_s(g_mine_ld2402_dbg_line, sizeof(g_mine_ld2402_dbg_line), 0, sizeof(g_mine_ld2402_dbg_line));
 
     /* 先做总线可用性检查，避免向未初始化 UART 下发命令。 */
@@ -971,8 +999,8 @@ bool mine_ld2402_init(uart_bus_t bus)
     g_mine_ld2402_handle.on_data_received = mine_ld2402_data_callback;
 
     if (!mine_ld2402_try_probe_online(MINE_LD2402_INIT_VERSION_RETRY_MAX, true)) {
-        /* 初始化阶段未握手成功，进入后台重探测流程。 */
-        mine_ld2402_set_status("RADAR:NO ACK");
+        /* 初始化阶段未握手成功，先进入自检态，再由后台重探测接管。 */
+        mine_ld2402_set_status("RADAR:SELFTEST");
         return false;
     }
 
@@ -990,7 +1018,15 @@ void mine_ld2402_feed(uart_bus_t bus, const uint8_t *data, uint16_t len)
 {
     uint16_t idx;
 
-    if ((!g_mine_ld2402_ready) || (bus != g_mine_ld2402_bus) || (data == NULL) || (len == 0)) {
+    if ((bus != g_mine_ld2402_bus) || (data == NULL) || (len == 0)) {
+        return;
+    }
+
+    /* 持续统计 UART2 输入，用于区分“无数据”与“有数据但命令无 ACK”。 */
+    g_mine_ld2402_rx_total_bytes += len;
+    g_mine_ld2402_rx_total_chunks++;
+
+    if (!g_mine_ld2402_ready) {
         return;
     }
 
