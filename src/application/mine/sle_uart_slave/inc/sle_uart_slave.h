@@ -44,6 +44,28 @@ extern "C" {
 #define MINE_UART_ENABLE_MASK (MINE_UART_EN_UART0 | MINE_UART_EN_UART2)
 
 /**
+ * @brief 是否启用 mine 日志对 UART0 的镜像直写，1=启用，0=禁用。
+ *
+ * 默认关闭。开启后每条日志会额外直写 UART0，便于早期串口联调；
+ * 但在高频回调场景下会显著增加 CPU 负载并放大重入风险。
+ */
+#define MINE_LOG_UART0_MIRROR_ENABLE 0
+
+/**
+ * @brief 是否在 UART2 RX 回调中打印原始收包内容，1=启用，0=禁用。
+ *
+ * 默认关闭。该回调通常在中断上下文触发，频繁打印会影响实时性。
+ */
+#define MINE_UART2_RX_ISR_DUMP_ENABLE 0
+
+/**
+ * @brief 是否启用 UART<->SLE 链路的高频追踪日志，1=启用，0=禁用。
+ *
+ * 仅建议在短时联调时打开，长期开启会显著增加日志开销。
+ */
+#define MINE_UART_LINK_TRACE_ENABLE 0
+
+/**
  * @brief UART0 引脚配置。
  */
 #define MINE_UART0_TXD_PIN 17
@@ -95,12 +117,12 @@ extern "C" {
 /**
  * @brief UART2 普通串口透传模式开关，1=启用，0=禁用。
  */
-#define MINE_UART2_MODE_NORMAL_ENABLE 1
+#define MINE_UART2_MODE_NORMAL_ENABLE 0
 
 /**
  * @brief UART2 挂载 LD2402 模式开关，1=启用，0=禁用。
  */
-#define MINE_UART2_MODE_LD2402_ENABLE 0
+#define MINE_UART2_MODE_LD2402_ENABLE 1
 
 /**
  * @brief UART2 挂载 ZW101 模式开关，1=启用，0=禁用。
