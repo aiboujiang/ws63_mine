@@ -26,6 +26,10 @@
 #define MINE_LD2402_VERSION_TEXT_LEN 24
 #define MINE_LD2402_DEBUG_LINE_MAX 96
 #define MINE_LD2402_SN_TEXT_MAX_LEN ((MINE_LD2402_SN_MAX_LEN * 2) + 1)
+/* 初始化阶段版本查询重试次数，吸收模块上电初期的偶发无应答。 */
+#define MINE_LD2402_INIT_VERSION_RETRY_MAX 3
+/* 初始化阶段版本查询重试间隔（毫秒）。 */
+#define MINE_LD2402_INIT_VERSION_RETRY_DELAY_MS 80
 
 /* LD2402 调试命令类型。 */
 typedef enum {
@@ -773,6 +777,7 @@ bool mine_ld2402_init(uart_bus_t bus)
     char version[MINE_LD2402_VERSION_TEXT_LEN] = {0};
     char sn_text[MINE_LD2402_SN_TEXT_MAX_LEN] = {0};
     uint8_t sn_buf[MINE_LD2402_SN_MAX_LEN] = {0};
+    uint8_t retry;
     int sn_len;
 
     g_mine_ld2402_ready = false;
@@ -802,9 +807,17 @@ bool mine_ld2402_init(uart_bus_t bus)
     /* 提前置 ready，确保初始化阶段下发命令时 ACK 能被回调解析。 */
     g_mine_ld2402_ready = true;
 
-    if (LD2402_GetVersion(&g_mine_ld2402_handle, version, sizeof(version)) == 0) {
-        osal_printk("[mine ld2402] version:%s\r\n", version);
-    } else {
+    for (retry = 0; retry < MINE_LD2402_INIT_VERSION_RETRY_MAX; retry++) {
+        if (LD2402_GetVersion(&g_mine_ld2402_handle, version, sizeof(version)) == 0) {
+            osal_printk("[mine ld2402] version:%s\r\n", version);
+            break;
+        }
+        (void)osal_msleep(MINE_LD2402_INIT_VERSION_RETRY_DELAY_MS);
+    }
+
+    if (retry >= MINE_LD2402_INIT_VERSION_RETRY_MAX) {
+        /* 版本读取失败说明命令 ACK 未打通，回滚 ready 防止状态误判。 */
+        g_mine_ld2402_ready = false;
         mine_ld2402_set_status("RADAR:NO ACK");
         return false;
     }
