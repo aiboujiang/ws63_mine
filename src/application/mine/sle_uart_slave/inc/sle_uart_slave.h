@@ -73,27 +73,6 @@ extern "C" {
 #define MINE_UART_LINK_TRACE_ENABLE 0
 
 /**
- * @brief UART->SLE 链路未就绪丢包日志最小间隔（毫秒）。
- *
- * 默认 500ms，即每秒最多输出 2 次，并在日志中附带区间累计丢包数。
- */
-#define MINE_UART_SEND_DROP_LOG_INTERVAL_MS 500U
-
-/**
- * @brief OLED 脏行刷新最小间隔（毫秒）。
- *
- * 默认 500ms，避免高频状态变化导致 I2C 写阻塞占满 CPU。
- */
-#define MINE_OLED_FLUSH_INTERVAL_MS 500U
-
-/**
- * @brief LD2402 状态文本更新最小间隔（毫秒）。
- *
- * 默认 500ms，限制 RADAR 状态行刷新频率，降低 OLED 压力。
- */
-#define MINE_LD2402_STATUS_UPDATE_INTERVAL_MS 500U
-
-/**
  * @brief UART0 引脚配置。
  */
 #define MINE_UART0_TXD_PIN 17

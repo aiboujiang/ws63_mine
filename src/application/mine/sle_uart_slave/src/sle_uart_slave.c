@@ -311,14 +311,6 @@ static void mine_sle_uart_slave_read_handler_common(uart_bus_t bus, const void *
 #endif
 #endif
 
-    /*
-     * 链路未就绪时直接丢弃透传数据，不做 vmalloc/入队，避免在建链窗口堆积无效负载。
-     * 调试命令路径已在前面优先消费，不受该策略影响。
-     */
-    if (!mine_sle_uart_slave_link_ready()) {
-        return;
-    }
-
     buffer_copy = osal_vmalloc(length);
     if (buffer_copy == NULL) {
         return;
@@ -486,6 +478,7 @@ void mine_sle_uart_slave_uart_init(void)
 static void *mine_sle_uart_slave_task(const char *arg)
 {
     int read_ret;
+    errcode_t send_ret;
 #if MINE_LD2402_ENABLE
     /* 仅在雷达功能启用时保留状态缓冲区，避免未使用告警。 */
     char radar_status[24] = {0};
@@ -559,8 +552,10 @@ static void *mine_sle_uart_slave_task(const char *arg)
             osal_printk("[mine slave] %s rx queue len:%u\r\n",
                 mine_slave_uart_bus_name(msg.uart_bus), msg.value_len);
 #endif
-            /* 发送函数内部已按场景分类打印，主循环避免重复错误日志刷屏。 */
-            (void)mine_sle_uart_slave_send_to_host(&msg);
+            send_ret = mine_sle_uart_slave_send_to_host(&msg);
+            if (send_ret != ERRCODE_SLE_SUCCESS) {
+                osal_printk("[mine slave] uart->sle send failed:%x\r\n", send_ret);
+            }
             osal_vfree(msg.value);
         }
     }

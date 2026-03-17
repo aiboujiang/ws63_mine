@@ -10,7 +10,6 @@
 
 #include "securec.h"
 #include "ssd1306/hal_bsp_ssd1306.h"
-#include "systick.h"
 
 #define osal_printk mine_slave_log
 
@@ -101,17 +100,9 @@ static void mine_oled_mark_line_dirty(uint32_t line_index)
  */
 void mine_slave_oled_flush_pending(void)
 {
-    static uint32_t s_last_flush_ms = 0;
-    static bool s_flush_started = false;
     uint8_t dirty_mask;
-    uint32_t now_ms;
 
     if ((!g_mine_oled_ready) || (!g_mine_oled_dirty)) {
-        return;
-    }
-
-    now_ms = (uint32_t)uapi_systick_get_ms();
-    if (s_flush_started && ((uint32_t)(now_ms - s_last_flush_ms) < MINE_OLED_FLUSH_INTERVAL_MS)) {
         return;
     }
 
@@ -124,8 +115,6 @@ void mine_slave_oled_flush_pending(void)
     }
 
     mine_oled_refresh(dirty_mask);
-    s_last_flush_ms = now_ms;
-    s_flush_started = true;
 }
 
 /**

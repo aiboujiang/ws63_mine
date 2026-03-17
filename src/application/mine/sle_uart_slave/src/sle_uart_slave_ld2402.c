@@ -414,21 +414,9 @@ static void mine_ld2402_delay_ms_adapter(uint32_t ms)
  */
 static void mine_ld2402_data_callback(LD2402_DataFrame_t *data)
 {
-    static uint32_t s_last_status_ms = 0;
-    static bool s_status_started = false;
-    uint32_t now_ms;
-
     if (data == NULL) {
         return;
     }
-
-    /* 高频数据帧仅按固定周期更新状态文本，避免 OLED/I2C 路径过载。 */
-    now_ms = (uint32_t)uapi_systick_get_ms();
-    if (s_status_started && ((uint32_t)(now_ms - s_last_status_ms) < MINE_LD2402_STATUS_UPDATE_INTERVAL_MS)) {
-        return;
-    }
-    s_last_status_ms = now_ms;
-    s_status_started = true;
 
     mine_ld2402_set_status_fmt("RADAR:S%u D:%u",
         (unsigned int)data->status, (unsigned int)data->distance_cm);
