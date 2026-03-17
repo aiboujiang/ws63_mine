@@ -29,6 +29,11 @@
 #define PRINT(fmt, arg...)
 #endif
 
+/* 是否启用 PRINT 通道日志（通常会带 APP| 前缀，默认关闭以避免重复输出）。 */
+#ifndef MINE_LOG_PRINT_CHANNEL_ENABLE
+#define MINE_LOG_PRINT_CHANNEL_ENABLE 0
+#endif
+
 /* 多路 UART 接收缓冲区（按 UART0/1/2 索引）。 */
 static uint8_t g_mine_uart_rx_buffer[MINE_UART_BUS_COUNT][MINE_UART_RX_BUFFER_SIZE] = {0};
 
@@ -38,6 +43,11 @@ static unsigned int g_mine_uart_msg_size = sizeof(mine_sle_uart_slave_msg_t);
 
 /* 保留原 OSAL 日志出口，并镜像到 PRINT 通道。 */
 static void (*g_mine_raw_osal_printk)(const char *fmt, ...) = osal_printk;
+
+/* UART2 接收日志最大显示字节数，避免长报文刷屏影响联调体验。 */
+#define MINE_UART_RX_LOG_SHOW_MAX_BYTES 64
+/* 文本日志缓冲区：预留转义字符空间（如\n、\r），末尾保留字符串结束符。 */
+#define MINE_UART_RX_LOG_TEXT_MAX_LEN ((MINE_UART_RX_LOG_SHOW_MAX_BYTES * 2) + 1)
 
 /**
  * @brief 将日志同步镜像到 UART0，保证串口调试口持续可见。
@@ -80,7 +90,10 @@ void mine_slave_log(const char *fmt, ...)
     }
 
     g_mine_raw_osal_printk("%s", log_buf);
+#if MINE_LOG_PRINT_CHANNEL_ENABLE
+    /* 如需 APP| 前缀通道可打开该开关，默认关闭以减少重复日志。 */
     PRINT("%s", log_buf);
+#endif
     mine_slave_log_mirror_uart0(log_buf, format_len);
 }
 
@@ -120,6 +133,83 @@ const char *mine_slave_uart_bus_name(uint8_t bus)
         return "UART2";
     }
     return "UART?";
+}
+
+/**
+ * @brief 将 UART2 接收数据转换为可读文本并打印到串口日志。
+ *
+ * 仅展示前 MINE_UART_RX_LOG_SHOW_MAX_BYTES 字节，避免长数据帧导致日志阻塞。
+ * 可打印 ASCII 字节直接输出；\r/\n/\t 转义显示；其余不可打印字节显示为 '.'。
+ *
+ * @param buffer UART2 接收缓冲区。
+ * @param length 接收字节数。
+ */
+static void mine_sle_uart_slave_dump_uart2_rx(const uint8_t *buffer, uint16_t length)
+{
+    char log_text[MINE_UART_RX_LOG_TEXT_MAX_LEN] = {0};
+    uint16_t show_len;
+    uint16_t idx;
+    uint16_t pos = 0;
+    bool truncated = false;
+    uint8_t ch;
+
+    if ((buffer == NULL) || (length == 0)) {
+        return;
+    }
+
+    show_len = length;
+    if (show_len > MINE_UART_RX_LOG_SHOW_MAX_BYTES) {
+        show_len = MINE_UART_RX_LOG_SHOW_MAX_BYTES;
+        truncated = true;
+    }
+
+    for (idx = 0; idx < show_len; idx++) {
+        if ((sizeof(log_text) - pos) <= 1) {
+            break;
+        }
+
+        ch = buffer[idx];
+        if ((ch >= 0x20U) && (ch <= 0x7EU)) {
+            /* 直接显示可打印 ASCII，便于定位上位机文本协议内容。 */
+            log_text[pos++] = (char)ch;
+            continue;
+        }
+
+        if (((sizeof(log_text) - pos) > 2) && (ch == '\r')) {
+            log_text[pos++] = '\\';
+            log_text[pos++] = 'r';
+            continue;
+        }
+
+        if (((sizeof(log_text) - pos) > 2) && (ch == '\n')) {
+            log_text[pos++] = '\\';
+            log_text[pos++] = 'n';
+            continue;
+        }
+
+        if (((sizeof(log_text) - pos) > 2) && (ch == '\t')) {
+            log_text[pos++] = '\\';
+            log_text[pos++] = 't';
+            continue;
+        }
+
+        /* 对不可打印字节给出占位符，避免日志出现乱码控制符。 */
+        log_text[pos++] = '.';
+    }
+
+    log_text[pos] = '\0';
+
+    if (pos == 0) {
+        osal_printk("[mine slave] UART2 rx len:%u (dump failed)\r\n", (unsigned int)length);
+        return;
+    }
+
+    if (truncated) {
+        osal_printk("[mine slave] UART2 rx len:%u show:%u data:%s ...\r\n",
+            (unsigned int)length, (unsigned int)show_len, log_text);
+    } else {
+        osal_printk("[mine slave] UART2 rx len:%u data:%s\r\n", (unsigned int)length, log_text);
+    }
 }
 
 /**
@@ -168,6 +258,11 @@ static void mine_sle_uart_slave_read_handler_common(uart_bus_t bus, const void *
 
     if ((buffer == NULL) || (length == 0)) {
         return;
+    }
+
+    if (bus == UART_BUS_2) {
+        /* 按需求输出 UART2 原始接收内容，便于串口侧联调排查。 */
+        mine_sle_uart_slave_dump_uart2_rx((const uint8_t *)buffer, length);
     }
 
 #if MINE_LD2402_ENABLE
