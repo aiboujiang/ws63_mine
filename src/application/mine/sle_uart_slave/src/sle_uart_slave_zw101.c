@@ -186,6 +186,145 @@ static void mine_zw101_set_status_fmt(const char *fmt, ...)
 }
 
 /**
+ * @brief 获取 ZW101 命令码的可读名称。
+ *
+ * 命令名称与协议手册第 3.3 节保持一致，便于定位具体指令步骤。
+ *
+ * @param cmd 命令码。
+ * @return const char* 命令名称。
+ */
+static const char *mine_zw101_cmd_name(uint8_t cmd)
+{
+    switch (cmd) {
+        case ZW101_CMD_MATCH_GETIMAGE:
+            return "PS_GetImage";
+        case ZW101_CMD_ENROLL_GETIMAGE:
+            return "PS_GetEnrollImage";
+        case ZW101_CMD_GEN_EXTRACT:
+            return "PS_GenChar";
+        case ZW101_CMD_SEARCH_TEMPLATE:
+            return "PS_Search";
+        case ZW101_CMD_GEN_TEMPLATE:
+            return "PS_RegModel";
+        case ZW101_CMD_STORE_TEMPLATE:
+            return "PS_StoreChar";
+        case ZW101_CMD_DEL_TEMPLATE:
+            return "PS_DeletChar";
+        case ZW101_CMD_EMPTY_TEMPLATE:
+            return "PS_Empty";
+        case ZW101_CMD_READ_TEMPLATE_INDEX_TABLE:
+            return "PS_ReadIndexTable";
+        case ZW101_CMD_AUTO_ENROLL:
+            return "PS_AutoEnroll";
+        case ZW101_CMD_AUTO_MATCH:
+            return "PS_AutoIdentify";
+        default:
+            return "PS_Unknown";
+    }
+}
+
+/**
+ * @brief 获取确认码的手册释义文本。
+ *
+ * 依据《指纹模组产品用户手册》3.2“确认码定义”整理，
+ * 用于日志中快速定位失败原因。
+ *
+ * @param ack_code 确认码。
+ * @return const char* 释义文本。
+ */
+static const char *mine_zw101_ack_desc(uint8_t ack_code)
+{
+    switch (ack_code) {
+        case 0x00:
+            return "OK";
+        case 0x01:
+            return "PKG_RECV_ERR";
+        case 0x02:
+            return "NO_FINGER";
+        case 0x03:
+            return "GET_IMAGE_FAIL";
+        case 0x04:
+            return "IMAGE_TOO_DRY";
+        case 0x05:
+            return "IMAGE_TOO_WET";
+        case 0x06:
+            return "IMAGE_TOO_MESSY";
+        case 0x07:
+            return "FEATURE_TOO_FEW";
+        case 0x08:
+            return "NOT_MATCH";
+        case 0x09:
+            return "NOT_FOUND";
+        case 0x0A:
+            return "MERGE_FAIL";
+        case 0x0B:
+            return "PAGE_ID_OVERFLOW";
+        case 0x0C:
+            return "TEMPLATE_INVALID";
+        case 0x10:
+            return "DELETE_FAIL";
+        case 0x11:
+            return "EMPTY_FAIL";
+        case 0x15:
+            return "NO_RAW_IMAGE";
+        case 0x17:
+            return "RESIDUAL_FINGER";
+        case 0x1E:
+            return "AUTO_ENROLL_FAIL";
+        case 0x1F:
+            return "LIB_FULL";
+        case 0x22:
+            return "TEMPLATE_NOT_EMPTY";
+        case 0x23:
+            return "TEMPLATE_EMPTY";
+        case 0x24:
+            return "LIB_EMPTY";
+        case 0x25:
+            return "ENROLL_TIMES_ERR";
+        case 0x26:
+            return "TIMEOUT";
+        case 0x27:
+            return "FINGER_EXISTS";
+        case 0x28:
+            return "TEMPLATE_ASSOCIATED";
+        case 0x29:
+            return "SENSOR_INIT_FAIL";
+        case 0x33:
+            return "IMAGE_AREA_SMALL";
+        case 0x34:
+            return "IMAGE_UNAVAILABLE";
+        case 0x40:
+            return "ENROLL_TIMES_NOT_ENOUGH";
+        default:
+            return "UNKNOWN";
+    }
+}
+
+/**
+ * @brief 统一打印 ZW101 单步命令输入输出日志。
+ *
+ * 日志格式固定包含流程名、步骤名、命令名、确认码与手册释义，
+ * 用于快速判断“识别/录入”各阶段是否成功。
+ *
+ * @param flow_name 流程名（例如 ENROLL/VERIFY）。
+ * @param step_name 步骤名（例如 CAPTURE#1/EXTRACT）。
+ * @param cmd       命令码。
+ * @param ret_code  调用返回值，0=成功，非0=失败。
+ * @param ack_code  确认码。
+ */
+static void mine_zw101_log_step_result(const char *flow_name, const char *step_name,
+    uint8_t cmd, int ret_code, uint8_t ack_code)
+{
+    const char *flow = (flow_name == NULL) ? "FLOW" : flow_name;
+    const char *step = (step_name == NULL) ? "STEP" : step_name;
+
+    osal_printk("[mine zw101] %s %s %s(0x%02X) %s ack:0x%02X(%s)\r\n",
+        flow, step, mine_zw101_cmd_name(cmd), cmd,
+        (ret_code == 0) ? "OK" : "FAIL",
+        ack_code, mine_zw101_ack_desc(ack_code));
+}
+
+/**
  * @brief 将调试命令加入待执行队列。
  *
  * @param op    命令类型。
@@ -419,8 +558,6 @@ static void mine_zw101_ack_callback(const zw101_ack_evt_t *evt)
         g_mine_zw101_match_id = (uint16_t)(((uint16_t)evt->payload[1] << 8) | evt->payload[2]);
         g_mine_zw101_match_score = (uint16_t)(((uint16_t)evt->payload[3] << 8) | evt->payload[4]);
         mine_zw101_set_status_fmt("ZW101:ID%u S%u", g_mine_zw101_match_id, g_mine_zw101_match_score);
-        osal_printk("[mine zw101] match success, id:%u score:%u\r\n",
-            (unsigned int)g_mine_zw101_match_id, (unsigned int)g_mine_zw101_match_score);
         return;
     }
 
@@ -649,13 +786,21 @@ static void mine_zw101_exec_debug_cmd(const mine_zw101_dbg_cmd_t *cmd)
             mine_zw101_set_status("ZW101:STATUS");
             break;
         case MINE_ZW101_DBG_OP_VERIFY:
+            osal_printk("[mine zw101] cmd in: FP VERIFY\r\n");
             if (!mine_zw101_request_verify()) {
                 mine_zw101_set_status("ZW101:VFY BUSY");
+                osal_printk("[mine zw101] cmd out: VERIFY reject\r\n");
+            } else {
+                osal_printk("[mine zw101] cmd out: VERIFY accept\r\n");
             }
             break;
         case MINE_ZW101_DBG_OP_ENROLL:
+            osal_printk("[mine zw101] cmd in: FP ENROLL %u\r\n", (unsigned int)cmd->id);
             if (!mine_zw101_request_enroll(cmd->id)) {
                 mine_zw101_set_status("ZW101:ENR BUSY");
+                osal_printk("[mine zw101] cmd out: ENROLL reject\r\n");
+            } else {
+                osal_printk("[mine zw101] cmd out: ENROLL accept\r\n");
             }
             break;
         case MINE_ZW101_DBG_OP_LIST:
@@ -678,16 +823,23 @@ static void mine_zw101_exec_debug_cmd(const mine_zw101_dbg_cmd_t *cmd)
  * 当返回“无手指”时按配置间隔重试，其他错误立即失败。
  *
  * @param operate_cmd 取图操作码（录入或验证场景）。
+ * @param ack_code    输出最终确认码，可为 NULL。
  * @return int 0 成功，-1 失败。
  */
-static int mine_zw101_capture_with_retry(uint8_t operate_cmd)
+static int mine_zw101_capture_with_retry(uint8_t operate_cmd, uint8_t *ack_code)
 {
     uint8_t retry_idx;
+    uint8_t last_ack = ZW101_PS_TIME_OUT;
 
     for (retry_idx = 0; retry_idx < MINE_ZW101_CAPTURE_RETRY; retry_idx++) {
         if (zw101_cmd_capture_image(&g_mine_zw101_ctx, operate_cmd) == 0) {
+            if (ack_code != NULL) {
+                *ack_code = ZW101_PS_OK;
+            }
             return 0;
         }
+
+        last_ack = g_mine_zw101_ctx.ack_code;
 
         /*
          * 无手指错误码在当前协议定义中统一为 0x02，
@@ -698,7 +850,14 @@ static int mine_zw101_capture_with_retry(uint8_t operate_cmd)
             continue;
         }
 
+        if (ack_code != NULL) {
+            *ack_code = last_ack;
+        }
         return -1;
+    }
+
+    if (ack_code != NULL) {
+        *ack_code = last_ack;
     }
 
     return -1;
@@ -713,37 +872,51 @@ static int mine_zw101_capture_with_retry(uint8_t operate_cmd)
  */
 static bool mine_zw101_run_enroll_flow(uint16_t template_id)
 {
+    uint8_t step_ack = 0xFF;
+
+    osal_printk("[mine zw101] enroll start, id:%u\r\n", (unsigned int)template_id);
     mine_zw101_set_status_fmt("ZW101:ENR %u", template_id);
 
-    if (mine_zw101_capture_with_retry(ZW101_CMD_ENROLL_GETIMAGE) != 0) {
+    if (mine_zw101_capture_with_retry(ZW101_CMD_ENROLL_GETIMAGE, &step_ack) != 0) {
+        mine_zw101_log_step_result("ENROLL", "CAPTURE#1", ZW101_CMD_ENROLL_GETIMAGE, -1, step_ack);
         mine_zw101_set_status("ZW101:ENR CAP1");
         return false;
     }
+    mine_zw101_log_step_result("ENROLL", "CAPTURE#1", ZW101_CMD_ENROLL_GETIMAGE, 0, step_ack);
 
     if (zw101_cmd_general_extract(&g_mine_zw101_ctx, 1) != 0) {
+        mine_zw101_log_step_result("ENROLL", "EXTRACT#1", ZW101_CMD_GEN_EXTRACT, -1, g_mine_zw101_ctx.ack_code);
         mine_zw101_set_status("ZW101:ENR FEAT1");
         return false;
     }
+    mine_zw101_log_step_result("ENROLL", "EXTRACT#1", ZW101_CMD_GEN_EXTRACT, 0, g_mine_zw101_ctx.ack_code);
 
     mine_zw101_set_status("ZW101:ENR NEXT");
     (void)osal_msleep(MINE_ZW101_ENROLL_SAMPLE_GAP_MS);
 
-    if (mine_zw101_capture_with_retry(ZW101_CMD_ENROLL_GETIMAGE) != 0) {
+    if (mine_zw101_capture_with_retry(ZW101_CMD_ENROLL_GETIMAGE, &step_ack) != 0) {
+        mine_zw101_log_step_result("ENROLL", "CAPTURE#2", ZW101_CMD_ENROLL_GETIMAGE, -1, step_ack);
         mine_zw101_set_status("ZW101:ENR CAP2");
         return false;
     }
+    mine_zw101_log_step_result("ENROLL", "CAPTURE#2", ZW101_CMD_ENROLL_GETIMAGE, 0, step_ack);
 
     if (zw101_cmd_general_extract(&g_mine_zw101_ctx, 2) != 0) {
+        mine_zw101_log_step_result("ENROLL", "EXTRACT#2", ZW101_CMD_GEN_EXTRACT, -1, g_mine_zw101_ctx.ack_code);
         mine_zw101_set_status("ZW101:ENR FEAT2");
         return false;
     }
+    mine_zw101_log_step_result("ENROLL", "EXTRACT#2", ZW101_CMD_GEN_EXTRACT, 0, g_mine_zw101_ctx.ack_code);
 
     if (zw101_cmd_general_template(&g_mine_zw101_ctx) != 0) {
+        mine_zw101_log_step_result("ENROLL", "REG_MODEL", ZW101_CMD_GEN_TEMPLATE, -1, g_mine_zw101_ctx.ack_code);
         mine_zw101_set_status("ZW101:ENR MODEL");
         return false;
     }
+    mine_zw101_log_step_result("ENROLL", "REG_MODEL", ZW101_CMD_GEN_TEMPLATE, 0, g_mine_zw101_ctx.ack_code);
 
     if (zw101_cmd_store_template(&g_mine_zw101_ctx, 1, template_id) != 0) {
+        mine_zw101_log_step_result("ENROLL", "STORE", ZW101_CMD_STORE_TEMPLATE, -1, g_mine_zw101_ctx.ack_code);
         if (g_mine_zw101_ctx.ack_code == ZW101_PS_TMPL_NOT_EMPTY) {
             mine_zw101_set_status("ZW101:ID USED");
         } else if (g_mine_zw101_ctx.ack_code == ZW101_PS_FP_DUPLICATION) {
@@ -753,6 +926,7 @@ static bool mine_zw101_run_enroll_flow(uint16_t template_id)
         }
         return false;
     }
+    mine_zw101_log_step_result("ENROLL", "STORE", ZW101_CMD_STORE_TEMPLATE, 0, g_mine_zw101_ctx.ack_code);
 
     mine_zw101_set_status_fmt("ZW101:ENR OK %u", template_id);
     osal_printk("[mine zw101] enroll success, id:%u\r\n", (unsigned int)template_id);
@@ -767,34 +941,48 @@ static bool mine_zw101_run_enroll_flow(uint16_t template_id)
  */
 static bool mine_zw101_run_verify_flow(void)
 {
+    uint8_t step_ack = 0xFF;
+
+    osal_printk("[mine zw101] verify start\r\n");
     g_mine_zw101_match_id = MINE_ZW101_MATCH_ID_INVALID;
     g_mine_zw101_match_score = 0;
 
     mine_zw101_set_status("ZW101:VERIFY");
 
-    if (mine_zw101_capture_with_retry(ZW101_CMD_MATCH_GETIMAGE) != 0) {
+    if (mine_zw101_capture_with_retry(ZW101_CMD_MATCH_GETIMAGE, &step_ack) != 0) {
+        mine_zw101_log_step_result("VERIFY", "CAPTURE", ZW101_CMD_MATCH_GETIMAGE, -1, step_ack);
         mine_zw101_set_status("ZW101:VFY CAP");
         return false;
     }
+    mine_zw101_log_step_result("VERIFY", "CAPTURE", ZW101_CMD_MATCH_GETIMAGE, 0, step_ack);
 
     if (zw101_cmd_general_extract(&g_mine_zw101_ctx, 1) != 0) {
+        mine_zw101_log_step_result("VERIFY", "EXTRACT", ZW101_CMD_GEN_EXTRACT, -1, g_mine_zw101_ctx.ack_code);
         mine_zw101_set_status("ZW101:VFY FEAT");
         return false;
     }
+    mine_zw101_log_step_result("VERIFY", "EXTRACT", ZW101_CMD_GEN_EXTRACT, 0, g_mine_zw101_ctx.ack_code);
 
     if (zw101_cmd_match1n(&g_mine_zw101_ctx, 1, MINE_ZW101_SEARCH_START_PAGE, MINE_ZW101_SEARCH_PAGE_NUM) != 0) {
+        mine_zw101_log_step_result("VERIFY", "SEARCH", ZW101_CMD_SEARCH_TEMPLATE, -1, g_mine_zw101_ctx.ack_code);
         if ((g_mine_zw101_ctx.ack_code == ZW101_PS_NOT_MATCH) ||
             (g_mine_zw101_ctx.ack_code == ZW101_PS_NOT_SEARCHED)) {
             mine_zw101_set_status("ZW101:NO MATCH");
         } else {
             mine_zw101_set_status_fmt("ZW101:VFY E%02X", g_mine_zw101_ctx.ack_code);
         }
+        osal_printk("[mine zw101] verify failed, reason:%s\r\n", mine_zw101_ack_desc(g_mine_zw101_ctx.ack_code));
         return false;
     }
+    mine_zw101_log_step_result("VERIFY", "SEARCH", ZW101_CMD_SEARCH_TEMPLATE, 0, g_mine_zw101_ctx.ack_code);
 
     if (g_mine_zw101_match_id == MINE_ZW101_MATCH_ID_INVALID) {
         mine_zw101_set_status("ZW101:MATCH OK");
-        osal_printk("[mine zw101] match success\r\n");
+        osal_printk("[mine zw101] verify success, id:unknown score:0\r\n");
+    } else {
+        mine_zw101_set_status_fmt("ZW101:ID%u S%u", g_mine_zw101_match_id, g_mine_zw101_match_score);
+        osal_printk("[mine zw101] verify success, id:%u score:%u\r\n",
+            (unsigned int)g_mine_zw101_match_id, (unsigned int)g_mine_zw101_match_score);
     }
 
     return true;
