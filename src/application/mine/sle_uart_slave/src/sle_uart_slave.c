@@ -372,6 +372,11 @@ static void *mine_sle_uart_slave_task(const char *arg)
     osal_printk("[mine slave] task start\r\n");
     mine_slave_oled_init();
     mine_sle_uart_slave_uart_init();
+    /* 启动阶段先上报 UART2 角色，便于确认三选一互斥配置是否生效。 */
+    osal_printk("[mine slave] uart2 mode:%s\r\n", MINE_UART2_MODE_NAME);
+#if MINE_UART2_PASSTHROUGH_ENABLE
+    mine_slave_oled_push_state("UART2 NORMAL");
+#endif
 #if MINE_LD2402_ENABLE
     if (mine_ld2402_init(MINE_LD2402_UART_BUS)) {
         mine_slave_oled_push_state("LD2402 READY");

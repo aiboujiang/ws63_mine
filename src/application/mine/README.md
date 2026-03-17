@@ -61,11 +61,14 @@ python3 build.py menuconfig
    - `UART2`：默认用于外挂模块（LD2402/ZW101）。
    - 默认使能掩码：`UART0 + UART2`。
 3. 从机业务默认开关（见 `sle_uart_slave/inc/sle_uart_slave.h`）
-   - `MINE_LD2402_ENABLE = 1`
+   - `MINE_UART2_MODE_NORMAL_ENABLE = 0`
+   - `MINE_UART2_MODE_LD2402_ENABLE = 1`
+   - `MINE_UART2_MODE_ZW101_ENABLE = 0`
+   - 三者必须三选一（编译期互斥校验）。
+   - `MINE_LD2402_ENABLE` / `MINE_ZW101_ENABLE` 由上述 UART2 模式自动推导。
    - `MINE_LD2402_UART_BUS = UART2`
    - `MINE_LD2402_DEBUG_CMD_ENABLE = 1`
    - `MINE_LD2402_DEBUG_UART_BUS = UART0`
-   - `MINE_ZW101_ENABLE = 0`
 
 ## 5. 从机模块化主流程
 
@@ -138,7 +141,7 @@ LD SAVE3F
 1. 协议封装目录：`application/mine/common/ZW101`
 2. 业务接入目录：`application/mine/sle_uart_slave/src/sle_uart_slave_zw101.c`
 3. 常用配置宏：
-   - `MINE_ZW101_ENABLE`
+   - `MINE_UART2_MODE_ZW101_ENABLE`
    - `MINE_ZW101_UART_BUS`
    - `MINE_ZW101_UART_BAUD`
    - `MINE_ZW101_DEBUG_CMD_ENABLE`
@@ -183,5 +186,6 @@ LD SAVE3F
    - 确认命令以回车换行结束。
 2. 现象：`RADAR:NOT READY`。
    - 排查 LD2402 所在 UART 引脚、波特率、供电与连线。
-3. 现象：同时启用 LD2402 与 ZW101 后编译失败。
-   - 两者若配置在同一 UART 总线，会触发编译期冲突保护；请分配不同总线或仅启用一个模块。
+3. 现象：编译报错提示 UART2 mode must be mutually exclusive。
+   - `MINE_UART2_MODE_NORMAL_ENABLE` / `MINE_UART2_MODE_LD2402_ENABLE` / `MINE_UART2_MODE_ZW101_ENABLE`
+     必须且只能有一个为 `1`。

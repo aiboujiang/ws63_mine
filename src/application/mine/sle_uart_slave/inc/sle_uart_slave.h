@@ -93,9 +93,55 @@ extern "C" {
 #define MINE_SLAVE_FALLBACK_SLE_MAC {0xE2, 0x00, 0x73, 0xC8, 0x11, 0x02}
 
 /**
- * @brief LD2402 启用开关，1=启用，0=禁用。
+ * @brief UART2 普通串口透传模式开关，1=启用，0=禁用。
  */
-#define MINE_LD2402_ENABLE 1
+#define MINE_UART2_MODE_NORMAL_ENABLE 0
+
+/**
+ * @brief UART2 挂载 LD2402 模式开关，1=启用，0=禁用。
+ */
+#define MINE_UART2_MODE_LD2402_ENABLE 1
+
+/**
+ * @brief UART2 挂载 ZW101 模式开关，1=启用，0=禁用。
+ */
+#define MINE_UART2_MODE_ZW101_ENABLE 0
+
+/* UART2 三种用途必须互斥：普通串口 / LD2402 / ZW101 仅可启用一项。 */
+#if ((MINE_UART2_MODE_NORMAL_ENABLE != 0) && (MINE_UART2_MODE_NORMAL_ENABLE != 1))
+#error "MINE_UART2_MODE_NORMAL_ENABLE must be 0 or 1"
+#endif
+
+#if ((MINE_UART2_MODE_LD2402_ENABLE != 0) && (MINE_UART2_MODE_LD2402_ENABLE != 1))
+#error "MINE_UART2_MODE_LD2402_ENABLE must be 0 or 1"
+#endif
+
+#if ((MINE_UART2_MODE_ZW101_ENABLE != 0) && (MINE_UART2_MODE_ZW101_ENABLE != 1))
+#error "MINE_UART2_MODE_ZW101_ENABLE must be 0 or 1"
+#endif
+
+#if ((MINE_UART2_MODE_NORMAL_ENABLE + MINE_UART2_MODE_LD2402_ENABLE + MINE_UART2_MODE_ZW101_ENABLE) != 1)
+#error "UART2 mode must be mutually exclusive: enable exactly one mode"
+#endif
+
+/* 兼容旧宏：由 UART2 互斥模式自动推导模块开关。 */
+#define MINE_UART2_PASSTHROUGH_ENABLE MINE_UART2_MODE_NORMAL_ENABLE
+#define MINE_LD2402_ENABLE MINE_UART2_MODE_LD2402_ENABLE
+#define MINE_ZW101_ENABLE MINE_UART2_MODE_ZW101_ENABLE
+
+/* UART2 角色用于日志与 OLED 调试显示。 */
+#if (MINE_UART2_MODE_NORMAL_ENABLE == 1)
+#define MINE_UART2_MODE_NAME "NORMAL"
+#elif (MINE_UART2_MODE_LD2402_ENABLE == 1)
+#define MINE_UART2_MODE_NAME "LD2402"
+#else
+#define MINE_UART2_MODE_NAME "ZW101"
+#endif
+
+/* 既然 UART2 必须三选一，就要求掩码中必须使能 UART2。 */
+#if ((MINE_UART_ENABLE_MASK & MINE_UART_EN_UART2) == 0U)
+#error "UART2 mode selected but UART2 is disabled in MINE_UART_ENABLE_MASK"
+#endif
 
 /**
  * @brief LD2402 所在 UART 总线。
@@ -113,19 +159,9 @@ extern "C" {
 #define MINE_LD2402_DEBUG_UART_BUS MINE_UART0_BUS
 
 /**
- * @brief ZW101 启用开关，1=启用，0=禁用。
- */
-#define MINE_ZW101_ENABLE 0
-
-/**
  * @brief ZW101 所在 UART 总线。
  */
 #define MINE_ZW101_UART_BUS MINE_UART2_BUS
-
-/* 同一 UART 总线不支持同时挂载 LD2402 与 ZW101。 */
-#if (MINE_LD2402_ENABLE == 1) && (MINE_ZW101_ENABLE == 1) && (MINE_LD2402_UART_BUS == MINE_ZW101_UART_BUS)
-#error "LD2402 and ZW101 cannot share the same UART bus when both are enabled"
-#endif
 
 /**
  * @brief ZW101 串口波特率（仅作用于指纹模块所在总线）。
