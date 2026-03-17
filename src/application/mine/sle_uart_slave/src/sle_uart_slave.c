@@ -157,16 +157,27 @@ const char *mine_slave_uart_bus_name(uint8_t bus)
 #if (MINE_UART2_RX_ISR_DUMP_ENABLE == 1)
 static void mine_sle_uart_slave_dump_uart2_rx(const uint8_t *buffer, uint16_t length)
 {
+    static uint32_t s_last_dump_ms = 0;
+    static bool s_dump_started = false;
     char log_text[MINE_UART_RX_LOG_TEXT_MAX_LEN] = {0};
     uint16_t show_len;
     uint16_t idx;
     uint16_t pos = 0;
     bool truncated = false;
     uint8_t ch;
+    uint32_t now_ms;
 
     if ((buffer == NULL) || (length == 0)) {
         return;
     }
+
+    /* 对 LD2402 原始文本流做限频，目标是每秒最多 2 次日志输出。 */
+    now_ms = (uint32_t)uapi_systick_get_ms();
+    if (s_dump_started && ((uint32_t)(now_ms - s_last_dump_ms) < MINE_UART2_RX_DUMP_INTERVAL_MS)) {
+        return;
+    }
+    s_last_dump_ms = now_ms;
+    s_dump_started = true;
 
     show_len = length;
     if (show_len > MINE_UART_RX_LOG_SHOW_MAX_BYTES) {
