@@ -95,12 +95,12 @@ extern "C" {
 /**
  * @brief UART2 普通串口透传模式开关，1=启用，0=禁用。
  */
-#define MINE_UART2_MODE_NORMAL_ENABLE 1
+#define MINE_UART2_MODE_NORMAL_ENABLE 0
 
 /**
  * @brief UART2 挂载 LD2402 模式开关，1=启用，0=禁用。
  */
-#define MINE_UART2_MODE_LD2402_ENABLE 0
+#define MINE_UART2_MODE_LD2402_ENABLE 1
 
 /**
  * @brief UART2 挂载 ZW101 模式开关，1=启用，0=禁用。
