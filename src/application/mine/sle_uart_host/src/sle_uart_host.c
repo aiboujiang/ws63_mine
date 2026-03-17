@@ -26,6 +26,14 @@
 #define PRINT(fmt, arg...)
 #endif
 
+/*
+ * 是否启用 PRINT 通道日志。该通道通常会携带 APP| 前缀，
+ * 默认关闭以避免与 OSAL 日志形成重复打印。
+ */
+#ifndef MINE_LOG_PRINT_CHANNEL_ENABLE
+#define MINE_LOG_PRINT_CHANNEL_ENABLE 0
+#endif
+
 /* Multi-UART RX buffers (indexed by UART bus 0/1/2). */
 static uint8_t g_mine_uart_rx_buffer[MINE_UART_BUS_COUNT][MINE_UART_RX_BUFFER_SIZE] = {0};
 
@@ -55,10 +63,10 @@ static void mine_host_log_mirror_uart0(const char *log_buf, int32_t format_len)
 }
 
 /**
- * @brief Host 统一日志接口，双路输出到 OSAL 与 PRINT。
+ * @brief Host 统一日志接口，主路输出到 OSAL，可选输出到 PRINT。
  *
  * 该函数用于替换模块内直接 osal_printk 调用，
- * 既保留系统日志，又在调试串口中打印同一份内容。
+ * 默认仅保留 OSAL 与 UART0 镜像输出，避免 APP 前缀重复日志。
  *
  * @param fmt printf 风格格式串。
  */
@@ -80,7 +88,10 @@ void mine_host_log(const char *fmt, ...)
     }
 
     g_mine_raw_osal_printk("%s", log_buf);
+#if MINE_LOG_PRINT_CHANNEL_ENABLE
+    /* 如需保留 APP| 前缀通道，可显式打开该开关。 */
     PRINT("%s", log_buf);
+#endif
     mine_host_log_mirror_uart0(log_buf, format_len);
 }
 
