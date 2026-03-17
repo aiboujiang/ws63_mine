@@ -32,6 +32,8 @@
 
 /* 调试命令行长度上限。 */
 #define MINE_ZW101_DEBUG_LINE_MAX 96
+/* 调试命令环形队列深度：吸收串口连续输入，避免单槽位覆盖。 */
+#define MINE_ZW101_DEBUG_CMD_QUEUE_LEN 8
 /* ZW101 索引表位图长度（1 页 256 个模板位）。 */
 #define MINE_ZW101_INDEX_BITMAP_LEN 32
 /* ZW101 索引表最大页数（常见为 0~3，共 4 页）。 */
@@ -89,8 +91,11 @@ static bool g_mine_zw101_dbg_capture = false;
 static char g_mine_zw101_dbg_line[MINE_ZW101_DEBUG_LINE_MAX] = {0};
 static uint16_t g_mine_zw101_dbg_line_len = 0;
 
-/* 待调度的调试命令（在任务线程中执行）。 */
-static mine_zw101_dbg_cmd_t g_mine_zw101_dbg_cmd = { MINE_ZW101_DBG_OP_NONE, 0, 0 };
+/* 待调度的调试命令环形队列（在任务线程中执行）。 */
+static mine_zw101_dbg_cmd_t g_mine_zw101_dbg_queue[MINE_ZW101_DEBUG_CMD_QUEUE_LEN] = {0};
+static uint8_t g_mine_zw101_dbg_queue_head = 0;
+static uint8_t g_mine_zw101_dbg_queue_tail = 0;
+static uint8_t g_mine_zw101_dbg_queue_count = 0;
 
 /* 列表查询时缓存当前页位图。 */
 static bool g_mine_zw101_index_valid = false;
@@ -99,6 +104,7 @@ static uint8_t g_mine_zw101_index_req_page = 0;
 static uint8_t g_mine_zw101_index_bitmap[MINE_ZW101_INDEX_BITMAP_LEN] = {0};
 
 static bool mine_zw101_enqueue_debug_cmd(mine_zw101_dbg_op_t op, uint16_t id, uint16_t count);
+static bool mine_zw101_dequeue_debug_cmd(mine_zw101_dbg_cmd_t *cmd);
 static void mine_zw101_print_help(void);
 static void mine_zw101_handle_debug_line(const char *line);
 static void mine_zw101_dump_index_page(uint8_t page, uint16_t *total_nums);
@@ -106,6 +112,18 @@ static bool mine_zw101_run_list_flow(void);
 static bool mine_zw101_run_delete_flow(uint16_t id, uint16_t count);
 static bool mine_zw101_run_clear_flow(void);
 static void mine_zw101_exec_debug_cmd(const mine_zw101_dbg_cmd_t *cmd);
+
+/**
+ * @brief 重置 ZW101 调试命令环形队列。
+ */
+static void mine_zw101_reset_debug_queue(void)
+{
+    g_mine_zw101_dbg_queue_head = 0;
+    g_mine_zw101_dbg_queue_tail = 0;
+    g_mine_zw101_dbg_queue_count = 0;
+    (void)memset_s(g_mine_zw101_dbg_queue, sizeof(g_mine_zw101_dbg_queue),
+        0, sizeof(g_mine_zw101_dbg_queue));
+}
 
 /**
  * @brief ZW101 HAL 串口发送适配。
@@ -154,12 +172,23 @@ static void mine_zw101_delay_ms_adapter(uint32_t ms)
  */
 static void mine_zw101_set_status(const char *text)
 {
+    char new_status[MINE_ZW101_STATUS_TEXT_LEN] = {0};
+
     if (text == NULL) {
         return;
     }
 
-    if (snprintf_s(g_mine_zw101_status_text, sizeof(g_mine_zw101_status_text),
-        sizeof(g_mine_zw101_status_text) - 1, "%s", text) > 0) {
+    if (snprintf_s(new_status, sizeof(new_status), sizeof(new_status) - 1, "%s", text) <= 0) {
+        return;
+    }
+
+    /* 状态未变化时不重复置脏，降低 OLED 刷屏频度。 */
+    if (strcmp(new_status, g_mine_zw101_status_text) == 0) {
+        return;
+    }
+
+    if (memcpy_s(g_mine_zw101_status_text, sizeof(g_mine_zw101_status_text),
+        new_status, sizeof(new_status)) == EOK) {
         g_mine_zw101_status_dirty = true;
     }
 }
@@ -196,14 +225,59 @@ static void mine_zw101_set_status_fmt(const char *fmt, ...)
  */
 static bool mine_zw101_enqueue_debug_cmd(mine_zw101_dbg_op_t op, uint16_t id, uint16_t count)
 {
-    if (g_mine_zw101_dbg_cmd.op != MINE_ZW101_DBG_OP_NONE) {
+    uint32_t irq_sts;
+    uint8_t tail;
+
+    irq_sts = osal_irq_lock();
+    if (g_mine_zw101_dbg_queue_count >= MINE_ZW101_DEBUG_CMD_QUEUE_LEN) {
+        osal_irq_restore(irq_sts);
         mine_zw101_set_status("ZW101:CMD BUSY");
         return false;
     }
 
-    g_mine_zw101_dbg_cmd.op = op;
-    g_mine_zw101_dbg_cmd.id = id;
-    g_mine_zw101_dbg_cmd.count = count;
+    tail = g_mine_zw101_dbg_queue_tail;
+    g_mine_zw101_dbg_queue[tail].op = op;
+    g_mine_zw101_dbg_queue[tail].id = id;
+    g_mine_zw101_dbg_queue[tail].count = count;
+
+    g_mine_zw101_dbg_queue_tail = (uint8_t)((tail + 1) % MINE_ZW101_DEBUG_CMD_QUEUE_LEN);
+    g_mine_zw101_dbg_queue_count++;
+    osal_irq_restore(irq_sts);
+
+    return true;
+}
+
+/**
+ * @brief 从 ZW101 调试命令环形队列取出一条命令。
+ *
+ * @param cmd 输出命令对象。
+ * @return true  出队成功。
+ * @return false 队列为空或参数无效。
+ */
+static bool mine_zw101_dequeue_debug_cmd(mine_zw101_dbg_cmd_t *cmd)
+{
+    uint32_t irq_sts;
+    uint8_t head;
+
+    if (cmd == NULL) {
+        return false;
+    }
+
+    irq_sts = osal_irq_lock();
+    if (g_mine_zw101_dbg_queue_count == 0) {
+        osal_irq_restore(irq_sts);
+        return false;
+    }
+
+    head = g_mine_zw101_dbg_queue_head;
+    *cmd = g_mine_zw101_dbg_queue[head];
+    g_mine_zw101_dbg_queue[head].op = MINE_ZW101_DBG_OP_NONE;
+    g_mine_zw101_dbg_queue[head].id = 0;
+    g_mine_zw101_dbg_queue[head].count = 0;
+
+    g_mine_zw101_dbg_queue_head = (uint8_t)((head + 1) % MINE_ZW101_DEBUG_CMD_QUEUE_LEN);
+    g_mine_zw101_dbg_queue_count--;
+    osal_irq_restore(irq_sts);
     return true;
 }
 
@@ -818,6 +892,7 @@ bool mine_zw101_init(uart_bus_t bus)
     g_mine_zw101_ready = false;
     g_mine_zw101_bus = bus;
     g_mine_zw101_work = MINE_ZW101_WORK_IDLE;
+    mine_zw101_reset_debug_queue();
 
     if (!mine_slave_uart_bus_enabled(bus)) {
         mine_zw101_set_status("ZW101:BUS OFF");
@@ -999,15 +1074,13 @@ bool mine_zw101_request_verify(void)
 void mine_zw101_process(void)
 {
 #if MINE_ZW101_DEBUG_CMD_ENABLE
+    mine_zw101_dbg_cmd_t cmd = { MINE_ZW101_DBG_OP_NONE, 0, 0 };
+
     /*
      * 调试命令在任务线程串行执行，避免与中断回调并发访问协议上下文。
      * 注意：命令分发必须放在 ready 判断之前，这样 HELP/STATUS 才能在设备未就绪时响应。
      */
-    if (g_mine_zw101_dbg_cmd.op != MINE_ZW101_DBG_OP_NONE) {
-        mine_zw101_dbg_cmd_t cmd = g_mine_zw101_dbg_cmd;
-        g_mine_zw101_dbg_cmd.op = MINE_ZW101_DBG_OP_NONE;
-        g_mine_zw101_dbg_cmd.id = 0;
-        g_mine_zw101_dbg_cmd.count = 0;
+    if (mine_zw101_dequeue_debug_cmd(&cmd)) {
         mine_zw101_exec_debug_cmd(&cmd);
     }
 #endif

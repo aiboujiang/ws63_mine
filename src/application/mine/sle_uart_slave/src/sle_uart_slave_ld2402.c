@@ -26,6 +26,8 @@
 #define MINE_LD2402_VERSION_TEXT_LEN 24
 #define MINE_LD2402_DEBUG_LINE_MAX 96
 #define MINE_LD2402_SN_TEXT_MAX_LEN ((MINE_LD2402_SN_MAX_LEN * 2) + 1)
+/* 调试命令环形队列深度：覆盖短时间多条串口命令输入。 */
+#define MINE_LD2402_DEBUG_CMD_QUEUE_LEN 8
 /* 初始化阶段版本查询重试次数，吸收模块上电初期的偶发无应答。 */
 #define MINE_LD2402_INIT_VERSION_RETRY_MAX 3
 /* 初始化阶段版本查询重试间隔（毫秒）。 */
@@ -73,8 +75,11 @@ static bool g_mine_ld2402_dbg_capture = false;
 static char g_mine_ld2402_dbg_line[MINE_LD2402_DEBUG_LINE_MAX] = {0};
 static uint16_t g_mine_ld2402_dbg_line_len = 0;
 
-/* 在任务线程执行的调试命令队列（单槽位）。 */
-static mine_ld2402_dbg_cmd_t g_mine_ld2402_dbg_cmd = { MINE_LD2402_DBG_OP_NONE, 0, 0, 0 };
+/* 在任务线程执行的调试命令环形队列（ISR/任务共享）。 */
+static mine_ld2402_dbg_cmd_t g_mine_ld2402_dbg_queue[MINE_LD2402_DEBUG_CMD_QUEUE_LEN] = {0};
+static uint8_t g_mine_ld2402_dbg_queue_head = 0;
+static uint8_t g_mine_ld2402_dbg_queue_tail = 0;
+static uint8_t g_mine_ld2402_dbg_queue_count = 0;
 
 /**
  * @brief 更新 LD2402 状态文本并置脏标记。
@@ -83,14 +88,37 @@ static mine_ld2402_dbg_cmd_t g_mine_ld2402_dbg_cmd = { MINE_LD2402_DBG_OP_NONE, 
  */
 static void mine_ld2402_set_status(const char *text)
 {
+    char new_status[MINE_LD2402_STATUS_TEXT_LEN] = {0};
+
     if (text == NULL) {
         return;
     }
 
-    if (snprintf_s(g_mine_ld2402_status_text, sizeof(g_mine_ld2402_status_text),
-        sizeof(g_mine_ld2402_status_text) - 1, "%s", text) > 0) {
+    if (snprintf_s(new_status, sizeof(new_status), sizeof(new_status) - 1, "%s", text) <= 0) {
+        return;
+    }
+
+    /* 状态未变化时不重复置脏，减少 OLED 无效刷新。 */
+    if (strcmp(new_status, g_mine_ld2402_status_text) == 0) {
+        return;
+    }
+
+    if (memcpy_s(g_mine_ld2402_status_text, sizeof(g_mine_ld2402_status_text),
+        new_status, sizeof(new_status)) == EOK) {
         g_mine_ld2402_status_dirty = true;
     }
+}
+
+/**
+ * @brief 重置 LD2402 调试命令环形队列。
+ */
+static void mine_ld2402_reset_debug_queue(void)
+{
+    g_mine_ld2402_dbg_queue_head = 0;
+    g_mine_ld2402_dbg_queue_tail = 0;
+    g_mine_ld2402_dbg_queue_count = 0;
+    (void)memset_s(g_mine_ld2402_dbg_queue, sizeof(g_mine_ld2402_dbg_queue),
+        0, sizeof(g_mine_ld2402_dbg_queue));
 }
 
 /**
@@ -127,15 +155,61 @@ static void mine_ld2402_set_status_fmt(const char *fmt, ...)
 static bool mine_ld2402_enqueue_debug_cmd(mine_ld2402_dbg_op_t op,
     uint16_t value0, uint16_t value1, uint16_t value2)
 {
-    if (g_mine_ld2402_dbg_cmd.op != MINE_LD2402_DBG_OP_NONE) {
+    uint32_t irq_sts;
+    uint8_t tail;
+
+    irq_sts = osal_irq_lock();
+    if (g_mine_ld2402_dbg_queue_count >= MINE_LD2402_DEBUG_CMD_QUEUE_LEN) {
+        osal_irq_restore(irq_sts);
         mine_ld2402_set_status("RADAR:CMD BUSY");
         return false;
     }
 
-    g_mine_ld2402_dbg_cmd.op = op;
-    g_mine_ld2402_dbg_cmd.value0 = value0;
-    g_mine_ld2402_dbg_cmd.value1 = value1;
-    g_mine_ld2402_dbg_cmd.value2 = value2;
+    tail = g_mine_ld2402_dbg_queue_tail;
+    g_mine_ld2402_dbg_queue[tail].op = op;
+    g_mine_ld2402_dbg_queue[tail].value0 = value0;
+    g_mine_ld2402_dbg_queue[tail].value1 = value1;
+    g_mine_ld2402_dbg_queue[tail].value2 = value2;
+
+    g_mine_ld2402_dbg_queue_tail = (uint8_t)((tail + 1) % MINE_LD2402_DEBUG_CMD_QUEUE_LEN);
+    g_mine_ld2402_dbg_queue_count++;
+    osal_irq_restore(irq_sts);
+
+    return true;
+}
+
+/**
+ * @brief 从 LD2402 调试命令环形队列取出一条命令。
+ *
+ * @param cmd 输出命令对象。
+ * @return true  出队成功。
+ * @return false 队列为空或参数无效。
+ */
+static bool mine_ld2402_dequeue_debug_cmd(mine_ld2402_dbg_cmd_t *cmd)
+{
+    uint32_t irq_sts;
+    uint8_t head;
+
+    if (cmd == NULL) {
+        return false;
+    }
+
+    irq_sts = osal_irq_lock();
+    if (g_mine_ld2402_dbg_queue_count == 0) {
+        osal_irq_restore(irq_sts);
+        return false;
+    }
+
+    head = g_mine_ld2402_dbg_queue_head;
+    *cmd = g_mine_ld2402_dbg_queue[head];
+    g_mine_ld2402_dbg_queue[head].op = MINE_LD2402_DBG_OP_NONE;
+    g_mine_ld2402_dbg_queue[head].value0 = 0;
+    g_mine_ld2402_dbg_queue[head].value1 = 0;
+    g_mine_ld2402_dbg_queue[head].value2 = 0;
+
+    g_mine_ld2402_dbg_queue_head = (uint8_t)((head + 1) % MINE_LD2402_DEBUG_CMD_QUEUE_LEN);
+    g_mine_ld2402_dbg_queue_count--;
+    osal_irq_restore(irq_sts);
     return true;
 }
 
@@ -782,10 +856,7 @@ bool mine_ld2402_init(uart_bus_t bus)
 
     g_mine_ld2402_ready = false;
     g_mine_ld2402_bus = bus;
-    g_mine_ld2402_dbg_cmd.op = MINE_LD2402_DBG_OP_NONE;
-    g_mine_ld2402_dbg_cmd.value0 = 0;
-    g_mine_ld2402_dbg_cmd.value1 = 0;
-    g_mine_ld2402_dbg_cmd.value2 = 0;
+    mine_ld2402_reset_debug_queue();
     g_mine_ld2402_dbg_capture = false;
     g_mine_ld2402_dbg_line_len = 0;
     (void)memset_s(g_mine_ld2402_dbg_line, sizeof(g_mine_ld2402_dbg_line), 0, sizeof(g_mine_ld2402_dbg_line));
@@ -952,13 +1023,10 @@ bool mine_ld2402_try_handle_debug_cmd(uart_bus_t bus, const uint8_t *data, uint1
  */
 void mine_ld2402_process(void)
 {
-    if (g_mine_ld2402_dbg_cmd.op != MINE_LD2402_DBG_OP_NONE) {
-        /* 单槽位命令队列：先拷贝再清空，防止执行过程中被重复消费。 */
-        mine_ld2402_dbg_cmd_t cmd = g_mine_ld2402_dbg_cmd;
-        g_mine_ld2402_dbg_cmd.op = MINE_LD2402_DBG_OP_NONE;
-        g_mine_ld2402_dbg_cmd.value0 = 0;
-        g_mine_ld2402_dbg_cmd.value1 = 0;
-        g_mine_ld2402_dbg_cmd.value2 = 0;
+    mine_ld2402_dbg_cmd_t cmd = { MINE_LD2402_DBG_OP_NONE, 0, 0, 0 };
+
+    if (mine_ld2402_dequeue_debug_cmd(&cmd)) {
+        /* 每轮主循环仅执行一条命令，避免耗时操作阻塞其他业务。 */
         mine_ld2402_exec_debug_cmd(&cmd);
     }
 }
