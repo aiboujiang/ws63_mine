@@ -140,4 +140,12 @@ void mine_slave_oled_set_uuid_property(uint16_t uuid16, uint16_t handle);
  */
 errcode_t mine_sle_uart_slave_send_to_host(const mine_sle_uart_slave_msg_t *msg);
 
+/**
+ * @brief 查询 UART->SLE 链路是否已就绪（已连接且已发现写特征）。
+ *
+ * @return true  链路就绪，可执行透传。
+ * @return false 链路未就绪，应避免继续堆积发送负载。
+ */
+bool mine_sle_uart_slave_link_ready(void);
+
 #endif /* MINE_SLE_UART_SLAVE_MODULE_H */

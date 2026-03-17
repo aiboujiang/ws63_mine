@@ -15,6 +15,7 @@
 #include "sle_device_discovery.h"
 #include "sle_errcode.h"
 #include "soc_osal.h"
+#include "systick.h"
 
 #define osal_printk mine_slave_log
 
@@ -29,11 +30,76 @@ static bool g_mine_connecting_pending = false;
 static sle_addr_t g_mine_remote_addr = {0};
 static ssapc_write_param_t g_mine_write_param = {0};
 
+/* 链路未就绪阶段的丢包日志限频状态。 */
+static uint32_t g_mine_send_drop_last_log_ms = 0;
+static uint32_t g_mine_send_drop_accumulated = 0;
+static bool g_mine_send_drop_log_started = false;
+
 static const uint8_t g_mine_slave_fallback_sle_mac[MINE_SLE_MAC_ADDR_LEN] = MINE_SLAVE_FALLBACK_SLE_MAC;
 
 static sle_announce_seek_callbacks_t g_mine_seek_cbks = {0};
 static sle_connection_callbacks_t g_mine_conn_cbks = {0};
 static ssapc_callbacks_t g_mine_ssapc_cbks = {0};
+
+/**
+ * @brief 限频输出 UART->SLE 链路未就绪阶段的丢包日志。
+ *
+ * 为避免未建链阶段日志刷屏，本函数按固定时间窗口输出汇总丢包数。
+ *
+ * @param uart_bus         数据来源 UART 总线。
+ * @param peer_connected   链路连接标志快照。
+ * @param property_ready   属性发现完成标志快照。
+ * @param conn_id_snapshot 连接 ID 快照。
+ * @param handle_snapshot  属性句柄快照。
+ */
+static void mine_log_send_drop_rate_limited(uint8_t uart_bus, bool peer_connected,
+    bool property_ready, uint16_t conn_id_snapshot, uint16_t handle_snapshot)
+{
+    uint32_t now_ms = (uint32_t)uapi_systick_get_ms();
+
+    g_mine_send_drop_accumulated++;
+
+    if (g_mine_send_drop_log_started &&
+        ((uint32_t)(now_ms - g_mine_send_drop_last_log_ms) < MINE_UART_SEND_DROP_LOG_INTERVAL_MS)) {
+        return;
+    }
+
+    osal_printk("[mine slave] drop %s data, link:%u prop:%u cid:%u handle:%u dropped:%u\r\n",
+        mine_slave_uart_bus_name(uart_bus),
+        (unsigned int)peer_connected, (unsigned int)property_ready,
+        conn_id_snapshot, handle_snapshot,
+        (unsigned int)g_mine_send_drop_accumulated);
+
+    /* OLED 状态也按同频率更新，避免屏幕状态被高频重复覆盖。 */
+    mine_slave_oled_push_state("SEND DROP");
+
+    g_mine_send_drop_accumulated = 0;
+    g_mine_send_drop_last_log_ms = now_ms;
+    g_mine_send_drop_log_started = true;
+}
+
+/**
+ * @brief 清空链路未就绪丢包日志的限频状态。
+ */
+static void mine_reset_send_drop_log_state(void)
+{
+    g_mine_send_drop_last_log_ms = 0;
+    g_mine_send_drop_accumulated = 0;
+    g_mine_send_drop_log_started = false;
+}
+
+/**
+ * @brief 查询 UART->SLE 链路是否已具备发送条件。
+ *
+ * 条件包括：已连接、属性发现完成、写句柄有效。
+ *
+ * @return true  可发送。
+ * @return false 不可发送。
+ */
+bool mine_sle_uart_slave_link_ready(void)
+{
+    return (g_mine_peer_connected && g_mine_property_ready && (g_mine_write_param.handle != 0));
+}
 
 /**
  * @brief 判断广播负载中是否包含目标设备名。
@@ -181,13 +247,14 @@ errcode_t mine_sle_uart_slave_send_to_host(const mine_sle_uart_slave_msg_t *msg)
     uart_bus_snapshot = msg->uart_bus;
 
     if ((!peer_connected_snapshot) || (!property_ready_snapshot) || (property_handle_snapshot == 0)) {
-        osal_printk("[mine slave] drop %s data, link:%u prop:%u cid:%u handle:%u\r\n",
-            mine_slave_uart_bus_name(uart_bus_snapshot),
-            (unsigned int)peer_connected_snapshot, (unsigned int)property_ready_snapshot,
+        mine_log_send_drop_rate_limited(uart_bus_snapshot,
+            peer_connected_snapshot, property_ready_snapshot,
             conn_id_snapshot, property_handle_snapshot);
-        mine_slave_oled_push_state("SEND DROP");
         return ERRCODE_SLE_FAIL;
     }
+
+    /* 进入可发送态后复位限频窗口，便于后续断链时首条日志立即可见。 */
+    mine_reset_send_drop_log_state();
 
     while (offset < msg->value_len) {
         chunk_len = (uint16_t)((msg->value_len - offset) > MINE_SLE_SAFE_CHUNK_LEN ?
