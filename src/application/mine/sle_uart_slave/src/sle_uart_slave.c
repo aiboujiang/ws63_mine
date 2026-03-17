@@ -37,10 +37,20 @@
 #define MINE_LOG_PRINT_CHANNEL_ENABLE 0
 #endif
 
+/*
+ * 是否启用 UART0 镜像日志。
+ * 当 OSAL 日志本身已输出到串口时，建议关闭以避免重复打印。
+ */
+#ifndef MINE_LOG_UART0_MIRROR_ENABLE
+#define MINE_LOG_UART0_MIRROR_ENABLE 0
+#endif
+
 /* UART2 接收日志最多展示字节数，避免长帧刷屏影响调试。 */
 #define MINE_UART_RX_LOG_SHOW_MAX_BYTES 64
 /* 文本日志缓冲区长度：每字节最多展开为2字符（如\n）+ 结尾符。 */
 #define MINE_UART_RX_LOG_TEXT_MAX_LEN ((MINE_UART_RX_LOG_SHOW_MAX_BYTES * 2) + 1)
+/* ZW101 二进制接收日志最小打印间隔（毫秒），用于抑制高频刷屏。 */
+#define MINE_ZW101_BINARY_LOG_INTERVAL_MS 1000
 
 /* 多路 UART 接收缓冲区（按 UART0/1/2 索引）。 */
 static uint8_t g_mine_uart_rx_buffer[MINE_UART_BUS_COUNT][MINE_UART_RX_BUFFER_SIZE] = {0};
@@ -48,6 +58,12 @@ static uint8_t g_mine_uart_rx_buffer[MINE_UART_BUS_COUNT][MINE_UART_RX_BUFFER_SI
 /* UART 回调投递到任务消息队列。 */
 static unsigned long g_mine_uart_msg_queue = 0;
 static unsigned int g_mine_uart_msg_size = sizeof(mine_sle_uart_slave_msg_t);
+
+#if MINE_ZW101_ENABLE
+/* ZW101 二进制日志节流状态。 */
+static uint32_t g_mine_zw101_binary_last_log_ms = 0;
+static uint32_t g_mine_zw101_binary_suppressed = 0;
+#endif
 
 /* 保留原 OSAL 日志出口，并镜像到 PRINT 通道。 */
 static void (*g_mine_raw_osal_printk)(const char *fmt, ...) = osal_printk;
@@ -60,6 +76,7 @@ static void (*g_mine_raw_osal_printk)(const char *fmt, ...) = osal_printk;
  * @param log_buf    日志缓冲区。
  * @param format_len 已格式化日志长度。
  */
+#if MINE_LOG_UART0_MIRROR_ENABLE
 static void mine_slave_log_mirror_uart0(const char *log_buf, int32_t format_len)
 {
     if ((log_buf == NULL) || (format_len <= 0)) {
@@ -69,11 +86,12 @@ static void mine_slave_log_mirror_uart0(const char *log_buf, int32_t format_len)
     /* 保持 UART0 与系统日志同步输出，不因串口未就绪中断主流程。 */
     (void)uapi_uart_write(UART_BUS_0, (const uint8_t *)log_buf, (uint16_t)format_len, 0);
 }
+#endif
 
 /**
- * @brief Slave 统一日志接口，主路输出到 OSAL，可选输出到 PRINT。
+ * @brief Slave 统一日志接口，主路输出到 OSAL，可选输出到 PRINT/UART0 镜像。
  *
- * 默认仅保留 OSAL 与 UART0 镜像输出，避免 APP 前缀重复日志。
+ * 默认仅保留 OSAL 输出，避免 APP 前缀与镜像导致的重复日志。
  *
  * @param fmt printf 风格格式串。
  */
@@ -99,7 +117,9 @@ void mine_slave_log(const char *fmt, ...)
     /* 如需保留 APP| 前缀通道，可显式打开该开关。 */
     PRINT("%s", log_buf);
 #endif
+#if MINE_LOG_UART0_MIRROR_ENABLE
     mine_slave_log_mirror_uart0(log_buf, format_len);
+#endif
 }
 
 #define osal_printk mine_slave_log
@@ -159,6 +179,7 @@ static void mine_sle_uart_slave_dump_uart_rx(uart_bus_t bus, const uint8_t *buff
     uint16_t idx;
     uint16_t pos = 0;
     bool truncated = false;
+    bool has_printable_ascii = false;
     uint8_t ch;
 
     if ((buffer == NULL) || (length == 0)) {
@@ -179,6 +200,7 @@ static void mine_sle_uart_slave_dump_uart_rx(uart_bus_t bus, const uint8_t *buff
         ch = buffer[idx];
         if ((ch >= 0x20U) && (ch <= 0x7EU)) {
             /* 直接显示可打印 ASCII，便于观察纯文本协议内容。 */
+            has_printable_ascii = true;
             log_text[pos++] = (char)ch;
             continue;
         }
@@ -217,6 +239,26 @@ static void mine_sle_uart_slave_dump_uart_rx(uart_bus_t bus, const uint8_t *buff
         }
         return;
     }
+
+#if MINE_ZW101_ENABLE
+    if ((bus == MINE_ZW101_UART_BUS) && (!has_printable_ascii)) {
+        uint32_t now_ms = (uint32_t)uapi_systick_get_ms();
+
+        if ((g_mine_zw101_binary_last_log_ms != 0U) &&
+            ((uint32_t)(now_ms - g_mine_zw101_binary_last_log_ms) < MINE_ZW101_BINARY_LOG_INTERVAL_MS)) {
+            g_mine_zw101_binary_suppressed++;
+            return;
+        }
+
+        if (g_mine_zw101_binary_suppressed > 0U) {
+            osal_printk("[mine slave] ZW101 binary rx suppressed:%lu\r\n",
+                (unsigned long)g_mine_zw101_binary_suppressed);
+            g_mine_zw101_binary_suppressed = 0;
+        }
+
+        g_mine_zw101_binary_last_log_ms = now_ms;
+    }
+#endif
 
     if (truncated) {
         if (peer_connected) {
@@ -290,13 +332,11 @@ static void mine_sle_uart_slave_read_handler_common(uart_bus_t bus, const void *
 
     peer_connected = mine_sle_uart_slave_is_connected();
 
-    if ((bus == UART_BUS_2) || (!peer_connected)) {
-        /*
-         * UART2 始终打印可读接收日志；
-         * 未连接时其余 UART 也打印，确保离线阶段可观测。
-         */
-        mine_sle_uart_slave_dump_uart_rx(bus, (const uint8_t *)buffer, length, peer_connected);
-    }
+    /*
+     * 所有 UART 接收都打印可读文本预览，便于直接核对数字/字母/符号内容；
+     * 未连接时继续保留本地日志观测，不执行后续入队转发。
+     */
+    mine_sle_uart_slave_dump_uart_rx(bus, (const uint8_t *)buffer, length, peer_connected);
 
 #if MINE_LD2402_ENABLE
     mine_ld2402_feed(bus, (const uint8_t *)buffer, length);
@@ -559,8 +599,16 @@ static void *mine_sle_uart_slave_task(const char *arg)
         }
 
         if ((msg.value != NULL) && (msg.value_len > 0)) {
+#if MINE_ZW101_ENABLE
+            /* ZW101 二进制数据高频上报，队列日志默认抑制以降低刷屏。 */
+            if (msg.uart_bus != MINE_ZW101_UART_BUS) {
+                osal_printk("[mine slave] %s rx queue len:%u\r\n",
+                    mine_slave_uart_bus_name(msg.uart_bus), msg.value_len);
+            }
+#else
             osal_printk("[mine slave] %s rx queue len:%u\r\n",
                 mine_slave_uart_bus_name(msg.uart_bus), msg.value_len);
+#endif
             send_ret = mine_sle_uart_slave_send_to_host(&msg);
             if (send_ret != ERRCODE_SLE_SUCCESS) {
                 osal_printk("[mine slave] uart->sle send failed:%x\r\n", send_ret);

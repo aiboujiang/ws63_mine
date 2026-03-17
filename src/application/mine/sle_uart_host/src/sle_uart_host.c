@@ -34,6 +34,14 @@
 #define MINE_LOG_PRINT_CHANNEL_ENABLE 0
 #endif
 
+/*
+ * 是否启用 UART0 镜像日志。
+ * 当 OSAL 日志本身已输出到串口时，建议关闭以避免重复打印。
+ */
+#ifndef MINE_LOG_UART0_MIRROR_ENABLE
+#define MINE_LOG_UART0_MIRROR_ENABLE 0
+#endif
+
 /* 未连接场景下的串口接收日志最多展示字节数，避免长帧刷屏。 */
 #define MINE_UART_RX_LOG_SHOW_MAX_BYTES 64
 /* 文本日志缓冲区长度：每字节最多展开为2字符（如\n）+ 结尾符。 */
@@ -57,6 +65,7 @@ static void (*g_mine_raw_osal_printk)(const char *fmt, ...) = osal_printk;
  * @param log_buf    日志缓冲区。
  * @param format_len 已格式化日志长度。
  */
+#if MINE_LOG_UART0_MIRROR_ENABLE
 static void mine_host_log_mirror_uart0(const char *log_buf, int32_t format_len)
 {
     if ((log_buf == NULL) || (format_len <= 0)) {
@@ -66,12 +75,13 @@ static void mine_host_log_mirror_uart0(const char *log_buf, int32_t format_len)
     /* 保持 UART0 与系统日志同步输出，不因串口未就绪中断主流程。 */
     (void)uapi_uart_write(UART_BUS_0, (const uint8_t *)log_buf, (uint16_t)format_len, 0);
 }
+#endif
 
 /**
- * @brief Host 统一日志接口，主路输出到 OSAL，可选输出到 PRINT。
+ * @brief Host 统一日志接口，主路输出到 OSAL，可选输出到 PRINT/UART0 镜像。
  *
  * 该函数用于替换模块内直接 osal_printk 调用，
- * 默认仅保留 OSAL 与 UART0 镜像输出，避免 APP 前缀重复日志。
+ * 默认仅保留 OSAL 输出，避免 APP 前缀与镜像导致的重复日志。
  *
  * @param fmt printf 风格格式串。
  */
@@ -97,7 +107,9 @@ void mine_host_log(const char *fmt, ...)
     /* 如需保留 APP| 前缀通道，可显式打开该开关。 */
     PRINT("%s", log_buf);
 #endif
+#if MINE_LOG_UART0_MIRROR_ENABLE
     mine_host_log_mirror_uart0(log_buf, format_len);
+#endif
 }
 
 #define osal_printk mine_host_log
@@ -139,16 +151,18 @@ const char *mine_host_uart_bus_name(uint8_t bus)
 }
 
 /**
- * @brief 将串口接收字节转为可读文本并输出日志（未连接 SLE 场景）。
+ * @brief 将 UART 接收字节转为可读文本并输出日志。
  *
  * 仅展示前 MINE_UART_RX_LOG_SHOW_MAX_BYTES 字节，避免超长帧刷屏；
  * 可打印 ASCII 直接输出，\r/\n/\t 使用转义字符显示，其余字节以 '.' 占位。
  *
- * @param bus    数据来源 UART 总线。
- * @param buffer 接收缓冲区。
- * @param length 接收字节长度。
+ * @param bus            数据来源 UART 总线。
+ * @param buffer         接收缓冲区。
+ * @param length         接收字节长度。
+ * @param peer_connected 当前 SLE 连接状态。
  */
-static void mine_sle_uart_host_dump_rx_while_disconnected(uart_bus_t bus, const uint8_t *buffer, uint16_t length)
+static void mine_sle_uart_host_dump_uart_rx(uart_bus_t bus, const uint8_t *buffer,
+    uint16_t length, bool peer_connected)
 {
     char log_text[MINE_UART_RX_LOG_TEXT_MAX_LEN] = {0};
     uint16_t show_len;
@@ -204,18 +218,34 @@ static void mine_sle_uart_host_dump_rx_while_disconnected(uart_bus_t bus, const 
     log_text[pos] = '\0';
 
     if (pos == 0) {
-        osal_printk("[mine host] %s rx len:%u link:0 (dump failed)\r\n",
-            mine_host_uart_bus_name((uint8_t)bus), (unsigned int)length);
+        if (peer_connected) {
+            osal_printk("[mine host] %s rx len:%u (dump failed)\r\n",
+                mine_host_uart_bus_name((uint8_t)bus), (unsigned int)length);
+        } else {
+            osal_printk("[mine host] %s rx len:%u link:0 (dump failed)\r\n",
+                mine_host_uart_bus_name((uint8_t)bus), (unsigned int)length);
+        }
         return;
     }
 
     if (truncated) {
-        osal_printk("[mine host] %s rx len:%u link:0 show:%u data:%s ...\r\n",
-            mine_host_uart_bus_name((uint8_t)bus), (unsigned int)length,
-            (unsigned int)show_len, log_text);
+        if (peer_connected) {
+            osal_printk("[mine host] %s rx len:%u show:%u data:%s ...\r\n",
+                mine_host_uart_bus_name((uint8_t)bus), (unsigned int)length,
+                (unsigned int)show_len, log_text);
+        } else {
+            osal_printk("[mine host] %s rx len:%u link:0 show:%u data:%s ...\r\n",
+                mine_host_uart_bus_name((uint8_t)bus), (unsigned int)length,
+                (unsigned int)show_len, log_text);
+        }
     } else {
-        osal_printk("[mine host] %s rx len:%u link:0 data:%s\r\n",
-            mine_host_uart_bus_name((uint8_t)bus), (unsigned int)length, log_text);
+        if (peer_connected) {
+            osal_printk("[mine host] %s rx len:%u data:%s\r\n",
+                mine_host_uart_bus_name((uint8_t)bus), (unsigned int)length, log_text);
+        } else {
+            osal_printk("[mine host] %s rx len:%u link:0 data:%s\r\n",
+                mine_host_uart_bus_name((uint8_t)bus), (unsigned int)length, log_text);
+        }
     }
 }
 
@@ -272,9 +302,14 @@ static void mine_sle_uart_host_read_handler_common(uart_bus_t bus, const void *b
     }
 
     peer_connected = mine_sle_uart_host_is_connected();
-    /* 未连接时不转发到 SLE，但仍输出接收日志，便于离线串口排查。 */
+
+    /*
+     * 无论连接与否都打印可读接收日志，便于直接观察数字/字母/符号数据；
+     * 未连接时仅做日志观测，不执行后续入队转发。
+     */
+    mine_sle_uart_host_dump_uart_rx(bus, (const uint8_t *)buffer, length, peer_connected);
+
     if (!peer_connected) {
-        mine_sle_uart_host_dump_rx_while_disconnected(bus, (const uint8_t *)buffer, length);
         return;
     }
 

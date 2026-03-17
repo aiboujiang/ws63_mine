@@ -217,8 +217,16 @@ errcode_t mine_sle_uart_slave_send_to_host(const mine_sle_uart_slave_msg_t *msg)
         offset = (uint16_t)(offset + chunk_len);
     }
 
+#if MINE_ZW101_ENABLE
+    /* ZW101 二进制上报频率高，默认抑制逐包写出日志，避免刷屏。 */
+    if (uart_bus_snapshot != MINE_ZW101_UART_BUS) {
+        osal_printk("[mine slave] %s->sle write len:%u\r\n",
+            mine_slave_uart_bus_name(uart_bus_snapshot), msg->value_len);
+    }
+#else
     osal_printk("[mine slave] %s->sle write len:%u\r\n",
         mine_slave_uart_bus_name(uart_bus_snapshot), msg->value_len);
+#endif
     mine_slave_oled_push_data_event(uart_bus_snapshot, "UART TX", msg->value, msg->value_len);
 
     return ERRCODE_SLE_SUCCESS;
