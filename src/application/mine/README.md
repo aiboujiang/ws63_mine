@@ -140,21 +140,30 @@ LD SAVE3F
 
 1. 协议封装目录：`application/mine/common/ZW101`
 2. 业务接入目录：`application/mine/sle_uart_slave/src/sle_uart_slave_zw101.c`
-3. 常用配置宏：
+3. 核心流程（按《指纹模组产品用户手册_V1.5.1》实现）：
+   - 自动注册模板：`PS_AutoEnroll (0x31)`
+   - 自动验证指纹：`PS_AutoIdentify (0x32)`
+   - 删除模板：`PS_DeletChar (0x0C)`
+4. 常用配置宏：
    - `MINE_UART2_MODE_ZW101_ENABLE`
    - `MINE_ZW101_UART_BUS`
    - `MINE_ZW101_UART_BAUD`
    - `MINE_ZW101_DEBUG_CMD_ENABLE`
    - `MINE_ZW101_DEBUG_UART_BUS`
-4. 调试命令前缀：`FP` 或 `ZW101`。
-5. 典型命令：
+5. 调试命令前缀：`FP` 或 `ZW101`。
+6. 典型命令：
    - `FP HELP`
    - `FP STATUS`
-   - `FP VERIFY`
-   - `FP ENROLL <id>`
    - `FP LIST`
+   - `FP ENROLL <id> [times]`
+   - `FP VERIFY [score] [id]`
    - `FP DEL <id> [count]`
    - `FP CLEAR`
+   - `FP CANCEL`
+7. 日志与状态：
+   - 自动注册会输出关键阶段日志（合法性/采图/特征/合模/存储）。
+   - 自动验证会输出关键阶段日志（合法性/采图/检索）与匹配 `id/score`。
+   - 状态文本通过 `mine_zw101_get_status` 对 OLED 侧输出，便于现场联调。
 
 ## 8. WK2114 UART2 扩展模块（可选）
 
@@ -189,3 +198,27 @@ LD SAVE3F
 3. 现象：编译报错提示 UART2 mode must be mutually exclusive。
    - `MINE_UART2_MODE_NORMAL_ENABLE` / `MINE_UART2_MODE_LD2402_ENABLE` / `MINE_UART2_MODE_ZW101_ENABLE`
      必须且只能有一个为 `1`。
+4. 现象：`FP STATUS`、`FP VERIFY` 等短命令无回显。
+   - 已兼容“无 CRLF 结尾”的命令帧；若仍无响应，确认命令前缀为 `FP` 或 `ZW101`。
+
+## 11. README 维护约定
+
+1. 每次需求完成后（代码修改 + 编译验证），必须同步更新本 `README`。
+2. 更新至少覆盖以下内容：
+   - 功能变化（新增/删除/行为变更）。
+   - 调试命令变化（命令字、参数、返回说明）。
+   - 配置变化（宏开关、默认值、依赖关系）。
+   - 验证结果（编译命令与是否通过）。
+3. 变更记录使用时间倒序，便于追溯。
+
+## 12. 变更记录
+
+### 2026-03-17
+
+1. 按《指纹模组产品用户手册_V1.5.1》重写从机 `ZW101` 业务模块。
+2. 主流程切换为自动指令：`PS_AutoEnroll`、`PS_AutoIdentify`、`PS_DeletChar`。
+3. 调试命令调整为：`ENROLL <id> [times]`、`VERIFY [score] [id]`、`DEL <id> [count]`、`CANCEL`。
+4. 增强现场可观测性：输出自动流程分阶段日志与确认码释义。
+5. 编译验证：在 `src` 目录执行 `python3 build.py ws63-liteos-app -c`，结果通过。
+6. 新增调试命令 `FP LIST`，通过 `PS_ValidTempleteNum (0x1D)` 查询模板库已录入数量。
+7. OLED 布局调整：`STATE` 区域占两行，`DATA` 区域占两行（Host/Slave/WK2114 三处同步）。

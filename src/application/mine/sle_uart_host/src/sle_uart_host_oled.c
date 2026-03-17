@@ -186,24 +186,73 @@ static void mine_oled_set_linef(uint32_t line_index, const char *fmt, ...)
  *
  * @param text 状态内容。
  */
+static void mine_oled_set_state_lines(const char *text)
+{
+    const uint32_t state_lines[MINE_OLED_STATE_LINE_COUNT] = {
+        MINE_OLED_LINE_STATE0, MINE_OLED_LINE_STATE1
+    };
+    char state_text[MINE_OLED_STATE_TOTAL_CHARS + 1] = {0};
+    uint32_t line_idx;
+    uint32_t text_len;
+
+    if (text == NULL) {
+        for (line_idx = 0; line_idx < MINE_OLED_STATE_LINE_COUNT; line_idx++) {
+            mine_oled_set_line_raw(state_lines[line_idx], "");
+        }
+        return;
+    }
+
+    if (snprintf_s(state_text, sizeof(state_text), sizeof(state_text) - 1, "STATE:%s", text) <= 0) {
+        return;
+    }
+
+    text_len = (uint32_t)strlen(state_text);
+    for (line_idx = 0; line_idx < MINE_OLED_STATE_LINE_COUNT; line_idx++) {
+        uint32_t offset = line_idx * MINE_OLED_LINE_CHARS;
+        uint32_t char_index;
+        char line_buf[MINE_OLED_LINE_CHARS + 1] = {0};
+
+        if (offset >= text_len) {
+            mine_oled_set_line_raw(state_lines[line_idx], "");
+            continue;
+        }
+
+        for (char_index = 0; char_index < MINE_OLED_LINE_CHARS; char_index++) {
+            char current_char = state_text[offset + char_index];
+            if (current_char == '\0') {
+                break;
+            }
+            line_buf[char_index] = current_char;
+        }
+
+        mine_oled_set_line_raw(state_lines[line_idx], line_buf);
+    }
+}
+
+/**
+ * @brief 更新 OLED 的连接状态文本行。
+ *
+ * @param text 状态内容。
+ */
 void mine_host_oled_push_text(const char *text)
 {
     if ((!g_mine_oled_ready) || (text == NULL)) {
         return;
     }
 
-    mine_oled_set_linef(MINE_OLED_LINE_STATE, "STATE:%s", text);
+    /* 状态区固定占两行，避免较长状态被一行截断。 */
+    mine_oled_set_state_lines(text);
 }
 
 /**
- * @brief 将数据预览文本按三行布局写入 OLED 数据区域。
+ * @brief 将数据预览文本按两行布局写入 OLED 数据区域。
  *
  * @param text 连续预览文本。
  */
 static void mine_oled_set_data_lines(const char *text)
 {
     const uint32_t data_lines[MINE_OLED_DATA_LINE_COUNT] = {
-        MINE_OLED_LINE_DATA0, MINE_OLED_LINE_DATA1, MINE_OLED_LINE_DATA2
+        MINE_OLED_LINE_DATA0, MINE_OLED_LINE_DATA1
     };
     uint32_t line_idx;
     uint32_t text_len;
@@ -366,7 +415,7 @@ void mine_host_oled_init(void)
 
     g_mine_oled_ready = true;
     mine_oled_set_line_raw(MINE_OLED_LINE_TITLE, "HOST UART<->SLE");
-    mine_oled_set_line_raw(MINE_OLED_LINE_STATE, "STATE:BOOT");
+    mine_host_oled_push_text("BOOT");
     mine_oled_set_data_lines("DATA:--");
     mine_oled_set_linef(MINE_OLED_LINE_UUID, "UUID:S%04X P%04X",
         MINE_SLE_UART_SERVICE_UUID, MINE_SLE_UART_PROPERTY_UUID);

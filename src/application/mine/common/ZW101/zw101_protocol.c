@@ -175,6 +175,7 @@ int zw101_send_command(zw101_context_t *ctx, uint8_t cmd, const uint8_t *params,
     ctx->waiting_ack = true;
     ctx->ack_done = false;
     ctx->ack_code = 0xFF;
+    ctx->ack_payload_len = 0;
 
     if (ctx->hal.uart_send(ctx->cmd_buf, frame_size) != 0) {
         ctx->waiting_ack = false;
@@ -265,6 +266,18 @@ int zw101_pkg_handle(zw101_context_t *ctx, const uint8_t *data, uint16_t size)
 
     if (finish_waiting_ack && (payload_len > 0)) {
         ctx->ack_code = payload[0];
+        /* 缓存最近一次 ACK 载荷，供同步命令在 wait_ack 返回后解析扩展字段。 */
+        ctx->ack_payload_len = 0;
+        if (payload_len <= sizeof(ctx->ack_payload)) {
+            if (memcpy_s(ctx->ack_payload, sizeof(ctx->ack_payload), payload, payload_len) == EOK) {
+                ctx->ack_payload_len = payload_len;
+            }
+        } else {
+            if (memcpy_s(ctx->ack_payload, sizeof(ctx->ack_payload), payload,
+                sizeof(ctx->ack_payload)) == EOK) {
+                ctx->ack_payload_len = sizeof(ctx->ack_payload);
+            }
+        }
         ctx->ack_done = true;
 
         if (ctx->ack_cb != NULL) {
@@ -400,6 +413,7 @@ static int zw101_send_variable_cmd(zw101_context_t *ctx, const uint8_t *base_cmd
     ctx->waiting_ack = true;
     ctx->ack_done = false;
     ctx->ack_code = 0xFF;
+    ctx->ack_payload_len = 0;
 
     if (ctx->hal.uart_send(ctx->cmd_buf, cmd_size) != 0) {
         ctx->waiting_ack = false;
@@ -449,6 +463,7 @@ int zw101_cmd_into_sleep(zw101_context_t *ctx)
     ctx->waiting_ack = true;
     ctx->ack_done = false;
     ctx->ack_code = 0xFF;
+    ctx->ack_payload_len = 0;
 
     if (ctx->hal.uart_send(ctx->cmd_buf, sizeof(g_zw101_fixed_cmd_sleep)) != 0) {
         ctx->waiting_ack = false;
@@ -501,6 +516,7 @@ int zw101_cmd_capture_image(zw101_context_t *ctx, uint8_t operate_cmd)
     ctx->waiting_ack = true;
     ctx->ack_done = false;
     ctx->ack_code = 0xFF;
+    ctx->ack_payload_len = 0;
 
     if (ctx->hal.uart_send(ctx->cmd_buf, cmd_size) != 0) {
         ctx->waiting_ack = false;
@@ -537,6 +553,7 @@ int zw101_cmd_general_template(zw101_context_t *ctx)
     ctx->waiting_ack = true;
     ctx->ack_done = false;
     ctx->ack_code = 0xFF;
+    ctx->ack_payload_len = 0;
 
     if (ctx->hal.uart_send(ctx->cmd_buf, sizeof(g_zw101_fixed_cmd_general_template)) != 0) {
         ctx->waiting_ack = false;
@@ -616,6 +633,7 @@ int zw101_cmd_empty_template(zw101_context_t *ctx)
     ctx->waiting_ack = true;
     ctx->ack_done = false;
     ctx->ack_code = 0xFF;
+    ctx->ack_payload_len = 0;
 
     if (ctx->hal.uart_send(ctx->cmd_buf, sizeof(g_zw101_fixed_cmd_empty_template)) != 0) {
         ctx->waiting_ack = false;
@@ -623,6 +641,50 @@ int zw101_cmd_empty_template(zw101_context_t *ctx)
     }
 
     return zw101_wait_ack(ctx, ZW101_CMD_EMPTY_TEMPLATE, ZW101_EMPTY_ACK_TIMEOUT, NULL);
+}
+
+/**
+ * @brief 读取模板库已录入模板数量（命令 0x1D）。
+ *
+ * @param ctx 协议上下文。
+ * @param valid_nums 输出数量指针，可为 NULL。
+ * @return int 0 成功，-1 失败。
+ */
+int zw101_cmd_read_valid_template_nums(zw101_context_t *ctx, uint16_t *valid_nums)
+{
+    uint8_t ack_code = 0xFF;
+
+    if (ctx == NULL) {
+        return -1;
+    }
+
+    if (valid_nums != NULL) {
+        *valid_nums = 0;
+    }
+
+    if (zw101_send_command(ctx, ZW101_CMD_READ_VALID_TEMPLATE_NUMS, NULL, 0) != 0) {
+        return -1;
+    }
+
+    if (zw101_wait_ack(ctx, ZW101_CMD_READ_VALID_TEMPLATE_NUMS, ZW101_COMMON_TIMEOUT, &ack_code) != 0) {
+        /* 兼容部分固件在空库场景下直接返回 LIB_EMPTY。 */
+        if ((ack_code == 0x24U) && (valid_nums != NULL)) {
+            *valid_nums = 0;
+            return 0;
+        }
+        return -1;
+    }
+
+    /* ACK payload: [0]=ack, [1]=valid_num_h, [2]=valid_num_l。 */
+    if ((ctx->ack_payload_len < 3U) || (ctx->ack_payload[0] != ZW101_PS_OK)) {
+        return -1;
+    }
+
+    if (valid_nums != NULL) {
+        *valid_nums = (uint16_t)(((uint16_t)ctx->ack_payload[1] << 8) | ctx->ack_payload[2]);
+    }
+
+    return 0;
 }
 
 /* 读取一个索引表页，用于检查 ID 占用情况。 */

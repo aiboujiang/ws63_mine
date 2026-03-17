@@ -207,6 +207,9 @@ typedef struct {
     bool waiting_ack;
     bool ack_done;
     uint8_t ack_code;
+    /* 最近一次 ACK 载荷缓存（包含 payload[0] 的 ack_code 字节）。 */
+    uint16_t ack_payload_len;
+    uint8_t ack_payload[ZW101_PROTOCOL_RCV_BUFFER_SIZE];
 
     /* 可选异步回调：原始包与 ACK。 */
     zw101_ack_callback_t ack_cb;
@@ -250,6 +253,8 @@ int zw101_cmd_store_template(zw101_context_t *ctx, uint8_t buffer_id, uint16_t p
 int zw101_cmd_match1n(zw101_context_t *ctx, uint8_t buffer_id, uint16_t start_page, uint16_t page_num);
 int zw101_cmd_del_template(zw101_context_t *ctx, uint16_t template_id, uint16_t template_nums);
 int zw101_cmd_empty_template(zw101_context_t *ctx);
+/* 读取模板库中“已录入模板数量”（命令 0x1D）。 */
+int zw101_cmd_read_valid_template_nums(zw101_context_t *ctx, uint16_t *valid_nums);
 int zw101_cmd_get_id_availability(zw101_context_t *ctx, uint8_t index);
 
 #ifdef __cplusplus

@@ -71,7 +71,7 @@ void mine_zw101_feed(uart_bus_t bus, const uint8_t *data, uint16_t len);
  * - false: 非命令数据，调用方应继续原有透传逻辑。
  *
  * 作用:
- * - 支持命令：HELP/STATUS/ENROLL/VERIFY/DEL/CLEAR/CANCEL。
+ * - 支持命令：HELP/STATUS/LIST/ENROLL/VERIFY/DEL/CLEAR/CANCEL。
  */
 bool mine_zw101_try_handle_debug_cmd(uart_bus_t bus, const uint8_t *data, uint16_t len);
 

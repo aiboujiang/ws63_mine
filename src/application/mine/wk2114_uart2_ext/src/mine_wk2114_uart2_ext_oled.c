@@ -160,7 +160,7 @@ static void mine_wk2114_oled_set_linef(uint32_t line_index, const char *fmt, ...
 }
 
 /**
- * @brief 将连续预览文本拆分为三行显示。
+ * @brief 将连续预览文本拆分为两行显示。
  *
  * @param text 连续文本。
  */
@@ -169,7 +169,6 @@ static void mine_wk2114_oled_set_data_lines(const char *text)
     const uint32_t data_lines[MINE_WK2114_OLED_DATA_LINE_COUNT] = {
         MINE_WK2114_OLED_LINE_DATA0,
         MINE_WK2114_OLED_LINE_DATA1,
-        MINE_WK2114_OLED_LINE_DATA2,
     };
     uint32_t line_idx;
     uint32_t text_len;
@@ -209,13 +208,62 @@ static void mine_wk2114_oled_set_data_lines(const char *text)
  *
  * @param text 状态文本。
  */
+static void mine_wk2114_oled_set_state_lines(const char *text)
+{
+    const uint32_t state_lines[MINE_WK2114_OLED_STATE_LINE_COUNT] = {
+        MINE_WK2114_OLED_LINE_STATE0, MINE_WK2114_OLED_LINE_STATE1
+    };
+    char state_text[MINE_WK2114_OLED_STATE_TOTAL_CHARS + 1] = {0};
+    uint32_t line_idx;
+    uint32_t text_len;
+
+    if (text == NULL) {
+        for (line_idx = 0; line_idx < MINE_WK2114_OLED_STATE_LINE_COUNT; line_idx++) {
+            mine_wk2114_oled_set_line_raw(state_lines[line_idx], "");
+        }
+        return;
+    }
+
+    if (snprintf_s(state_text, sizeof(state_text), sizeof(state_text) - 1, "STATE:%s", text) <= 0) {
+        return;
+    }
+
+    text_len = (uint32_t)strlen(state_text);
+    for (line_idx = 0; line_idx < MINE_WK2114_OLED_STATE_LINE_COUNT; line_idx++) {
+        uint32_t offset = line_idx * MINE_WK2114_OLED_LINE_CHARS;
+        uint32_t char_index;
+        char line_buf[MINE_WK2114_OLED_LINE_CHARS + 1] = {0};
+
+        if (offset >= text_len) {
+            mine_wk2114_oled_set_line_raw(state_lines[line_idx], "");
+            continue;
+        }
+
+        for (char_index = 0; char_index < MINE_WK2114_OLED_LINE_CHARS; char_index++) {
+            char current_char = state_text[offset + char_index];
+            if (current_char == '\0') {
+                break;
+            }
+            line_buf[char_index] = current_char;
+        }
+
+        mine_wk2114_oled_set_line_raw(state_lines[line_idx], line_buf);
+    }
+}
+
+/**
+ * @brief 更新 OLED 状态文本。
+ *
+ * @param text 状态文本。
+ */
 void mine_wk2114_oled_push_state(const char *text)
 {
     if ((!g_mine_wk2114_oled_ready) || (text == NULL)) {
         return;
     }
 
-    mine_wk2114_oled_set_linef(MINE_WK2114_OLED_LINE_STATE, "STATE:%s", text);
+    /* 状态区固定占两行，提升长状态信息可读性。 */
+    mine_wk2114_oled_set_state_lines(text);
 }
 
 /**
@@ -356,7 +404,7 @@ void mine_wk2114_oled_init(void)
 
     g_mine_wk2114_oled_ready = true;
     mine_wk2114_oled_set_line_raw(MINE_WK2114_OLED_LINE_TITLE, "WK2114 UART2 EXT");
-    mine_wk2114_oled_set_line_raw(MINE_WK2114_OLED_LINE_STATE, "STATE:BOOT");
+    mine_wk2114_oled_push_state("BOOT");
     mine_wk2114_oled_set_data_lines("DATA:--");
     mine_wk2114_oled_set_channel(0, MINE_WK2114_HOST_UART_BAUD);
     mine_wk2114_oled_set_line_raw(MINE_WK2114_OLED_LINE_RX, "RX:0 C:0");

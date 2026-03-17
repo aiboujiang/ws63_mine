@@ -83,6 +83,7 @@ typedef enum {
     MINE_ZW101_CMD_NONE = 0,
     MINE_ZW101_CMD_HELP,
     MINE_ZW101_CMD_STATUS,
+    MINE_ZW101_CMD_LIST,
     MINE_ZW101_CMD_ENROLL,
     MINE_ZW101_CMD_VERIFY,
     MINE_ZW101_CMD_DELETE,
@@ -1020,11 +1021,42 @@ static void mine_zw101_print_help(void)
     osal_printk("[mine zw101] cmd help:\r\n");
     osal_printk("[mine zw101]   FP HELP\r\n");
     osal_printk("[mine zw101]   FP STATUS\r\n");
+    osal_printk("[mine zw101]   FP LIST\r\n");
     osal_printk("[mine zw101]   FP ENROLL <id> [times]\r\n");
     osal_printk("[mine zw101]   FP VERIFY [score] [id]\r\n");
     osal_printk("[mine zw101]   FP DEL <id> [count]\r\n");
     osal_printk("[mine zw101]   FP CLEAR\r\n");
     osal_printk("[mine zw101]   FP CANCEL\r\n");
+}
+
+/**
+ * @brief 执行模板数量查询流程。
+ *
+ * @return true  查询成功。
+ * @return false 查询失败。
+ */
+static bool mine_zw101_run_list(void)
+{
+    uint16_t valid_nums = 0;
+
+    if (!g_mine_zw101_ready) {
+        mine_zw101_set_status("ZW101:NOT READY");
+        return false;
+    }
+
+    mine_zw101_set_status("ZW101:LIST");
+    osal_printk("[mine zw101] cmd in: PS_ValidTempleteNum\r\n");
+
+    if (zw101_cmd_read_valid_template_nums(&g_mine_zw101_ctx, &valid_nums) != 0) {
+        mine_zw101_set_status_fmt("ZW101:LIST E%02X", g_mine_zw101_ctx.ack_code);
+        osal_printk("[mine zw101] LIST failed, ack:0x%02X(%s)\r\n",
+            g_mine_zw101_ctx.ack_code, mine_zw101_ack_desc(g_mine_zw101_ctx.ack_code));
+        return false;
+    }
+
+    mine_zw101_set_status_fmt("ZW101:LIST %u", valid_nums);
+    osal_printk("[mine zw101] LIST success, valid_nums:%u\r\n", (unsigned int)valid_nums);
+    return true;
 }
 
 /**
@@ -1050,6 +1082,10 @@ static void mine_zw101_exec_cmd(const mine_zw101_cmd_t *cmd)
                 (unsigned int)mine_zw101_cmd_busy(),
                 g_mine_zw101_status_text);
             mine_zw101_set_status("ZW101:STATUS");
+            break;
+
+        case MINE_ZW101_CMD_LIST:
+            (void)mine_zw101_run_list();
             break;
 
         case MINE_ZW101_CMD_ENROLL:
@@ -1213,6 +1249,7 @@ static bool mine_zw101_push_cmd_or_busy(const mine_zw101_cmd_t *cmd)
  * 支持命令：
  * - FP HELP
  * - FP STATUS
+ * - FP LIST
  * - FP ENROLL <id> [times]
  * - FP VERIFY [score] [id]
  * - FP DEL <id> [count]
@@ -1271,6 +1308,12 @@ static void mine_zw101_handle_debug_line(const char *line)
 
     if (strcmp(op, "STATUS") == 0) {
         cmd.op = MINE_ZW101_CMD_STATUS;
+        (void)mine_zw101_push_cmd_or_busy(&cmd);
+        return;
+    }
+
+    if (strcmp(op, "LIST") == 0) {
+        cmd.op = MINE_ZW101_CMD_LIST;
         (void)mine_zw101_push_cmd_or_busy(&cmd);
         return;
     }
