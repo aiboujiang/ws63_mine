@@ -34,6 +34,11 @@
 #define MINE_LOG_PRINT_CHANNEL_ENABLE 0
 #endif
 
+/* 未连接场景下的串口接收日志最多展示字节数，避免长帧刷屏。 */
+#define MINE_UART_RX_LOG_SHOW_MAX_BYTES 64
+/* 文本日志缓冲区长度：每字节最多展开为2字符（如\n）+ 结尾符。 */
+#define MINE_UART_RX_LOG_TEXT_MAX_LEN ((MINE_UART_RX_LOG_SHOW_MAX_BYTES * 2) + 1)
+
 /* Multi-UART RX buffers (indexed by UART bus 0/1/2). */
 static uint8_t g_mine_uart_rx_buffer[MINE_UART_BUS_COUNT][MINE_UART_RX_BUFFER_SIZE] = {0};
 
@@ -134,6 +139,87 @@ const char *mine_host_uart_bus_name(uint8_t bus)
 }
 
 /**
+ * @brief 将串口接收字节转为可读文本并输出日志（未连接 SLE 场景）。
+ *
+ * 仅展示前 MINE_UART_RX_LOG_SHOW_MAX_BYTES 字节，避免超长帧刷屏；
+ * 可打印 ASCII 直接输出，\r/\n/\t 使用转义字符显示，其余字节以 '.' 占位。
+ *
+ * @param bus    数据来源 UART 总线。
+ * @param buffer 接收缓冲区。
+ * @param length 接收字节长度。
+ */
+static void mine_sle_uart_host_dump_rx_while_disconnected(uart_bus_t bus, const uint8_t *buffer, uint16_t length)
+{
+    char log_text[MINE_UART_RX_LOG_TEXT_MAX_LEN] = {0};
+    uint16_t show_len;
+    uint16_t idx;
+    uint16_t pos = 0;
+    bool truncated = false;
+    uint8_t ch;
+
+    if ((buffer == NULL) || (length == 0)) {
+        return;
+    }
+
+    show_len = length;
+    if (show_len > MINE_UART_RX_LOG_SHOW_MAX_BYTES) {
+        show_len = MINE_UART_RX_LOG_SHOW_MAX_BYTES;
+        truncated = true;
+    }
+
+    for (idx = 0; idx < show_len; idx++) {
+        if ((sizeof(log_text) - pos) <= 1) {
+            break;
+        }
+
+        ch = buffer[idx];
+        if ((ch >= 0x20U) && (ch <= 0x7EU)) {
+            /* 直接显示可打印 ASCII，便于观察文本协议内容。 */
+            log_text[pos++] = (char)ch;
+            continue;
+        }
+
+        if (((sizeof(log_text) - pos) > 2) && (ch == '\r')) {
+            log_text[pos++] = '\\';
+            log_text[pos++] = 'r';
+            continue;
+        }
+
+        if (((sizeof(log_text) - pos) > 2) && (ch == '\n')) {
+            log_text[pos++] = '\\';
+            log_text[pos++] = 'n';
+            continue;
+        }
+
+        if (((sizeof(log_text) - pos) > 2) && (ch == '\t')) {
+            log_text[pos++] = '\\';
+            log_text[pos++] = 't';
+            continue;
+        }
+
+        /* 不可打印字节统一转为 '.'，避免日志污染终端控制字符。 */
+        log_text[pos++] = '.';
+    }
+
+    log_text[pos] = '\0';
+
+    if (pos == 0) {
+        osal_printk("[mine host] %s rx len:%u link:0 (dump failed)\r\n",
+            mine_host_uart_bus_name((uint8_t)bus), (unsigned int)length);
+        return;
+    }
+
+    if (truncated) {
+        osal_printk("[mine host] %s rx len:%u link:0 show:%u data:%s ...\r\n",
+            mine_host_uart_bus_name((uint8_t)bus), (unsigned int)length,
+            (unsigned int)show_len, log_text);
+    } else {
+        osal_printk("[mine host] %s rx len:%u link:0 data:%s\r\n",
+            mine_host_uart_bus_name((uint8_t)bus), (unsigned int)length, log_text);
+    }
+}
+
+/**
  * @brief 向所有已启用 UART 广播写入数据。
  *
  * @param data 待发送数据指针。
@@ -176,6 +262,7 @@ static void mine_sle_uart_host_read_handler_common(uart_bus_t bus, const void *b
 {
     mine_sle_uart_host_msg_t msg = {0};
     void *buffer_copy = NULL;
+    bool peer_connected;
     int write_ret;
 
     unused(error);
@@ -184,8 +271,10 @@ static void mine_sle_uart_host_read_handler_common(uart_bus_t bus, const void *b
         return;
     }
 
-    /* Drop UART payload while not connected to avoid queue storms. */
-    if (!mine_sle_uart_host_is_connected()) {
+    peer_connected = mine_sle_uart_host_is_connected();
+    /* 未连接时不转发到 SLE，但仍输出接收日志，便于离线串口排查。 */
+    if (!peer_connected) {
+        mine_sle_uart_host_dump_rx_while_disconnected(bus, (const uint8_t *)buffer, length);
         return;
     }
 
