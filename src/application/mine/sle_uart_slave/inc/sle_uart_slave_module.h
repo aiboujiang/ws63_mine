@@ -15,13 +15,6 @@
 #define MINE_UART_RX_BUFFER_SIZE 512
 #define MINE_UART_BUS_COUNT 3
 #define MINE_UART_BUS_INVALID 0xFF
-/*
- * UART 透传环形槽位数：回调写入静态槽位，任务线程按索引消费。
- * 该设计用于替代高频 vmalloc/vfree，降低碎片与抢占抖动。
- */
-#define MINE_UART_RING_SLOT_COUNT 16
-/* 环形槽位耗尽时的日志最小间隔（毫秒），避免告警刷屏。 */
-#define MINE_UART_RING_DROP_LOG_INTERVAL_MS 500
 
 /* SLE 参数。 */
 #define MINE_SLE_DEFAULT_MTU_SIZE 512

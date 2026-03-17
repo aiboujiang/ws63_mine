@@ -37,27 +37,9 @@
 /* 多路 UART 接收缓冲区（按 UART0/1/2 索引）。 */
 static uint8_t g_mine_uart_rx_buffer[MINE_UART_BUS_COUNT][MINE_UART_RX_BUFFER_SIZE] = {0};
 
-/* UART 回调写入静态环形槽位，任务线程通过索引消息消费。 */
-typedef struct {
-    uint8_t uart_bus;
-    uint16_t value_len;
-    uint8_t value[MINE_UART_RX_BUFFER_SIZE];
-    bool in_use;
-} mine_sle_uart_ring_slot_t;
-
-/* 任务队列仅传递槽位索引，避免大块内存在队列中重复复制。 */
-typedef struct {
-    uint8_t slot_index;
-} mine_sle_uart_ring_msg_t;
-
-static mine_sle_uart_ring_slot_t g_mine_uart_ring_slots[MINE_UART_RING_SLOT_COUNT] = {0};
-static uint8_t g_mine_uart_ring_alloc_cursor = 0;
-static uint32_t g_mine_uart_ring_drop_count = 0;
-static uint32_t g_mine_uart_ring_drop_last_log_ms = 0;
-static bool g_mine_uart_ring_drop_log_started = false;
-
+/* UART 回调投递到任务消息队列。 */
 static unsigned long g_mine_uart_msg_queue = 0;
-static unsigned int g_mine_uart_msg_size = sizeof(mine_sle_uart_ring_msg_t);
+static unsigned int g_mine_uart_msg_size = sizeof(mine_sle_uart_slave_msg_t);
 
 /* 保留原 OSAL 日志出口，并镜像到 PRINT 通道。 */
 static void (*g_mine_raw_osal_printk)(const char *fmt, ...) = osal_printk;
@@ -161,95 +143,6 @@ const char *mine_slave_uart_bus_name(uint8_t bus)
         return "UART2";
     }
     return "UART?";
-}
-
-/**
- * @brief 限频输出环形槽位耗尽日志。
- *
- * @param bus    数据来源 UART 总线。
- * @param length 丢弃的数据长度。
- */
-static void mine_uart_ring_log_drop_rate_limited(uart_bus_t bus, uint16_t length)
-{
-    uint32_t now_ms = (uint32_t)uapi_systick_get_ms();
-
-    g_mine_uart_ring_drop_count++;
-    if (g_mine_uart_ring_drop_log_started &&
-        ((uint32_t)(now_ms - g_mine_uart_ring_drop_last_log_ms) < MINE_UART_RING_DROP_LOG_INTERVAL_MS)) {
-        return;
-    }
-
-    osal_printk("[mine slave] ring full drop %s len:%u dropped:%lu\r\n",
-        mine_slave_uart_bus_name((uint8_t)bus), (unsigned int)length,
-        (unsigned long)g_mine_uart_ring_drop_count);
-
-    g_mine_uart_ring_drop_count = 0;
-    g_mine_uart_ring_drop_last_log_ms = now_ms;
-    g_mine_uart_ring_drop_log_started = true;
-}
-
-/**
- * @brief 申请一个空闲环形槽位。
- *
- * @return int32_t >=0 为槽位索引，<0 表示无空闲槽位。
- */
-static int32_t mine_uart_ring_alloc_slot(void)
-{
-    uint8_t offset;
-    uint8_t slot_index;
-    uint32_t irq_sts = osal_irq_lock();
-
-    for (offset = 0; offset < MINE_UART_RING_SLOT_COUNT; offset++) {
-        slot_index = (uint8_t)((g_mine_uart_ring_alloc_cursor + offset) % MINE_UART_RING_SLOT_COUNT);
-        if (!g_mine_uart_ring_slots[slot_index].in_use) {
-            g_mine_uart_ring_slots[slot_index].in_use = true;
-            g_mine_uart_ring_alloc_cursor = (uint8_t)((slot_index + 1) % MINE_UART_RING_SLOT_COUNT);
-            osal_irq_restore(irq_sts);
-            return (int32_t)slot_index;
-        }
-    }
-
-    osal_irq_restore(irq_sts);
-    return -1;
-}
-
-/**
- * @brief 释放已消费的环形槽位。
- *
- * @param slot_index 槽位索引。
- */
-static void mine_uart_ring_free_slot(uint8_t slot_index)
-{
-    uint32_t irq_sts;
-
-    if (slot_index >= MINE_UART_RING_SLOT_COUNT) {
-        return;
-    }
-
-    irq_sts = osal_irq_lock();
-    g_mine_uart_ring_slots[slot_index].in_use = false;
-    g_mine_uart_ring_slots[slot_index].value_len = 0;
-    g_mine_uart_ring_slots[slot_index].uart_bus = MINE_UART_BUS_INVALID;
-    osal_irq_restore(irq_sts);
-}
-
-/**
- * @brief 重置环形槽位状态。
- */
-static void mine_uart_ring_reset(void)
-{
-    uint8_t slot_index;
-
-    for (slot_index = 0; slot_index < MINE_UART_RING_SLOT_COUNT; slot_index++) {
-        g_mine_uart_ring_slots[slot_index].in_use = false;
-        g_mine_uart_ring_slots[slot_index].value_len = 0;
-        g_mine_uart_ring_slots[slot_index].uart_bus = MINE_UART_BUS_INVALID;
-    }
-
-    g_mine_uart_ring_alloc_cursor = 0;
-    g_mine_uart_ring_drop_count = 0;
-    g_mine_uart_ring_drop_last_log_ms = 0;
-    g_mine_uart_ring_drop_log_started = false;
 }
 
 /**
@@ -380,9 +273,8 @@ void mine_slave_uart_write_enabled_buses(const uint8_t *data, uint16_t len)
  */
 static void mine_sle_uart_slave_read_handler_common(uart_bus_t bus, const void *buffer, uint16_t length, bool error)
 {
-    mine_sle_uart_ring_msg_t ring_msg = {0};
-    mine_sle_uart_ring_slot_t *slot = NULL;
-    int32_t slot_index;
+    mine_sle_uart_slave_msg_t msg = {0};
+    void *buffer_copy = NULL;
     int write_ret;
 
     unused(error);
@@ -427,31 +319,23 @@ static void mine_sle_uart_slave_read_handler_common(uart_bus_t bus, const void *
         return;
     }
 
-    if (length > MINE_UART_RX_BUFFER_SIZE) {
-        mine_uart_ring_log_drop_rate_limited(bus, length);
+    buffer_copy = osal_vmalloc(length);
+    if (buffer_copy == NULL) {
         return;
     }
 
-    slot_index = mine_uart_ring_alloc_slot();
-    if (slot_index < 0) {
-        mine_uart_ring_log_drop_rate_limited(bus, length);
+    if (memcpy_s(buffer_copy, length, buffer, length) != EOK) {
+        osal_vfree(buffer_copy);
         return;
     }
 
-    slot = &g_mine_uart_ring_slots[(uint8_t)slot_index];
-    slot->uart_bus = (uint8_t)bus;
-    slot->value_len = length;
-    if (memcpy_s(slot->value, sizeof(slot->value), buffer, length) != EOK) {
-        mine_uart_ring_free_slot((uint8_t)slot_index);
-        return;
-    }
+    msg.uart_bus = (uint8_t)bus;
+    msg.value = (uint8_t *)buffer_copy;
+    msg.value_len = length;
 
-    ring_msg.slot_index = (uint8_t)slot_index;
-
-    write_ret = osal_msg_queue_write_copy(g_mine_uart_msg_queue, &ring_msg, g_mine_uart_msg_size, 0);
+    write_ret = osal_msg_queue_write_copy(g_mine_uart_msg_queue, &msg, g_mine_uart_msg_size, 0);
     if (write_ret != OSAL_SUCCESS) {
-        mine_uart_ring_free_slot((uint8_t)slot_index);
-        osal_printk("[mine slave] ring enqueue failed:%d\r\n", write_ret);
+        osal_vfree(buffer_copy);
     }
 }
 
@@ -649,13 +533,10 @@ static void *mine_sle_uart_slave_task(const char *arg)
     }
 
     while (1) {
-        mine_sle_uart_ring_msg_t ring_msg = {0};
-        mine_sle_uart_ring_slot_t *slot = NULL;
         mine_sle_uart_slave_msg_t msg = {0};
-        unsigned int read_size = g_mine_uart_msg_size;
 
-        read_ret = osal_msg_queue_read_copy(g_mine_uart_msg_queue, &ring_msg,
-            &read_size, MINE_TASK_LOOP_WAIT_MS);
+        read_ret = osal_msg_queue_read_copy(g_mine_uart_msg_queue, &msg,
+            &g_mine_uart_msg_size, MINE_TASK_LOOP_WAIT_MS);
 #if MINE_LD2402_ENABLE
         mine_ld2402_process();
         if (mine_ld2402_get_status(radar_status, sizeof(radar_status))) {
@@ -673,19 +554,6 @@ static void *mine_sle_uart_slave_task(const char *arg)
             continue;
         }
 
-        if (ring_msg.slot_index >= MINE_UART_RING_SLOT_COUNT) {
-            continue;
-        }
-
-        slot = &g_mine_uart_ring_slots[ring_msg.slot_index];
-        if ((!slot->in_use) || (slot->value_len == 0)) {
-            continue;
-        }
-
-        msg.uart_bus = slot->uart_bus;
-        msg.value = slot->value;
-        msg.value_len = slot->value_len;
-
         if ((msg.value != NULL) && (msg.value_len > 0)) {
 #if (MINE_UART_LINK_TRACE_ENABLE == 1)
             osal_printk("[mine slave] %s rx queue len:%u\r\n",
@@ -693,9 +561,8 @@ static void *mine_sle_uart_slave_task(const char *arg)
 #endif
             /* 发送函数内部已按场景分类打印，主循环避免重复错误日志刷屏。 */
             (void)mine_sle_uart_slave_send_to_host(&msg);
+            osal_vfree(msg.value);
         }
-
-        mine_uart_ring_free_slot(ring_msg.slot_index);
     }
 }
 
@@ -711,9 +578,7 @@ static void mine_sle_uart_slave_entry(void)
 
     osal_kthread_lock();
 
-    mine_uart_ring_reset();
-
-    create_ret = osal_msg_queue_create("mine_sle_slave_msg", MINE_UART_RING_SLOT_COUNT,
+    create_ret = osal_msg_queue_create("mine_sle_slave_msg", (unsigned short)g_mine_uart_msg_size,
         &g_mine_uart_msg_queue, 0, g_mine_uart_msg_size);
     if (create_ret != OSAL_SUCCESS) {
         osal_printk("[mine slave] create queue failed:%x\r\n", create_ret);
