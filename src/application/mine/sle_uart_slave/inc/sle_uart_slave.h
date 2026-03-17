@@ -59,13 +59,6 @@ extern "C" {
 #define MINE_UART2_RX_ISR_DUMP_ENABLE 0
 
 /**
- * @brief UART2 原始收包日志最小间隔（毫秒）。
- *
- * 默认 500ms，即每秒最多输出 2 次，避免 LD2402 文本流刷屏。
- */
-#define MINE_UART2_RX_DUMP_INTERVAL_MS 500U
-
-/**
  * @brief 是否启用 UART<->SLE 链路的高频追踪日志，1=启用，0=禁用。
  *
  * 仅建议在短时联调时打开，长期开启会显著增加日志开销。
