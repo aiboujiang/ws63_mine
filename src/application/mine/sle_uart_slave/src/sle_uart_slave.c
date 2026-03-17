@@ -52,29 +52,19 @@ static void (*g_mine_raw_osal_printk)(const char *fmt, ...) = osal_printk;
 /**
  * @brief 将日志同步镜像到 UART0，保证串口调试口持续可见。
  *
+ * 采用“尽力发送”策略：不额外打印失败日志，避免日志回路递归。
  *
  * @param log_buf    日志缓冲区。
  * @param format_len 已格式化日志长度。
  */
 static void mine_slave_log_mirror_uart0(const char *log_buf, int32_t format_len)
 {
-#if (MINE_LOG_UART0_MIRROR_ENABLE == 0)
-    unused(log_buf);
-    unused(format_len);
-    return;
-#else
     if ((log_buf == NULL) || (format_len <= 0)) {
-        return;
-    }
-
-    /* 中断上下文禁用镜像直写，避免在 UART ISR 内触发重型日志路径。 */
-    if (osal_in_interrupt() != 0) {
         return;
     }
 
     /* 保持 UART0 与系统日志同步输出，不因串口未就绪中断主流程。 */
     (void)uapi_uart_write(UART_BUS_0, (const uint8_t *)log_buf, (uint16_t)format_len, 0);
-#endif
 }
 
 /**
@@ -154,7 +144,6 @@ const char *mine_slave_uart_bus_name(uint8_t bus)
  * @param buffer UART2 接收缓冲区。
  * @param length 接收字节数。
  */
-#if (MINE_UART2_RX_ISR_DUMP_ENABLE == 1)
 static void mine_sle_uart_slave_dump_uart2_rx(const uint8_t *buffer, uint16_t length)
 {
     char log_text[MINE_UART_RX_LOG_TEXT_MAX_LEN] = {0};
@@ -222,7 +211,6 @@ static void mine_sle_uart_slave_dump_uart2_rx(const uint8_t *buffer, uint16_t le
         osal_printk("[mine slave] UART2 rx len:%u data:%s\r\n", (unsigned int)length, log_text);
     }
 }
-#endif
 
 /**
  * @brief 向所有已启用 UART 广播写入数据。
@@ -272,14 +260,10 @@ static void mine_sle_uart_slave_read_handler_common(uart_bus_t bus, const void *
         return;
     }
 
-#if (MINE_UART2_RX_ISR_DUMP_ENABLE == 1)
     if (bus == UART_BUS_2) {
-        /* RX 回调通常运行在中断上下文，仅在任务上下文允许详细串口转储。 */
-        if (osal_in_interrupt() == 0) {
-            mine_sle_uart_slave_dump_uart2_rx((const uint8_t *)buffer, length);
-        }
+        /* 按需求输出 UART2 原始接收内容，便于串口侧联调排查。 */
+        mine_sle_uart_slave_dump_uart2_rx((const uint8_t *)buffer, length);
     }
-#endif
 
 #if MINE_LD2402_ENABLE
     mine_ld2402_feed(bus, (const uint8_t *)buffer, length);
@@ -537,10 +521,8 @@ static void *mine_sle_uart_slave_task(const char *arg)
         }
 
         if ((msg.value != NULL) && (msg.value_len > 0)) {
-#if (MINE_UART_LINK_TRACE_ENABLE == 1)
             osal_printk("[mine slave] %s rx queue len:%u\r\n",
                 mine_slave_uart_bus_name(msg.uart_bus), msg.value_len);
-#endif
             send_ret = mine_sle_uart_slave_send_to_host(&msg);
             if (send_ret != ERRCODE_SLE_SUCCESS) {
                 osal_printk("[mine slave] uart->sle send failed:%x\r\n", send_ret);
