@@ -36,6 +36,17 @@ static sle_connection_callbacks_t g_mine_conn_cbks = {0};
 static ssapc_callbacks_t g_mine_ssapc_cbks = {0};
 
 /**
+ * @brief 查询 Slave 侧链路连接状态。
+ *
+ * @return true  当前存在可用连接。
+ * @return false 当前未连接。
+ */
+bool mine_sle_uart_slave_is_connected(void)
+{
+    return g_mine_peer_connected;
+}
+
+/**
  * @brief 判断广播负载中是否包含目标设备名。
  *
  * @param data     广播负载数据。

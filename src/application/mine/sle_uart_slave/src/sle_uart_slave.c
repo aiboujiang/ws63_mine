@@ -141,15 +141,18 @@ const char *mine_slave_uart_bus_name(uint8_t bus)
 }
 
 /**
- * @brief 将 UART2 接收字节转为可读文本并输出日志。
+ * @brief 将 UART 接收字节转为可读文本并输出日志。
  *
  * 仅展示前 MINE_UART_RX_LOG_SHOW_MAX_BYTES 字节，避免超长帧刷屏；
  * 可打印 ASCII 直接输出，\r/\n/\t 使用转义字符显示，其余字节以 '.' 占位。
  *
- * @param buffer UART2 接收缓冲区。
- * @param length 接收字节长度。
+ * @param bus            数据来源 UART 总线。
+ * @param buffer         接收缓冲区。
+ * @param length         接收字节长度。
+ * @param peer_connected 当前 SLE 连接状态。
  */
-static void mine_sle_uart_slave_dump_uart2_rx(const uint8_t *buffer, uint16_t length)
+static void mine_sle_uart_slave_dump_uart_rx(uart_bus_t bus, const uint8_t *buffer,
+    uint16_t length, bool peer_connected)
 {
     char log_text[MINE_UART_RX_LOG_TEXT_MAX_LEN] = {0};
     uint16_t show_len;
@@ -205,15 +208,34 @@ static void mine_sle_uart_slave_dump_uart2_rx(const uint8_t *buffer, uint16_t le
     log_text[pos] = '\0';
 
     if (pos == 0) {
-        osal_printk("[mine slave] UART2 rx len:%u (dump failed)\r\n", (unsigned int)length);
+        if (peer_connected) {
+            osal_printk("[mine slave] %s rx len:%u (dump failed)\r\n",
+                mine_slave_uart_bus_name((uint8_t)bus), (unsigned int)length);
+        } else {
+            osal_printk("[mine slave] %s rx len:%u link:0 (dump failed)\r\n",
+                mine_slave_uart_bus_name((uint8_t)bus), (unsigned int)length);
+        }
         return;
     }
 
     if (truncated) {
-        osal_printk("[mine slave] UART2 rx len:%u show:%u data:%s ...\r\n",
-            (unsigned int)length, (unsigned int)show_len, log_text);
+        if (peer_connected) {
+            osal_printk("[mine slave] %s rx len:%u show:%u data:%s ...\r\n",
+                mine_slave_uart_bus_name((uint8_t)bus), (unsigned int)length,
+                (unsigned int)show_len, log_text);
+        } else {
+            osal_printk("[mine slave] %s rx len:%u link:0 show:%u data:%s ...\r\n",
+                mine_slave_uart_bus_name((uint8_t)bus), (unsigned int)length,
+                (unsigned int)show_len, log_text);
+        }
     } else {
-        osal_printk("[mine slave] UART2 rx len:%u data:%s\r\n", (unsigned int)length, log_text);
+        if (peer_connected) {
+            osal_printk("[mine slave] %s rx len:%u data:%s\r\n",
+                mine_slave_uart_bus_name((uint8_t)bus), (unsigned int)length, log_text);
+        } else {
+            osal_printk("[mine slave] %s rx len:%u link:0 data:%s\r\n",
+                mine_slave_uart_bus_name((uint8_t)bus), (unsigned int)length, log_text);
+        }
     }
 }
 
@@ -257,6 +279,7 @@ static void mine_sle_uart_slave_read_handler_common(uart_bus_t bus, const void *
 {
     mine_sle_uart_slave_msg_t msg = {0};
     void *buffer_copy = NULL;
+    bool peer_connected;
     int write_ret;
 
     unused(error);
@@ -265,9 +288,14 @@ static void mine_sle_uart_slave_read_handler_common(uart_bus_t bus, const void *
         return;
     }
 
-    if (bus == UART_BUS_2) {
-        /* 仅记录从机 UART2 原始接收数据，辅助现场串口数据排查。 */
-        mine_sle_uart_slave_dump_uart2_rx((const uint8_t *)buffer, length);
+    peer_connected = mine_sle_uart_slave_is_connected();
+
+    if ((bus == UART_BUS_2) || (!peer_connected)) {
+        /*
+         * UART2 始终打印可读接收日志；
+         * 未连接时其余 UART 也打印，确保离线阶段可观测。
+         */
+        mine_sle_uart_slave_dump_uart_rx(bus, (const uint8_t *)buffer, length, peer_connected);
     }
 
 #if MINE_LD2402_ENABLE
@@ -288,6 +316,11 @@ static void mine_sle_uart_slave_read_handler_common(uart_bus_t bus, const void *
     }
 #endif
 #endif
+
+    /* 未连接时不入队转发到 SLE，仅保留本地串口接收日志与模块处理。 */
+    if (!peer_connected) {
+        return;
+    }
 
     buffer_copy = osal_vmalloc(length);
     if (buffer_copy == NULL) {

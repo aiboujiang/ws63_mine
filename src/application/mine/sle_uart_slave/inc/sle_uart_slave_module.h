@@ -83,6 +83,14 @@ bool mine_slave_uart_bus_enabled(uart_bus_t bus);
 const char *mine_slave_uart_bus_name(uint8_t bus);
 
 /**
+ * @brief 查询 Slave 当前是否已建立 SLE 连接。
+ *
+ * @return true  已连接。
+ * @return false 未连接。
+ */
+bool mine_sle_uart_slave_is_connected(void);
+
+/**
  * @brief 向所有已启用 UART 总线广播写入数据。
  *
  * @param data 待发送数据指针。
