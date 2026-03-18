@@ -209,6 +209,14 @@ extern "C" {
 #define MINE_ZW101_DEBUG_UART_BUS MINE_UART0_BUS
 
 /**
+ * @brief ZW101 原始 UART2 数据透传开关，1=透传，0=仅上报状态文本。
+ *
+ * 默认关闭：ZW101 协议为二进制帧，直接透传到主机会出现乱码；
+ * 关闭后仅保留例如 [ZW101]VERIFYING / [ZW101]VERIFY SUCCESS 的可读上报。
+ */
+#define MINE_ZW101_RAW_UPLINK_ENABLE 0
+
+/**
  * @brief UART 与 SLE 之间转发的数据结构。
  *
  * @param value     数据缓冲区指针。

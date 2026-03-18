@@ -459,6 +459,16 @@ static void mine_sle_uart_slave_read_handler_common(uart_bus_t bus, const void *
         return;
     }
 #endif
+
+#if (MINE_ZW101_RAW_UPLINK_ENABLE == 0)
+    /*
+     * ZW101 模式默认不透传 UART2 原始二进制帧，避免主机出现乱码。
+     * 可读状态文本由 mine_slave_forward_zw101_status_to_host 单独上报。
+     */
+    if (bus == MINE_ZW101_UART_BUS) {
+        return;
+    }
+#endif
 #endif
 
     /* 未连接时不入队转发到 SLE，仅保留本地串口接收日志与模块处理。 */
