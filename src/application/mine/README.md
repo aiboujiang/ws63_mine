@@ -1,6 +1,6 @@
 # Mine 应用说明
 
-本目录包含 mine 自定义应用，核心是基于 SLE 的主从 UART 双向透传，并在从机侧按模块化方式挂载外设业务（LD2402、ZW101）。
+本目录包含 mine 自定义应用，核心是基于 SLE 的主从 UART 双向透传，并在从机侧按模块化方式挂载外设业务（Camera、LD2402、ZW101）。
 
 ## 1. 功能概览
 
@@ -10,7 +10,7 @@
 2. `sle_uart_slave`（从机，SLE Client）：
    - 负责扫描、连接、订阅主机服务。
    - 将从机 UART 数据转发到主机。
-   - 可选挂载 LD2402 雷达与 ZW101 指纹业务模块。
+   - 可选挂载 Camera、LD2402 雷达与 ZW101 指纹业务模块。
 
 ## 2. 目录结构
 
@@ -58,14 +58,17 @@ python3 build.py menuconfig
    - Property UUID：`0xBCDE`
 2. UART 参数
    - `UART0`：主链路调试与透传（默认调试口）。
-   - `UART2`：默认用于外挂模块（LD2402/ZW101）。
+   - `UART2`：默认用于外挂模块（Camera/LD2402/ZW101）。
    - 默认使能掩码：`UART0 + UART2`。
 3. 从机业务默认开关（见 `sle_uart_slave/inc/sle_uart_slave.h`）
-   - `MINE_UART2_MODE_NORMAL_ENABLE = 0`
+   - `MINE_UART2_MODE_CAMERA_ENABLE = 0`
    - `MINE_UART2_MODE_LD2402_ENABLE = 1`
    - `MINE_UART2_MODE_ZW101_ENABLE = 0`
    - 三者必须三选一（编译期互斥校验）。
-   - `MINE_LD2402_ENABLE` / `MINE_ZW101_ENABLE` 由上述 UART2 模式自动推导。
+   - `MINE_CAMERA_ENABLE` / `MINE_LD2402_ENABLE` / `MINE_ZW101_ENABLE` 由上述 UART2 模式自动推导。
+   - `MINE_CAMERA_UART_BUS = UART2`
+   - `MINE_CAMERA_DEBUG_CMD_ENABLE = 1`
+   - `MINE_CAMERA_DEBUG_UART_BUS = UART0`
    - `MINE_LD2402_UART_BUS = UART2`
    - `MINE_LD2402_DEBUG_CMD_ENABLE = 1`
    - `MINE_LD2402_DEBUG_UART_BUS = UART0`
@@ -75,13 +78,34 @@ python3 build.py menuconfig
 从机 `sle_uart_slave.c` 主循环仅负责调度，业务能力下沉到独立模块：
 
 1. UART 回调收到数据后，先按设备总线喂入对应协议解析器。
-2. 若命中调试命令前缀（例如 LD2402 的 `LD`），本地消费，不透传。
+2. 若命中调试命令前缀（例如 Camera 的 `CAM`、LD2402 的 `LD`），本地消费，不透传。
 3. 非命令数据继续走原有 UART <-> SLE 双向透传链路。
 4. 主循环周期调用各业务模块 `process`，串行执行调试命令，避免并发访问协议上下文。
 
-## 6. LD2402 雷达模块（从机）
+## 6. Camera 模式（从机）
 
 ### 6.1 模块说明
+
+1. 适用场景：UART2 连接摄像头串口时，作为 Camera 控制与数据采集通道。
+2. 模式开关：`MINE_UART2_MODE_CAMERA_ENABLE = 1`（其余两个模式必须为 `0`）。
+3. 调试命令输入总线：`MINE_CAMERA_DEBUG_UART_BUS`（默认 `UART0`）。
+
+### 6.2 Camera 串口调试命令
+
+在 `MINE_CAMERA_DEBUG_UART_BUS` 输入文本命令并回车：
+
+```text
+CAM START
+```
+
+命令行为：
+
+1. 识别到 `CAM START` 后，从机会向 `UART2` 输出：`start collect`。
+2. 该命令由从机本地消费，不透传到 Host。
+
+## 7. LD2402 雷达模块（从机）
+
+### 7.1 模块说明
 
 1. 协议封装目录：`application/mine/common/LD2402`
 2. 业务接入目录：`application/mine/sle_uart_slave/src/sle_uart_slave_ld2402.c`
@@ -93,7 +117,7 @@ python3 build.py menuconfig
    - 电源干扰参数查询。
    - `0x003F` 刷新后保存流程（`SAVE3F`）。
 
-### 6.2 LD2402 串口调试命令
+### 7.2 LD2402 串口调试命令
 
 在 `MINE_LD2402_DEBUG_UART_BUS` 对应串口输入文本命令并回车。命令前缀支持 `LD` 或 `LD2402`，不区分大小写。
 
@@ -123,7 +147,7 @@ LD SAVE3F
 4. `LD ALARM`：查询自动门限干扰状态与门位图。
 5. `LD SAVE3F`：执行 `0x003F` 读后回写，再执行保存。
 
-### 6.3 推荐联调顺序
+### 7.3 推荐联调顺序
 
 1. `LD STATUS`
 2. `LD VERSION`
@@ -136,7 +160,7 @@ LD SAVE3F
 9. `LD SAVE`
 10. `LD MODE NORMAL`
 
-## 7. ZW101 指纹模块（从机）
+## 8. ZW101 指纹模块（从机）
 
 1. 协议封装目录：`application/mine/common/ZW101`
 2. 业务接入目录：`application/mine/sle_uart_slave/src/sle_uart_slave_zw101.c`
@@ -165,7 +189,7 @@ LD SAVE3F
    - 自动验证会输出关键阶段日志（合法性/采图/检索）与匹配 `id/score`。
    - 状态文本通过 `mine_zw101_get_status` 对 OLED 侧输出，便于现场联调。
 
-## 8. WK2114 UART2 扩展模块（可选）
+## 9. WK2114 UART2 扩展模块（可选）
 
 1. 目录：`application/mine/wk2114_uart2_ext`
 2. 功能：使用 `UART2` 作为 WK2114 主口，将单路主 UART 扩展为 4 路子 UART。
@@ -177,7 +201,7 @@ LD SAVE3F
    - 统计信息：RX/TX 最近长度与累计次数。
    - 通道信息：当前子串口号与波特率（例如 `CH:U1 B:115200`）。
 
-## 9. 快速联调步骤
+## 10. 快速联调步骤
 
 
 
@@ -188,7 +212,7 @@ LD SAVE3F
    - 从机串口发数据，观察主机串口输出。
 4. 若启用 LD2402，在从机调试串口执行 `LD HELP` 验证命令通道是否正常。
 
-## 10. 常见问题
+## 11. 常见问题
 
 1. 现象：`LD` 命令无响应。
    - 排查 `MINE_LD2402_DEBUG_CMD_ENABLE` 与 `MINE_LD2402_DEBUG_UART_BUS`。
@@ -196,12 +220,12 @@ LD SAVE3F
 2. 现象：`RADAR:NOT READY`。
    - 排查 LD2402 所在 UART 引脚、波特率、供电与连线。
 3. 现象：编译报错提示 UART2 mode must be mutually exclusive。
-   - `MINE_UART2_MODE_NORMAL_ENABLE` / `MINE_UART2_MODE_LD2402_ENABLE` / `MINE_UART2_MODE_ZW101_ENABLE`
+   - `MINE_UART2_MODE_CAMERA_ENABLE` / `MINE_UART2_MODE_LD2402_ENABLE` / `MINE_UART2_MODE_ZW101_ENABLE`
      必须且只能有一个为 `1`。
 4. 现象：`FP STATUS`、`FP VERIFY` 等短命令无回显。
    - 已兼容“无 CRLF 结尾”的命令帧；若仍无响应，确认命令前缀为 `FP` 或 `ZW101`。
 
-## 11. README 维护约定
+## 12. README 维护约定
 
 1. 每次需求完成后（代码修改 + 编译验证），必须同步更新本 `README`。
 2. 更新至少覆盖以下内容：
@@ -211,7 +235,14 @@ LD SAVE3F
    - 验证结果（编译命令与是否通过）。
 3. 变更记录使用时间倒序，便于追溯。
 
-## 12. 变更记录
+## 13. 变更记录
+
+### 2026-03-18
+
+1. UART2 模式统一为三选一：`camera / zw101 / ld2402`。
+2. 新增 Camera 调试命令：`CAM START`（输入后 UART2 输出 `start collect`）。
+3. 从机上行标签新增 Camera 模式标识：`[CAMERA]`。
+4. 编译验证：在 `src` 目录执行 `python3 build.py -c ws63-liteos-app`，结果通过。
 
 ### 2026-03-17
 

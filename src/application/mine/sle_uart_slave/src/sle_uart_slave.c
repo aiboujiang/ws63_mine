@@ -8,6 +8,7 @@
 #include "sle_uart_slave_module.h"
 #include "sle_uart_slave_zw101.h"
 
+#include <ctype.h>
 #include <stdbool.h>
 #include <stdarg.h>
 #include <string.h>
@@ -54,6 +55,11 @@
 
 /* ZW101 状态上报最大文本长度（不含 SSAPC 侧自动追加的数据标签）。 */
 #define MINE_ZW101_STATUS_FORWARD_TEXT_LEN 64
+
+/* Camera 调试命令缓存长度。 */
+#define MINE_CAMERA_DEBUG_LINE_MAX 64
+/* Camera START 命令写回 UART2 的文本。 */
+#define MINE_CAMERA_START_COLLECT_TEXT "start collect\r\n"
 
 /* 多路 UART 接收缓冲区（按 UART0/1/2 索引）。 */
 static uint8_t g_mine_uart_rx_buffer[MINE_UART_BUS_COUNT][MINE_UART_RX_BUFFER_SIZE] = {0};
@@ -162,6 +168,151 @@ const char *mine_slave_uart_bus_name(uint8_t bus)
     }
     return "UART?";
 }
+
+#if MINE_CAMERA_ENABLE
+/**
+ * @brief 将字符串原地转换为大写，便于命令匹配不区分大小写。
+ *
+ * @param text 待转换字符串。
+ */
+static void mine_camera_to_upper(char *text)
+{
+    uint16_t idx;
+
+    if (text == NULL) {
+        return;
+    }
+
+    for (idx = 0; text[idx] != '\0'; idx++) {
+        text[idx] = (char)toupper((unsigned char)text[idx]);
+    }
+}
+
+/**
+ * @brief 从串口输入中提取一行可解析命令文本并做首尾空白裁剪。
+ *
+ * @param data    输入字节流。
+ * @param len     输入长度。
+ * @param out     输出命令文本。
+ * @param out_len 输出缓存长度。
+ * @return true  提取成功。
+ * @return false 不是有效命令行。
+ */
+static bool mine_camera_extract_debug_line(const uint8_t *data, uint16_t len, char *out, uint16_t out_len)
+{
+    uint16_t idx;
+    uint16_t pos = 0;
+    uint16_t start = 0;
+    uint16_t end;
+
+    if ((data == NULL) || (len == 0U) || (out == NULL) || (out_len < 2U)) {
+        return false;
+    }
+
+    for (idx = 0; idx < len; idx++) {
+        uint8_t ch = data[idx];
+
+        if ((ch == '\r') || (ch == '\n')) {
+            continue;
+        }
+
+        if ((!isprint((int)ch)) && (ch != ' ') && (ch != '\t')) {
+            return false;
+        }
+
+        if (pos >= (uint16_t)(out_len - 1U)) {
+            return false;
+        }
+
+        out[pos++] = (char)ch;
+    }
+    out[pos] = '\0';
+
+    if (pos == 0U) {
+        return false;
+    }
+
+    while ((start < pos) && ((out[start] == ' ') || (out[start] == '\t'))) {
+        start++;
+    }
+    if (start >= pos) {
+        return false;
+    }
+
+    end = pos;
+    while ((end > start) && ((out[end - 1U] == ' ') || (out[end - 1U] == '\t'))) {
+        end--;
+    }
+
+    if (start > 0U) {
+        (void)memmove_s(out, out_len, &out[start], (size_t)(end - start));
+    }
+    out[end - start] = '\0';
+    return true;
+}
+
+/**
+ * @brief 尝试处理 Camera 调试命令。
+ *
+ * 支持命令：
+ * - CAM START：向 UART2 输出 "start collect"，启动人脸数据采集。
+ *
+ * @param bus  数据来源 UART 总线。
+ * @param data 输入字节流。
+ * @param len  输入长度。
+ * @return true  命令已消费，不再继续透传。
+ * @return false 非 Camera 调试命令。
+ */
+static bool mine_camera_try_handle_debug_cmd(uart_bus_t bus, const uint8_t *data, uint16_t len)
+{
+#if MINE_CAMERA_DEBUG_CMD_ENABLE
+    char cmd_line[MINE_CAMERA_DEBUG_LINE_MAX] = {0};
+    int32_t write_ret;
+
+    if (bus != MINE_CAMERA_DEBUG_UART_BUS) {
+        return false;
+    }
+
+    if (!mine_camera_extract_debug_line(data, len, cmd_line, sizeof(cmd_line))) {
+        return false;
+    }
+
+    mine_camera_to_upper(cmd_line);
+    if (strncmp(cmd_line, "CAM", 3U) != 0) {
+        return false;
+    }
+
+    if (strcmp(cmd_line, "CAM START") == 0) {
+        write_ret = uapi_uart_write(MINE_CAMERA_UART_BUS,
+            (const uint8_t *)MINE_CAMERA_START_COLLECT_TEXT,
+            (uint16_t)(sizeof(MINE_CAMERA_START_COLLECT_TEXT) - 1U), 0);
+        if (write_ret < 0) {
+            osal_printk("[mine cam] CAM START write uart2 failed, ret=%d\r\n", (int)write_ret);
+            mine_slave_oled_push_state("CAM START FAIL");
+        } else {
+            osal_printk("[mine cam] CAM START -> uart2: %s", MINE_CAMERA_START_COLLECT_TEXT);
+            mine_slave_oled_push_state("CAM START");
+        }
+        return true;
+    }
+
+    if (strcmp(cmd_line, "CAM HELP") == 0) {
+        osal_printk("[mine cam] cmd help:\r\n");
+        osal_printk("[mine cam]   CAM START\r\n");
+        return true;
+    }
+
+    osal_printk("[mine cam] unknown cmd:%s\r\n", cmd_line);
+    mine_slave_oled_push_state("CAM CMD ?");
+    return true;
+#else
+    (void)bus;
+    (void)data;
+    (void)len;
+    return false;
+#endif
+}
+#endif
 
 #if MINE_ZW101_ENABLE
 /**
@@ -471,6 +622,13 @@ static void mine_sle_uart_slave_read_handler_common(uart_bus_t bus, const void *
 #endif
 #endif
 
+#if MINE_CAMERA_ENABLE
+    /* Camera 命令由本地解析消费，避免把命令文本继续透传到 Host。 */
+    if (mine_camera_try_handle_debug_cmd(bus, (const uint8_t *)buffer, length)) {
+        return;
+    }
+#endif
+
     /* 未连接时不入队转发到 SLE，仅保留本地串口接收日志与模块处理。 */
     if (!peer_connected) {
         return;
@@ -661,8 +819,8 @@ static void *mine_sle_uart_slave_task(const char *arg)
     mine_sle_uart_slave_uart_init();
     /* 启动阶段先上报 UART2 角色，便于确认三选一互斥配置是否生效。 */
     osal_printk("[mine slave] uart2 mode:%s\r\n", MINE_UART2_MODE_NAME);
-#if MINE_UART2_PASSTHROUGH_ENABLE
-    mine_slave_oled_push_state("UART2 NORMAL");
+#if MINE_CAMERA_ENABLE
+    mine_slave_oled_push_state("UART2 CAMERA");
 #endif
 #if MINE_LD2402_ENABLE
     if (mine_ld2402_init(MINE_LD2402_UART_BUS)) {

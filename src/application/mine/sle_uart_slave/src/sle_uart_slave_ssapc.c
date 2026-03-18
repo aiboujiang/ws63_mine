@@ -21,7 +21,8 @@
 /* UART2 透传到 Host 前的数据标签。 */
 #define MINE_UART2_TAG_ZW101 "[ZW101]"
 #define MINE_UART2_TAG_LD2402 "[LD2402]"
-#define MINE_UART2_TAG_NORMAL "[UART2]"
+#define MINE_UART2_TAG_CAMERA "[CAMERA]"
+#define MINE_UART2_TAG_UART2 "[UART2]"
 
 static volatile uint16_t g_mine_conn_id = 0;
 static volatile bool g_mine_peer_connected = false;
@@ -51,8 +52,10 @@ static const char *mine_get_uart2_mode_tag(void)
     return MINE_UART2_TAG_ZW101;
 #elif MINE_LD2402_ENABLE
     return MINE_UART2_TAG_LD2402;
+#elif MINE_CAMERA_ENABLE
+    return MINE_UART2_TAG_CAMERA;
 #else
-    return MINE_UART2_TAG_NORMAL;
+    return MINE_UART2_TAG_UART2;
 #endif
 }
 
