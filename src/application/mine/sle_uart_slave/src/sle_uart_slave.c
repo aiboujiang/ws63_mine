@@ -434,7 +434,10 @@ static void mine_sle_uart_slave_dump_uart_rx(uart_bus_t bus, const uint8_t *buff
     uint16_t idx;
     uint16_t pos = 0;
     bool truncated = false;
+#if MINE_ZW101_ENABLE
+    /* 仅 ZW101 模式下需要根据可打印字符判定是否进行二进制日志节流。 */
     bool has_printable_ascii = false;
+#endif
     uint8_t ch;
 
     if ((buffer == NULL) || (length == 0)) {
@@ -455,7 +458,9 @@ static void mine_sle_uart_slave_dump_uart_rx(uart_bus_t bus, const uint8_t *buff
         ch = buffer[idx];
         if ((ch >= 0x20U) && (ch <= 0x7EU)) {
             /* 直接显示可打印 ASCII，便于观察纯文本协议内容。 */
+#if MINE_ZW101_ENABLE
             has_printable_ascii = true;
+#endif
             log_text[pos++] = (char)ch;
             continue;
         }
