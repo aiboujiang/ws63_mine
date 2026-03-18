@@ -52,6 +52,9 @@
 /* ZW101 二进制接收日志最小打印间隔（毫秒），用于抑制高频刷屏。 */
 #define MINE_ZW101_BINARY_LOG_INTERVAL_MS 1000
 
+/* ZW101 状态上报最大文本长度（不含 SSAPC 侧自动追加的数据标签）。 */
+#define MINE_ZW101_STATUS_FORWARD_TEXT_LEN 64
+
 /* 多路 UART 接收缓冲区（按 UART0/1/2 索引）。 */
 static uint8_t g_mine_uart_rx_buffer[MINE_UART_BUS_COUNT][MINE_UART_RX_BUFFER_SIZE] = {0};
 
@@ -159,6 +162,107 @@ const char *mine_slave_uart_bus_name(uint8_t bus)
     }
     return "UART?";
 }
+
+#if MINE_ZW101_ENABLE
+/**
+ * @brief 提取状态文本主体，去掉模块前缀（例如 "ZW101:"）。
+ *
+ * @param status_text 原始状态文本。
+ * @return const char* 去前缀后的主体文本。
+ */
+static const char *mine_slave_status_body(const char *status_text)
+{
+    const char *body;
+
+    if (status_text == NULL) {
+        return NULL;
+    }
+
+    body = strchr(status_text, ':');
+    if ((body != NULL) && (*(body + 1) != '\0')) {
+        return (body + 1);
+    }
+
+    return status_text;
+}
+
+/**
+ * @brief 将 ZW101 内部状态归一化为主机可读文本。
+ *
+ * 示例：
+ * - ZW101:VERIFY   -> VERIFYING
+ * - ZW101:ENR OK 1 -> ENROLL SUCCESS
+ * - ZW101:ID1 S92  -> VERIFY SUCCESS ID1 S92
+ *
+ * @param raw_status ZW101 原始状态文本。
+ * @param out_text   输出缓冲区。
+ * @param out_len    输出缓冲区长度。
+ * @return true  转换成功。
+ * @return false 输入非法或转换失败。
+ */
+static bool mine_slave_build_zw101_forward_text(const char *raw_status, char *out_text, uint16_t out_len)
+{
+    const char *body;
+
+    if ((raw_status == NULL) || (out_text == NULL) || (out_len == 0U)) {
+        return false;
+    }
+
+    body = mine_slave_status_body(raw_status);
+    if ((body == NULL) || (*body == '\0')) {
+        return false;
+    }
+
+    if (strncmp(body, "ENR OK", 6U) == 0) {
+        return (snprintf_s(out_text, out_len, out_len - 1, "ENROLL SUCCESS") > 0);
+    }
+
+    if ((strcmp(body, "VERIFY") == 0) || (strncmp(body, "VFY", 3U) == 0)) {
+        return (snprintf_s(out_text, out_len, out_len - 1, "VERIFYING") > 0);
+    }
+
+    if ((strncmp(body, "ENR ", 4U) == 0) || (strncmp(body, "ENR REQ", 7U) == 0) || (strcmp(body, "ENR SEND") == 0)) {
+        return (snprintf_s(out_text, out_len, out_len - 1, "ENROLLING") > 0);
+    }
+
+    if (strncmp(body, "ID", 2U) == 0) {
+        return (snprintf_s(out_text, out_len, out_len - 1, "VERIFY SUCCESS %s", body) > 0);
+    }
+
+    if (strcmp(body, "NO MATCH") == 0) {
+        return (snprintf_s(out_text, out_len, out_len - 1, "VERIFY FAIL NO MATCH") > 0);
+    }
+
+    return (snprintf_s(out_text, out_len, out_len - 1, "%s", body) > 0);
+}
+
+/**
+ * @brief 将 ZW101 状态文本通过现有 UART2->SLE 通道上报给主机。
+ *
+ * 复用统一发送接口，标签由 SSAPC 上行层自动补齐为 [ZW101]。
+ *
+ * @param status_text ZW101 原始状态文本。
+ */
+static void mine_slave_forward_zw101_status_to_host(const char *status_text)
+{
+    mine_sle_uart_slave_msg_t msg = {0};
+    char forward_text[MINE_ZW101_STATUS_FORWARD_TEXT_LEN] = {0};
+
+    if (!mine_slave_build_zw101_forward_text(status_text, forward_text, sizeof(forward_text))) {
+        return;
+    }
+
+    msg.uart_bus = (uint8_t)MINE_ZW101_UART_BUS;
+    msg.value = (uint8_t *)forward_text;
+    msg.value_len = (uint16_t)strlen(forward_text);
+    if (msg.value_len == 0U) {
+        return;
+    }
+
+    /* 连接未就绪时允许丢弃，避免阻塞主流程。 */
+    (void)mine_sle_uart_slave_send_to_host(&msg);
+}
+#endif
 
 /**
  * @brief 将 UART 接收字节转为可读文本并输出日志。
@@ -591,6 +695,7 @@ static void *mine_sle_uart_slave_task(const char *arg)
         mine_zw101_process();
         if (mine_zw101_get_status(zw101_status, sizeof(zw101_status))) {
             mine_slave_oled_push_state(zw101_status);
+            mine_slave_forward_zw101_status_to_host(zw101_status);
         }
 #endif
         mine_slave_oled_flush_pending();

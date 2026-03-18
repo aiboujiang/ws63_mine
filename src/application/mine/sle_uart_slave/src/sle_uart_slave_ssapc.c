@@ -18,6 +18,11 @@
 
 #define osal_printk mine_slave_log
 
+/* UART2 透传到 Host 前的数据标签。 */
+#define MINE_UART2_TAG_ZW101 "[ZW101]"
+#define MINE_UART2_TAG_LD2402 "[LD2402]"
+#define MINE_UART2_TAG_NORMAL "[UART2]"
+
 static volatile uint16_t g_mine_conn_id = 0;
 static volatile bool g_mine_peer_connected = false;
 static volatile bool g_mine_property_ready = false;
@@ -34,6 +39,86 @@ static const uint8_t g_mine_slave_fallback_sle_mac[MINE_SLE_MAC_ADDR_LEN] = MINE
 static sle_announce_seek_callbacks_t g_mine_seek_cbks = {0};
 static sle_connection_callbacks_t g_mine_conn_cbks = {0};
 static ssapc_callbacks_t g_mine_ssapc_cbks = {0};
+
+/**
+ * @brief 获取 UART2 当前业务模式对应的标签文本。
+ *
+ * @return const char* 标签字符串（例如 [ZW101]）。
+ */
+static const char *mine_get_uart2_mode_tag(void)
+{
+#if MINE_ZW101_ENABLE
+    return MINE_UART2_TAG_ZW101;
+#elif MINE_LD2402_ENABLE
+    return MINE_UART2_TAG_LD2402;
+#else
+    return MINE_UART2_TAG_NORMAL;
+#endif
+}
+
+/**
+ * @brief 为 UART2 上行数据拼接标签前缀。
+ *
+ * 仅 UART2 走标签拼接，其他总线保持原始负载，确保历史行为兼容。
+ *
+ * @param uart_bus   当前数据来源 UART 总线。
+ * @param src        原始数据指针。
+ * @param src_len    原始数据长度。
+ * @param out_data   输出发送数据指针。
+ * @param out_len    输出发送数据长度。
+ * @return errcode_t
+ * @retval ERRCODE_SLE_SUCCESS 拼接成功或无需拼接。
+ * @retval ERRCODE_SLE_FAIL    参数非法/内存不足/拼接失败。
+ */
+static errcode_t mine_prepare_tagged_uplink_payload(uint8_t uart_bus, const uint8_t *src, uint16_t src_len,
+    uint8_t **out_data, uint16_t *out_len)
+{
+    const char *tag = NULL;
+    uint16_t tag_len;
+    uint32_t total_len;
+    uint8_t *tagged = NULL;
+
+    if ((src == NULL) || (src_len == 0) || (out_data == NULL) || (out_len == NULL)) {
+        return ERRCODE_SLE_FAIL;
+    }
+
+    *out_data = (uint8_t *)src;
+    *out_len = src_len;
+
+    if (uart_bus != MINE_UART2_BUS) {
+        return ERRCODE_SLE_SUCCESS;
+    }
+
+    tag = mine_get_uart2_mode_tag();
+    tag_len = (uint16_t)strlen(tag);
+    if (tag_len == 0U) {
+        return ERRCODE_SLE_SUCCESS;
+    }
+
+    total_len = (uint32_t)tag_len + (uint32_t)src_len;
+    if (total_len > 0xFFFFU) {
+        return ERRCODE_SLE_FAIL;
+    }
+
+    tagged = osal_vmalloc((uint16_t)total_len);
+    if (tagged == NULL) {
+        return ERRCODE_SLE_FAIL;
+    }
+
+    if (memcpy_s(tagged, (uint16_t)total_len, tag, tag_len) != EOK) {
+        osal_vfree(tagged);
+        return ERRCODE_SLE_FAIL;
+    }
+
+    if (memcpy_s(tagged + tag_len, (uint16_t)total_len - tag_len, src, src_len) != EOK) {
+        osal_vfree(tagged);
+        return ERRCODE_SLE_FAIL;
+    }
+
+    *out_data = tagged;
+    *out_len = (uint16_t)total_len;
+    return ERRCODE_SLE_SUCCESS;
+}
 
 /**
  * @brief 查询 Slave 侧链路连接状态。
@@ -175,6 +260,9 @@ errcode_t mine_sle_uart_slave_send_to_host(const mine_sle_uart_slave_msg_t *msg)
     uint16_t conn_id_snapshot;
     uint16_t property_handle_snapshot;
     uint8_t uart_bus_snapshot;
+    uint8_t *send_payload;
+    uint16_t send_payload_len;
+    bool tagged_payload_allocated;
     bool peer_connected_snapshot;
     bool property_ready_snapshot;
     errcode_t ret;
@@ -190,6 +278,9 @@ errcode_t mine_sle_uart_slave_send_to_host(const mine_sle_uart_slave_msg_t *msg)
     conn_id_snapshot = g_mine_conn_id;
     property_handle_snapshot = g_mine_write_param.handle;
     uart_bus_snapshot = msg->uart_bus;
+    send_payload = msg->value;
+    send_payload_len = msg->value_len;
+    tagged_payload_allocated = false;
 
     if ((!peer_connected_snapshot) || (!property_ready_snapshot) || (property_handle_snapshot == 0)) {
         osal_printk("[mine slave] drop %s data, link:%u prop:%u cid:%u handle:%u\r\n",
@@ -200,17 +291,29 @@ errcode_t mine_sle_uart_slave_send_to_host(const mine_sle_uart_slave_msg_t *msg)
         return ERRCODE_SLE_FAIL;
     }
 
-    while (offset < msg->value_len) {
-        chunk_len = (uint16_t)((msg->value_len - offset) > MINE_SLE_SAFE_CHUNK_LEN ?
-            MINE_SLE_SAFE_CHUNK_LEN : (msg->value_len - offset));
+    ret = mine_prepare_tagged_uplink_payload(uart_bus_snapshot, msg->value, msg->value_len,
+        &send_payload, &send_payload_len);
+    if (ret != ERRCODE_SLE_SUCCESS) {
+        osal_printk("[mine slave] build tagged payload failed\r\n");
+        mine_slave_oled_push_state("SEND TAG FAIL");
+        return ret;
+    }
+    tagged_payload_allocated = (send_payload != msg->value);
 
-        g_mine_write_param.data = (uint8_t *)(msg->value + offset);
+    while (offset < send_payload_len) {
+        chunk_len = (uint16_t)((send_payload_len - offset) > MINE_SLE_SAFE_CHUNK_LEN ?
+            MINE_SLE_SAFE_CHUNK_LEN : (send_payload_len - offset));
+
+        g_mine_write_param.data = (uint8_t *)(send_payload + offset);
         g_mine_write_param.data_len = chunk_len;
 
         ret = ssapc_write_cmd(0, conn_id_snapshot, &g_mine_write_param);
         if (ret != ERRCODE_SLE_SUCCESS) {
             osal_printk("[mine slave] write cmd failed, ret=%x\r\n", ret);
             mine_slave_oled_push_state("SEND FAIL");
+            if (tagged_payload_allocated) {
+                osal_vfree(send_payload);
+            }
             return ret;
         }
 
@@ -221,13 +324,17 @@ errcode_t mine_sle_uart_slave_send_to_host(const mine_sle_uart_slave_msg_t *msg)
     /* ZW101 二进制上报频率高，默认抑制逐包写出日志，避免刷屏。 */
     if (uart_bus_snapshot != MINE_ZW101_UART_BUS) {
         osal_printk("[mine slave] %s->sle write len:%u\r\n",
-            mine_slave_uart_bus_name(uart_bus_snapshot), msg->value_len);
+            mine_slave_uart_bus_name(uart_bus_snapshot), send_payload_len);
     }
 #else
     osal_printk("[mine slave] %s->sle write len:%u\r\n",
-        mine_slave_uart_bus_name(uart_bus_snapshot), msg->value_len);
+        mine_slave_uart_bus_name(uart_bus_snapshot), send_payload_len);
 #endif
-    mine_slave_oled_push_data_event(uart_bus_snapshot, "UART TX", msg->value, msg->value_len);
+    mine_slave_oled_push_data_event(uart_bus_snapshot, "UART TX", send_payload, send_payload_len);
+
+    if (tagged_payload_allocated) {
+        osal_vfree(send_payload);
+    }
 
     return ERRCODE_SLE_SUCCESS;
 }
