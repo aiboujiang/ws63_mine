@@ -20,6 +20,14 @@
 #define UART_RX_CONDITION_MASK_IDLE 1
 #endif
 
+#ifndef UART_RX_CONDITION_MASK_SUFFICIENT_DATA
+#define UART_RX_CONDITION_MASK_SUFFICIENT_DATA 2
+#endif
+
+#ifndef UART_RX_CONDITION_MASK_FULL
+#define UART_RX_CONDITION_MASK_FULL 4
+#endif
+
 #ifndef PRINT
 #define PRINT(fmt, arg...)
 #endif
@@ -148,6 +156,57 @@ static bool mine_wk2114_host_resp_fifo_pop(uint8_t *byte)
         (uint16_t)((g_mine_wk2114_host_resp_tail + 1U) % MINE_WK2114_HOST_RESP_FIFO_SIZE);
     mine_wk2114_irq_unlock(irq_status);
     return true;
+}
+
+/**
+ * @brief 清理 UART2 硬件 RX FIFO 的历史字节，避免旧数据干扰当前命令回读。
+ *
+ * @note
+ * 仅在发送新命令前调用；若无数据可读会立即退出，不阻塞主流程。
+ */
+static void mine_wk2114_host_hw_rx_drain(void)
+{
+    uint8_t drain_byte = 0;
+    uint16_t drain_count = 0;
+
+    while (drain_count < MINE_WK2114_HOST_RESP_FIFO_SIZE) {
+        if (uapi_uart_read(MINE_WK2114_HOST_UART_BUS, &drain_byte, 1, 0) <= 0) {
+            break;
+        }
+        drain_count++;
+    }
+
+    if (drain_count > 0U) {
+        osal_printk("[mine wk2114] drain stale host rx=%u\r\n", (unsigned int)drain_count);
+    }
+}
+
+/**
+ * @brief 获取主口回读字节：优先软件 FIFO，失败后轮询硬件 FIFO 兜底。
+ *
+ * @param byte 输出字节。
+ * @return true  获取成功。
+ * @return false 暂无数据。
+ */
+static bool mine_wk2114_host_resp_try_fetch(uint8_t *byte)
+{
+    if (byte == NULL) {
+        return false;
+    }
+
+    if (mine_wk2114_host_resp_fifo_pop(byte)) {
+        return true;
+    }
+
+    /*
+     * 某些场景下中断回调可能延后触发，轮询硬件 FIFO 作为兜底路径。
+     * 这样即使回调未及时入队，也能在读寄存器窗口内拿到返回值。
+     */
+    if (uapi_uart_read(MINE_WK2114_HOST_UART_BUS, byte, 1, 0) > 0) {
+        return true;
+    }
+
+    return false;
 }
 
 /**
@@ -287,6 +346,7 @@ static errcode_t mine_wk2114_read_addr6(uint8_t addr6, uint8_t *value)
 
     cmd = (uint8_t)(MINE_WK2114_HOST_CMD_READ_REG | (addr6 & 0x3FU));
     mine_wk2114_host_resp_fifo_reset();
+    mine_wk2114_host_hw_rx_drain();
 
     ret = mine_wk2114_send_host_frame(&cmd, 1, "HOST TX RREG");
     if (ret != ERRCODE_SUCC) {
@@ -296,7 +356,7 @@ static errcode_t mine_wk2114_read_addr6(uint8_t addr6, uint8_t *value)
     start_ms = (uint32_t)uapi_systick_get_ms();
     while ((uint32_t)(uapi_systick_get_ms() - start_ms) <= MINE_WK2114_HOST_READ_TIMEOUT_MS) {
         got_new_data = false;
-        while (mine_wk2114_host_resp_fifo_pop(&rx_byte)) {
+        while (mine_wk2114_host_resp_try_fetch(&rx_byte)) {
             /*
              * 读取阶段采用“最后一个字节为准”的策略：
              * - 若总线上存在回显，首字节可能是命令字；
@@ -360,6 +420,32 @@ static errcode_t mine_wk2114_read_addr6_retry(uint8_t addr6, uint8_t retry_max, 
 }
 
 /**
+ * @brief 执行 WK2114 主口自动波特率锁定序列。
+ *
+ * 按手册 9.1 的 0x55 机制实现，并增加多次发送以提升冷启动锁定稳定性。
+ *
+ * @return errcode_t
+ */
+static errcode_t mine_wk2114_send_autobaud_sync_sequence(void)
+{
+    uint8_t sync_byte = MINE_WK2114_HOST_AUTOBAUD_SYNC_BYTE;
+    uint8_t sync_idx;
+    errcode_t ret;
+
+    for (sync_idx = 0; sync_idx < MINE_WK2114_HOST_AUTOBAUD_SYNC_RETRY; sync_idx++) {
+        ret = mine_wk2114_send_host_frame(&sync_byte, 1, "HOST TX SYNC");
+        if (ret != ERRCODE_SUCC) {
+            return ret;
+        }
+        osal_msleep(MINE_WK2114_HOST_AUTOBAUD_SYNC_INTERVAL_MS);
+    }
+
+    /* 给芯片自适应锁定逻辑留出稳定时间，避免首条读命令超时。 */
+    osal_msleep(MINE_WK2114_HOST_AUTOBAUD_LOCK_WAIT_MS);
+    return ERRCODE_SUCC;
+}
+
+/**
  * @brief 执行 WK2114 上电连通性检查。
  *
  * 检查流程基于规格书：
@@ -376,7 +462,6 @@ static errcode_t mine_wk2114_read_addr6_retry(uint8_t addr6, uint8_t retry_max, 
  */
 static errcode_t mine_wk2114_check_link_ready(void)
 {
-    uint8_t sync_byte = MINE_WK2114_HOST_AUTOBAUD_SYNC_BYTE;
     uint8_t gena_origin = 0;
     uint8_t gena_verify = 0;
     uint8_t gena_probe = 0;
@@ -385,15 +470,13 @@ static errcode_t mine_wk2114_check_link_ready(void)
     errcode_t ret;
 
     mine_wk2114_host_resp_fifo_reset();
+    mine_wk2114_host_hw_rx_drain();
 
-    ret = mine_wk2114_send_host_frame(&sync_byte, 1, "HOST TX SYNC");
+    ret = mine_wk2114_send_autobaud_sync_sequence();
     if (ret != ERRCODE_SUCC) {
         mine_wk2114_oled_push_state("WK SYNC FAIL");
         return ret;
     }
-
-    /* 给主口自适应逻辑一个短暂锁定时间，避免首条读命令误判。 */
-    osal_msleep(MINE_WK2114_HOST_AUTOBAUD_LOCK_WAIT_MS);
 
     ret = mine_wk2114_read_addr6_retry(MINE_WK2114_ADDR_GENA, MINE_WK2114_LINK_CHECK_READ_RETRY, &gena_origin);
     if (ret != ERRCODE_SUCC) {
@@ -715,7 +798,11 @@ errcode_t mine_wk2114_uart2_ext_init(void)
     }
 
     ret = uapi_uart_register_rx_callback(MINE_WK2114_HOST_UART_BUS,
-        UART_RX_CONDITION_MASK_IDLE, 1, mine_wk2114_uart_rx_handler);
+        (uart_rx_condition_t)(UART_RX_CONDITION_MASK_FULL |
+        UART_RX_CONDITION_MASK_SUFFICIENT_DATA |
+        UART_RX_CONDITION_MASK_IDLE),
+        1,
+        mine_wk2114_uart_rx_handler);
     if (ret != ERRCODE_SUCC) {
         osal_printk("[mine wk2114] rx callback register failed, ret=%x\r\n", ret);
         mine_wk2114_oled_push_state("UART2 RXCB FAIL");
