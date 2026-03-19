@@ -279,8 +279,8 @@ static void mine_wk2114_uart_diag_report_periodic(void)
  *
  * 复位流程：
  * 1) GPIO9 拉低保持一段时间，触发芯片复位；
- * 2) GPIO9 拉高释放复位；
- * 3) 等待芯片内部状态稳定，再进入 0x55 自适应同步。
+ * 2) 正常模式下 GPIO9 拉高释放复位；
+ * 3) 调试模式下可保持 GPIO9 持续低电平，不再释放。
  *
  * @return errcode_t
  */
@@ -306,6 +306,13 @@ static errcode_t mine_wk2114_hw_reset_chip(void)
     }
 
     osal_msleep(MINE_WK2114_RESET_HOLD_MS);
+
+#if (MINE_WK2114_RESET_FORCE_LOW_ONLY == 1U)
+    /* 调试期间保持 GPIO9 低电平，供外部仪器确认复位脚状态。 */
+    mine_wk2114_log("[mine wk2114] reset pin forced low on gpio9 for debug\r\n");
+    mine_wk2114_oled_push_state("WK RST HOLD LO");
+    return ERRCODE_SUCC;
+#endif
 
     ret = uapi_gpio_set_val(MINE_WK2114_RESET_GPIO_PIN, GPIO_LEVEL_HIGH);
     if (ret != ERRCODE_SUCC) {
@@ -700,6 +707,16 @@ static errcode_t mine_wk2114_check_link_ready(void)
         mine_wk2114_oled_push_state("WK RST FAIL");
         return ret;
     }
+
+#if (MINE_WK2114_RESET_FORCE_LOW_ONLY == 1U)
+    /*
+     * 强制低电平调试模式下仅验证引脚状态，不执行后续串口链路检查，
+     * 避免在芯片复位期间持续发送主口命令干扰现场测试。
+     */
+    mine_wk2114_log("[mine wk2114] force-low mode enabled, skip link check\r\n");
+    mine_wk2114_oled_push_state("WK RST HOLD LO");
+    return ERRCODE_FAIL;
+#endif
 
     mine_wk2114_host_resp_fifo_reset();
     mine_wk2114_host_hw_rx_drain();

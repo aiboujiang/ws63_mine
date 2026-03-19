@@ -25,6 +25,13 @@
 #define MINE_WK2114_RESET_HOLD_MS 10U
 #define MINE_WK2114_RESET_RELEASE_WAIT_MS 20U
 
+/*
+ * GPIO9 调试开关：
+ * 1U 表示持续保持复位脚低电平（不再拉高），用于现场量测；
+ * 0U 表示正常复位脉冲流程（拉低后释放拉高）。
+ */
+#define MINE_WK2114_RESET_FORCE_LOW_ONLY 1U
+
 /* UART2 活性诊断日志周期（毫秒）。 */
 #define MINE_WK2114_UART_DIAG_REPORT_MS 1000
 
