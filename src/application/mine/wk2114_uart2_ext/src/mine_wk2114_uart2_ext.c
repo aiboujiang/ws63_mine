@@ -693,6 +693,54 @@ errcode_t mine_wk2114_uart2_ext_send(uint8_t channel, const uint8_t *data, uint1
 }
 
 /**
+ * @brief 执行 WK2114 启动流程并在失败时自动重试。
+ *
+ * 重试阶段分两步：
+ * 1) 主口初始化 + 连通性检查失败时重试；
+ * 2) 子串口1默认配置失败时重试。
+ *
+ * 该流程确保模块上电后最终进入可工作状态，而不是首次失败后直接退出任务。
+ *
+ * @return errcode_t
+ * @retval ERRCODE_SUCC 启动流程完成。
+ */
+static errcode_t mine_wk2114_bootstrap_with_retry(void)
+{
+    errcode_t ret;
+    uint32_t init_retry_count = 0;
+    uint32_t sub1_retry_count = 0;
+
+    while (1) {
+        ret = mine_wk2114_uart2_ext_init();
+        if (ret == ERRCODE_SUCC) {
+            break;
+        }
+
+        init_retry_count++;
+        mine_wk2114_oled_push_state("INIT RETRY");
+        osal_printk("[mine wk2114] init retry #%lu, ret=%x\r\n",
+            (unsigned long)init_retry_count, ret);
+        mine_wk2114_oled_flush_pending();
+        osal_msleep(MINE_WK2114_INIT_RETRY_WAIT_MS);
+    }
+
+    while (1) {
+        ret = mine_wk2114_uart2_ext_set_subuart_baud(1, g_mine_wk2114_subuart_baud[0]);
+        if (ret == ERRCODE_SUCC) {
+            mine_wk2114_oled_push_state("SUB1 READY");
+            return ERRCODE_SUCC;
+        }
+
+        sub1_retry_count++;
+        mine_wk2114_oled_push_state("SUB1 RETRY");
+        osal_printk("[mine wk2114] sub1 cfg retry #%lu, ret=%x\r\n",
+            (unsigned long)sub1_retry_count, ret);
+        mine_wk2114_oled_flush_pending();
+        osal_msleep(MINE_WK2114_INIT_RETRY_WAIT_MS);
+    }
+}
+
+/**
  * @brief WK2114 模块主任务。
  *
  * @param arg 任务参数（当前未使用）。
@@ -708,26 +756,24 @@ static void *mine_wk2114_uart2_ext_task(const char *arg)
     mine_wk2114_oled_init();
     mine_wk2114_oled_push_state("INIT...");
 
-    ret = mine_wk2114_uart2_ext_init();
+    /*
+     * 启动阶段必须做失败重试：
+     * - 主口初始化/连通性失败时，自动重试直到成功；
+     * - 子串口默认配置失败时，同样自动重试。
+     */
+    ret = mine_wk2114_bootstrap_with_retry();
     if (ret != ERRCODE_SUCC) {
-        osal_printk("[mine wk2114] uart init failed, ret=%x\\r\\n", ret);
-        mine_wk2114_oled_flush_pending();
-        return NULL;
-    }
-
-    /* 默认先拉起子串口1，便于上电即验证 OLED 调试链路。 */
-    ret = mine_wk2114_uart2_ext_set_subuart_baud(1, g_mine_wk2114_subuart_baud[0]);
-    if (ret != ERRCODE_SUCC) {
-        osal_printk("[mine wk2114] sub1 cfg failed, ret=%x\\r\\n", ret);
-        mine_wk2114_oled_push_state("SUB1 CFG FAIL");
-    } else {
-        mine_wk2114_oled_push_state("SUB1 READY");
+        osal_printk("[mine wk2114] bootstrap failed unexpectedly, ret=%x\r\n", ret);
+        mine_wk2114_oled_push_state("BOOT FAIL");
     }
 
     while (1) {
         mine_wk2114_oled_flush_pending();
         osal_msleep(MINE_WK2114_TASK_LOOP_WAIT_MS);
     }
+
+    /* 防御性返回，满足编译器对非 void 任务入口的返回约束。 */
+    return NULL;
 }
 
 /**
