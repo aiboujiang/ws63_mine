@@ -65,8 +65,9 @@
 #define MINE_WK2114_SUBREG_BAUD0 0x05
 #define MINE_WK2114_SUBREG_PRES 0x06
 
-/* GENA 的高 4 位为只读保留位，复位后固定为 1（手册 7.2.1）。 */
+/* GENA 位定义：高 4 位为保留位（推荐保持为 1），低 4 位为 UT1~UT4 使能位。 */
 #define MINE_WK2114_GENA_RESERVED_MASK 0xF0U
+#define MINE_WK2114_GENA_CHANNEL_MASK 0x0FU
 
 /* OLED 面板布局。 */
 #define MINE_WK2114_OLED_LINE_COUNT 8

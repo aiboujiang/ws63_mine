@@ -329,20 +329,59 @@ static errcode_t mine_wk2114_read_addr6(uint8_t addr6, uint8_t *value)
 }
 
 /**
+ * @brief 对读寄存器流程执行短重试，过滤启动阶段瞬态失败。
+ *
+ * @param addr6     6bit 地址。
+ * @param retry_max 最大重试次数。
+ * @param value     输出读取值。
+ * @return errcode_t
+ */
+static errcode_t mine_wk2114_read_addr6_retry(uint8_t addr6, uint8_t retry_max, uint8_t *value)
+{
+    uint8_t retry_idx;
+    uint8_t temp_value = 0;
+    errcode_t ret;
+
+    if ((value == NULL) || (retry_max == 0U)) {
+        return ERRCODE_INVALID_PARAM;
+    }
+
+    for (retry_idx = 0; retry_idx < retry_max; retry_idx++) {
+        ret = mine_wk2114_read_addr6(addr6, &temp_value);
+        if (ret == ERRCODE_SUCC) {
+            *value = temp_value;
+            return ERRCODE_SUCC;
+        }
+
+        osal_msleep(1);
+    }
+
+    return ERRCODE_FAIL;
+}
+
+/**
  * @brief 执行 WK2114 上电连通性检查。
  *
  * 检查流程基于规格书：
  * 1) 先发 0x55 完成主口波特率自适应锁定；
- * 2) 回读 GENA（0x00）确认器件有响应；
- * 3) 校验 GENA 高 4 位保留位应为 1（手册 7.2.1 复位定义）。
+ * 2) 回读 GENA（0x00）获取当前寄存器状态；
+ * 3) 翻转 GENA 低 4 位中的一个 bit，做“写后读”一致性校验；
+ * 4) 恢复原值，确保链路检查不改变业务配置。
+ *
+ * 说明：
+ * 部分板卡现场会出现 GENA 高 4 位回显不稳定（例如 0x00）。
+ * 因此连通性判据不再单独依赖保留位，而是以写读一致性为主。
  *
  * @return errcode_t
  */
 static errcode_t mine_wk2114_check_link_ready(void)
 {
     uint8_t sync_byte = MINE_WK2114_HOST_AUTOBAUD_SYNC_BYTE;
-    uint8_t gena = 0;
-    uint8_t retry_idx;
+    uint8_t gena_origin = 0;
+    uint8_t gena_verify = 0;
+    uint8_t gena_probe = 0;
+    uint8_t origin_low;
+    uint8_t probe_low;
     errcode_t ret;
 
     mine_wk2114_host_resp_fifo_reset();
@@ -356,27 +395,68 @@ static errcode_t mine_wk2114_check_link_ready(void)
     /* 给主口自适应逻辑一个短暂锁定时间，避免首条读命令误判。 */
     osal_msleep(MINE_WK2114_HOST_AUTOBAUD_LOCK_WAIT_MS);
 
-    for (retry_idx = 0; retry_idx < MINE_WK2114_LINK_CHECK_READ_RETRY; retry_idx++) {
-        ret = mine_wk2114_read_addr6(MINE_WK2114_ADDR_GENA, &gena);
-        if (ret != ERRCODE_SUCC) {
-            continue;
-        }
-
-        if ((gena & MINE_WK2114_GENA_RESERVED_MASK) == MINE_WK2114_GENA_RESERVED_MASK) {
-            /* 同步影子寄存器，保持后续 enable 操作与当前芯片状态一致。 */
-            g_mine_wk2114_gena_shadow = (uint8_t)(gena & (MINE_WK2114_GENA_RESERVED_MASK | 0x0FU));
-            osal_printk("[mine wk2114] link ok, GENA=0x%02X\r\n", gena);
-            return ERRCODE_SUCC;
-        }
-
-        osal_printk("[mine wk2114] link read retry #%u, GENA=0x%02X\r\n",
-            (unsigned int)(retry_idx + 1U), (unsigned int)gena);
-        osal_msleep(1);
+    ret = mine_wk2114_read_addr6_retry(MINE_WK2114_ADDR_GENA, MINE_WK2114_LINK_CHECK_READ_RETRY, &gena_origin);
+    if (ret != ERRCODE_SUCC) {
+        osal_printk("[mine wk2114] link check read GENA timeout\r\n");
+        mine_wk2114_oled_push_state("WK REG FAIL");
+        return ERRCODE_FAIL;
     }
 
-    osal_printk("[mine wk2114] link check failed after retry, GENA=0x%02X\r\n", (unsigned int)gena);
-    mine_wk2114_oled_push_state("WK REG FAIL");
-    return ERRCODE_FAIL;
+    origin_low = (uint8_t)(gena_origin & MINE_WK2114_GENA_CHANNEL_MASK);
+    /* 仅翻转低 4 位中的 1 位，验证主口写/读链路都能工作。 */
+    probe_low = (uint8_t)(origin_low ^ 0x01U);
+    gena_probe = (uint8_t)(MINE_WK2114_GENA_RESERVED_MASK | probe_low);
+
+    ret = mine_wk2114_write_addr6(MINE_WK2114_ADDR_GENA, gena_probe);
+    if (ret != ERRCODE_SUCC) {
+        osal_printk("[mine wk2114] link check write probe failed, ret=%x\r\n", ret);
+        mine_wk2114_oled_push_state("WK REG FAIL");
+        return ERRCODE_FAIL;
+    }
+
+    osal_msleep(1);
+    ret = mine_wk2114_read_addr6_retry(MINE_WK2114_ADDR_GENA, MINE_WK2114_LINK_CHECK_READ_RETRY, &gena_verify);
+    if (ret != ERRCODE_SUCC) {
+        osal_printk("[mine wk2114] link check verify read timeout\r\n");
+        mine_wk2114_oled_push_state("WK REG FAIL");
+        return ERRCODE_FAIL;
+    }
+
+    if ((gena_verify & MINE_WK2114_GENA_CHANNEL_MASK) != probe_low) {
+        osal_printk("[mine wk2114] link check failed after retry, GENA=0x%02X (orig=0x%02X, probe=0x%02X)\r\n",
+            (unsigned int)gena_verify, (unsigned int)gena_origin, (unsigned int)gena_probe);
+        mine_wk2114_oled_push_state("WK REG FAIL");
+        return ERRCODE_FAIL;
+    }
+
+    /* 恢复原始使能位，避免链路测试影响后续子串口配置。 */
+    ret = mine_wk2114_write_addr6(MINE_WK2114_ADDR_GENA,
+        (uint8_t)(MINE_WK2114_GENA_RESERVED_MASK | origin_low));
+    if (ret != ERRCODE_SUCC) {
+        osal_printk("[mine wk2114] link check restore write failed, ret=%x\r\n", ret);
+        mine_wk2114_oled_push_state("WK REG FAIL");
+        return ERRCODE_FAIL;
+    }
+
+    osal_msleep(1);
+    ret = mine_wk2114_read_addr6_retry(MINE_WK2114_ADDR_GENA, MINE_WK2114_LINK_CHECK_READ_RETRY, &gena_verify);
+    if (ret != ERRCODE_SUCC) {
+        osal_printk("[mine wk2114] link check restore read timeout\r\n");
+        mine_wk2114_oled_push_state("WK REG FAIL");
+        return ERRCODE_FAIL;
+    }
+
+    if ((gena_verify & MINE_WK2114_GENA_CHANNEL_MASK) != origin_low) {
+        osal_printk("[mine wk2114] link check restore mismatch, GENA=0x%02X expect=0x%02X\r\n",
+            (unsigned int)gena_verify, (unsigned int)(MINE_WK2114_GENA_RESERVED_MASK | origin_low));
+        mine_wk2114_oled_push_state("WK REG FAIL");
+        return ERRCODE_FAIL;
+    }
+
+    /* 影子值固定保留位为 1，后续 enable 流程仅更新低 4 位。 */
+    g_mine_wk2114_gena_shadow = (uint8_t)(MINE_WK2114_GENA_RESERVED_MASK | origin_low);
+    osal_printk("[mine wk2114] link ok, GENA=0x%02X\r\n", (unsigned int)gena_verify);
+    return ERRCODE_SUCC;
 }
 
 /**
@@ -435,7 +515,9 @@ static errcode_t mine_wk2114_enable_global_channel(uint8_t channel)
     }
 
     bit_index = mine_wk2114_channel_to_index(channel);
-    g_mine_wk2114_gena_shadow |= (uint8_t)(1U << bit_index);
+    /* 保留位始终置 1，仅改变低 4 位通道使能位。 */
+    g_mine_wk2114_gena_shadow = (uint8_t)((g_mine_wk2114_gena_shadow | MINE_WK2114_GENA_RESERVED_MASK) |
+        (uint8_t)(1U << bit_index));
     return mine_wk2114_write_addr6(MINE_WK2114_ADDR_GENA, g_mine_wk2114_gena_shadow);
 }
 
