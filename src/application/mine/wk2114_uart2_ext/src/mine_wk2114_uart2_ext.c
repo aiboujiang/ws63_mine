@@ -273,8 +273,13 @@ static errcode_t mine_wk2114_write_addr6(uint8_t addr6, uint8_t value)
 static errcode_t mine_wk2114_read_addr6(uint8_t addr6, uint8_t *value)
 {
     uint8_t cmd;
+    uint8_t rx_byte = 0;
+    uint8_t last_byte = 0;
     errcode_t ret;
     uint32_t start_ms;
+    uint32_t stable_wait_ms = 0;
+    bool got_data = false;
+    bool got_new_data;
 
     if (value == NULL) {
         return ERRCODE_INVALID_PARAM;
@@ -290,10 +295,33 @@ static errcode_t mine_wk2114_read_addr6(uint8_t addr6, uint8_t *value)
 
     start_ms = (uint32_t)uapi_systick_get_ms();
     while ((uint32_t)(uapi_systick_get_ms() - start_ms) <= MINE_WK2114_HOST_READ_TIMEOUT_MS) {
-        if (mine_wk2114_host_resp_fifo_pop(value)) {
-            return ERRCODE_SUCC;
+        got_new_data = false;
+        while (mine_wk2114_host_resp_fifo_pop(&rx_byte)) {
+            /*
+             * 读取阶段采用“最后一个字节为准”的策略：
+             * - 若总线上存在回显，首字节可能是命令字；
+             * - 真正的寄存器返回值通常在其后到达。
+             */
+            got_new_data = true;
+            got_data = true;
+            last_byte = rx_byte;
+            stable_wait_ms = 0;
         }
+
+        if (got_data && (!got_new_data)) {
+            stable_wait_ms++;
+            if (stable_wait_ms >= MINE_WK2114_HOST_RESP_STABLE_WAIT_MS) {
+                *value = last_byte;
+                return ERRCODE_SUCC;
+            }
+        }
+
         osal_msleep(1);
+    }
+
+    if (got_data) {
+        *value = last_byte;
+        return ERRCODE_SUCC;
     }
 
     mine_wk2114_oled_push_state("HOST RREG TO");
@@ -314,6 +342,7 @@ static errcode_t mine_wk2114_check_link_ready(void)
 {
     uint8_t sync_byte = MINE_WK2114_HOST_AUTOBAUD_SYNC_BYTE;
     uint8_t gena = 0;
+    uint8_t retry_idx;
     errcode_t ret;
 
     mine_wk2114_host_resp_fifo_reset();
@@ -327,22 +356,27 @@ static errcode_t mine_wk2114_check_link_ready(void)
     /* 给主口自适应逻辑一个短暂锁定时间，避免首条读命令误判。 */
     osal_msleep(MINE_WK2114_HOST_AUTOBAUD_LOCK_WAIT_MS);
 
-    ret = mine_wk2114_read_addr6(MINE_WK2114_ADDR_GENA, &gena);
-    if (ret != ERRCODE_SUCC) {
-        mine_wk2114_oled_push_state("WK LINK FAIL");
-        return ret;
+    for (retry_idx = 0; retry_idx < MINE_WK2114_LINK_CHECK_READ_RETRY; retry_idx++) {
+        ret = mine_wk2114_read_addr6(MINE_WK2114_ADDR_GENA, &gena);
+        if (ret != ERRCODE_SUCC) {
+            continue;
+        }
+
+        if ((gena & MINE_WK2114_GENA_RESERVED_MASK) == MINE_WK2114_GENA_RESERVED_MASK) {
+            /* 同步影子寄存器，保持后续 enable 操作与当前芯片状态一致。 */
+            g_mine_wk2114_gena_shadow = (uint8_t)(gena & (MINE_WK2114_GENA_RESERVED_MASK | 0x0FU));
+            osal_printk("[mine wk2114] link ok, GENA=0x%02X\r\n", gena);
+            return ERRCODE_SUCC;
+        }
+
+        osal_printk("[mine wk2114] link read retry #%u, GENA=0x%02X\r\n",
+            (unsigned int)(retry_idx + 1U), (unsigned int)gena);
+        osal_msleep(1);
     }
 
-    if ((gena & MINE_WK2114_GENA_RESERVED_MASK) != MINE_WK2114_GENA_RESERVED_MASK) {
-        osal_printk("[mine wk2114] link check failed, GENA=0x%02X\r\n", gena);
-        mine_wk2114_oled_push_state("WK REG FAIL");
-        return ERRCODE_FAIL;
-    }
-
-    /* 同步影子寄存器，保持后续 enable 操作与当前芯片状态一致。 */
-    g_mine_wk2114_gena_shadow = (uint8_t)(gena & (MINE_WK2114_GENA_RESERVED_MASK | 0x0FU));
-    osal_printk("[mine wk2114] link ok, GENA=0x%02X\r\n", gena);
-    return ERRCODE_SUCC;
+    osal_printk("[mine wk2114] link check failed after retry, GENA=0x%02X\r\n", (unsigned int)gena);
+    mine_wk2114_oled_push_state("WK REG FAIL");
+    return ERRCODE_FAIL;
 }
 
 /**
@@ -593,6 +627,7 @@ errcode_t mine_wk2114_uart2_ext_init(void)
     (void)uapi_uart_deinit(MINE_WK2114_HOST_UART_BUS);
     ret = uapi_uart_init(MINE_WK2114_HOST_UART_BUS, &pin_cfg, &attr, NULL, &uart_buffer_cfg);
     if (ret != ERRCODE_SUCC) {
+        osal_printk("[mine wk2114] uart init stage failed, ret=%x\r\n", ret);
         mine_wk2114_oled_push_state("UART2 INIT FAIL");
         return ret;
     }
@@ -600,6 +635,7 @@ errcode_t mine_wk2114_uart2_ext_init(void)
     ret = uapi_uart_register_rx_callback(MINE_WK2114_HOST_UART_BUS,
         UART_RX_CONDITION_MASK_IDLE, 1, mine_wk2114_uart_rx_handler);
     if (ret != ERRCODE_SUCC) {
+        osal_printk("[mine wk2114] rx callback register failed, ret=%x\r\n", ret);
         mine_wk2114_oled_push_state("UART2 RXCB FAIL");
         return ret;
     }
@@ -609,6 +645,7 @@ errcode_t mine_wk2114_uart2_ext_init(void)
 
     ret = mine_wk2114_check_link_ready();
     if (ret != ERRCODE_SUCC) {
+        osal_printk("[mine wk2114] link check stage failed, ret=%x\r\n", ret);
         mine_wk2114_oled_push_state("WK2114 LINK FAIL");
         g_mine_wk2114_uart_ready = false;
         return ret;
