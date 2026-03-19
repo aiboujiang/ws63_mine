@@ -20,6 +20,11 @@
 /* 启动失败重试参数。 */
 #define MINE_WK2114_INIT_RETRY_WAIT_MS 1200
 
+/* WK2114 复位引脚与时序（GPIO9 连接芯片 RESET）。 */
+#define MINE_WK2114_RESET_GPIO_PIN GPIO_09
+#define MINE_WK2114_RESET_HOLD_MS 10U
+#define MINE_WK2114_RESET_RELEASE_WAIT_MS 20U
+
 /* UART2 活性诊断日志周期（毫秒）。 */
 #define MINE_WK2114_UART_DIAG_REPORT_MS 1000
 
@@ -51,8 +56,8 @@
 #define MINE_WK2114_HOST_READ_TIMEOUT_MS 120U
 #define MINE_WK2114_HOST_AUTOBAUD_LOCK_WAIT_MS 6U
 
-/* 自适应锁定增强参数：上电后连续发送多个 0x55，提高锁定成功率。 */
-#define MINE_WK2114_HOST_AUTOBAUD_SYNC_RETRY 4U
+/* 按手册 9.1：复位后发送单字节 0x55 完成主口波特率锁定。 */
+#define MINE_WK2114_HOST_AUTOBAUD_SYNC_RETRY 1U
 #define MINE_WK2114_HOST_AUTOBAUD_SYNC_INTERVAL_MS 2U
 
 /* 回读稳定等待与链路检查重读次数。 */

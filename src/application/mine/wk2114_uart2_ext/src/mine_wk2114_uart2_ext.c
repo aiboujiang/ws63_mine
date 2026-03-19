@@ -10,6 +10,7 @@
 
 #include "app_init.h"
 #include "common_def.h"
+#include "gpio.h"
 #include "pinctrl.h"
 #include "securec.h"
 #include "soc_osal.h"
@@ -271,6 +272,51 @@ static void mine_wk2114_uart_diag_report_periodic(void)
     }
 
     last_snapshot = cur_snapshot;
+}
+
+/**
+ * @brief 对 WK2114 执行硬件复位脉冲（GPIO9）。
+ *
+ * 复位流程：
+ * 1) GPIO9 拉低保持一段时间，触发芯片复位；
+ * 2) GPIO9 拉高释放复位；
+ * 3) 等待芯片内部状态稳定，再进入 0x55 自适应同步。
+ *
+ * @return errcode_t
+ */
+static errcode_t mine_wk2114_hw_reset_chip(void)
+{
+    errcode_t ret;
+
+    uapi_gpio_init();
+    (void)uapi_pin_set_mode(MINE_WK2114_RESET_GPIO_PIN, HAL_PIO_FUNC_GPIO);
+
+    ret = uapi_gpio_set_dir(MINE_WK2114_RESET_GPIO_PIN, GPIO_DIRECTION_OUTPUT);
+    if (ret != ERRCODE_SUCC) {
+        mine_wk2114_log("[mine wk2114] reset pin dir failed, ret=%x\r\n", ret);
+        mine_wk2114_oled_push_state("WK RST DIR FAIL");
+        return ret;
+    }
+
+    ret = uapi_gpio_set_val(MINE_WK2114_RESET_GPIO_PIN, GPIO_LEVEL_LOW);
+    if (ret != ERRCODE_SUCC) {
+        mine_wk2114_log("[mine wk2114] reset pin pull low failed, ret=%x\r\n", ret);
+        mine_wk2114_oled_push_state("WK RST LOW FAIL");
+        return ret;
+    }
+
+    osal_msleep(MINE_WK2114_RESET_HOLD_MS);
+
+    ret = uapi_gpio_set_val(MINE_WK2114_RESET_GPIO_PIN, GPIO_LEVEL_HIGH);
+    if (ret != ERRCODE_SUCC) {
+        mine_wk2114_log("[mine wk2114] reset pin release failed, ret=%x\r\n", ret);
+        mine_wk2114_oled_push_state("WK RST HI FAIL");
+        return ret;
+    }
+
+    osal_msleep(MINE_WK2114_RESET_RELEASE_WAIT_MS);
+    mine_wk2114_log("[mine wk2114] hw reset pulse done on gpio9\r\n");
+    return ERRCODE_SUCC;
 }
 
 /**
@@ -634,25 +680,26 @@ static errcode_t mine_wk2114_send_autobaud_sync_sequence(void)
  * @brief 执行 WK2114 上电连通性检查。
  *
  * 检查流程基于规格书：
- * 1) 先发 0x55 完成主口波特率自适应锁定；
- * 2) 回读 GENA（0x00）获取当前寄存器状态；
- * 3) 翻转 GENA 低 4 位中的一个 bit，做“写后读”一致性校验；
- * 4) 恢复原值，确保链路检查不改变业务配置。
+ * 1) 先执行硬复位（reset 低电平保持 10ms，再拉高）；
+ * 2) 发送 0x55 完成主口波特率自适应锁定；
+ * 3) 读取 GENA（0x00）并校验默认值 0xF0。
  *
  * 说明：
- * 部分板卡现场会出现 GENA 高 4 位回显不稳定（例如 0x00）。
- * 因此连通性判据不再单独依赖保留位，而是以写读一致性为主。
+ * 这里采用“默认值直读校验”而不是“写后读探测”，
+ * 目的是完全对齐手册时序，降低现场联调的不确定性。
  *
  * @return errcode_t
  */
 static errcode_t mine_wk2114_check_link_ready(void)
 {
     uint8_t gena_origin = 0;
-    uint8_t gena_verify = 0;
-    uint8_t gena_probe = 0;
-    uint8_t origin_low;
-    uint8_t probe_low;
     errcode_t ret;
+
+    ret = mine_wk2114_hw_reset_chip();
+    if (ret != ERRCODE_SUCC) {
+        mine_wk2114_oled_push_state("WK RST FAIL");
+        return ret;
+    }
 
     mine_wk2114_host_resp_fifo_reset();
     mine_wk2114_host_hw_rx_drain();
@@ -670,60 +717,17 @@ static errcode_t mine_wk2114_check_link_ready(void)
         return ERRCODE_FAIL;
     }
 
-    origin_low = (uint8_t)(gena_origin & MINE_WK2114_GENA_CHANNEL_MASK);
-    /* 仅翻转低 4 位中的 1 位，验证主口写/读链路都能工作。 */
-    probe_low = (uint8_t)(origin_low ^ 0x01U);
-    gena_probe = (uint8_t)(MINE_WK2114_GENA_RESERVED_MASK | probe_low);
-
-    ret = mine_wk2114_write_addr6(MINE_WK2114_ADDR_GENA, gena_probe);
-    if (ret != ERRCODE_SUCC) {
-        osal_printk("[mine wk2114] link check write probe failed, ret=%x\r\n", ret);
+    if (gena_origin != MINE_WK2114_GENA_RESERVED_MASK) {
+        osal_printk("[mine wk2114] link check GENA mismatch, got=0x%02X expect=0x%02X\r\n",
+            (unsigned int)gena_origin,
+            (unsigned int)MINE_WK2114_GENA_RESERVED_MASK);
         mine_wk2114_oled_push_state("WK REG FAIL");
         return ERRCODE_FAIL;
     }
 
-    osal_msleep(1);
-    ret = mine_wk2114_read_addr6_retry(MINE_WK2114_ADDR_GENA, MINE_WK2114_LINK_CHECK_READ_RETRY, &gena_verify);
-    if (ret != ERRCODE_SUCC) {
-        osal_printk("[mine wk2114] link check verify read timeout\r\n");
-        mine_wk2114_oled_push_state("WK REG FAIL");
-        return ERRCODE_FAIL;
-    }
-
-    if ((gena_verify & MINE_WK2114_GENA_CHANNEL_MASK) != probe_low) {
-        osal_printk("[mine wk2114] link check failed after retry, GENA=0x%02X (orig=0x%02X, probe=0x%02X)\r\n",
-            (unsigned int)gena_verify, (unsigned int)gena_origin, (unsigned int)gena_probe);
-        mine_wk2114_oled_push_state("WK REG FAIL");
-        return ERRCODE_FAIL;
-    }
-
-    /* 恢复原始使能位，避免链路测试影响后续子串口配置。 */
-    ret = mine_wk2114_write_addr6(MINE_WK2114_ADDR_GENA,
-        (uint8_t)(MINE_WK2114_GENA_RESERVED_MASK | origin_low));
-    if (ret != ERRCODE_SUCC) {
-        osal_printk("[mine wk2114] link check restore write failed, ret=%x\r\n", ret);
-        mine_wk2114_oled_push_state("WK REG FAIL");
-        return ERRCODE_FAIL;
-    }
-
-    osal_msleep(1);
-    ret = mine_wk2114_read_addr6_retry(MINE_WK2114_ADDR_GENA, MINE_WK2114_LINK_CHECK_READ_RETRY, &gena_verify);
-    if (ret != ERRCODE_SUCC) {
-        osal_printk("[mine wk2114] link check restore read timeout\r\n");
-        mine_wk2114_oled_push_state("WK REG FAIL");
-        return ERRCODE_FAIL;
-    }
-
-    if ((gena_verify & MINE_WK2114_GENA_CHANNEL_MASK) != origin_low) {
-        osal_printk("[mine wk2114] link check restore mismatch, GENA=0x%02X expect=0x%02X\r\n",
-            (unsigned int)gena_verify, (unsigned int)(MINE_WK2114_GENA_RESERVED_MASK | origin_low));
-        mine_wk2114_oled_push_state("WK REG FAIL");
-        return ERRCODE_FAIL;
-    }
-
-    /* 影子值固定保留位为 1，后续 enable 流程仅更新低 4 位。 */
-    g_mine_wk2114_gena_shadow = (uint8_t)(MINE_WK2114_GENA_RESERVED_MASK | origin_low);
-    osal_printk("[mine wk2114] link ok, GENA=0x%02X\r\n", (unsigned int)gena_verify);
+    /* 影子值按默认复位值初始化，后续 enable 流程仅更新低 4 位。 */
+    g_mine_wk2114_gena_shadow = MINE_WK2114_GENA_RESERVED_MASK;
+    osal_printk("[mine wk2114] link ok, GENA=0x%02X\r\n", (unsigned int)gena_origin);
     return ERRCODE_SUCC;
 }
 
@@ -941,6 +945,15 @@ static void mine_wk2114_uart_rx_handler(const void *buffer, uint16_t length, boo
 
     mine_wk2114_uart_diag_record_rx_callback((uint32_t)length);
 
+    /*
+     * 打印回调收到的首/尾字节，确认主口到底收到了什么值。
+     * 该日志可用于判断是否只收到了 0x55 同步字节。
+     */
+    mine_wk2114_log("[mine wk2114] host rx cb len=%u first=0x%02X last=0x%02X\r\n",
+        (unsigned int)length,
+        (unsigned int)data_ptr[0],
+        (unsigned int)data_ptr[length - 1U]);
+
     mine_wk2114_oled_push_data_event("HOST RX", data_ptr, length);
 }
 
@@ -984,8 +997,9 @@ errcode_t mine_wk2114_uart2_ext_init(void)
         return ret;
     }
 
+#if defined(CONFIG_UART_SUPPORT_RX)
     ret = uapi_uart_register_rx_callback(MINE_WK2114_HOST_UART_BUS,
-        (uart_rx_condition_t)(UART_RX_CONDITION_MASK_FULL |
+        (UART_RX_CONDITION_MASK_FULL |
         UART_RX_CONDITION_MASK_SUFFICIENT_DATA |
         UART_RX_CONDITION_MASK_IDLE),
         1,
@@ -995,6 +1009,11 @@ errcode_t mine_wk2114_uart2_ext_init(void)
         mine_wk2114_oled_push_state("UART2 RXCB FAIL");
         return ret;
     }
+#else
+    mine_wk2114_log("[mine wk2114] uart rx callback api unavailable\r\n");
+    mine_wk2114_oled_push_state("UART2 RX UNSUP");
+    return ERRCODE_FAIL;
+#endif
 
     /* 先允许主口收发，再执行规格书要求的链路就绪检查。 */
     g_mine_wk2114_uart_ready = true;
