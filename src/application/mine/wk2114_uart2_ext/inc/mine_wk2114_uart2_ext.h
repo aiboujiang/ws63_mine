@@ -19,6 +19,9 @@ extern "C" {
 /**
  * @brief 初始化 WK2114 UART2 扩展模块。
  *
+ * 初始化过程包含主口波特率自适应与连通性检查：
+ * 先发送 0x55 锁定主口波特率，再回读 GENA 寄存器确认设备在线。
+ *
  * @return errcode_t
  * @retval ERRCODE_SUCC 初始化成功。
  * @retval 其他值       初始化失败。

@@ -13,6 +13,7 @@
 #include "pinctrl.h"
 #include "securec.h"
 #include "soc_osal.h"
+#include "systick.h"
 #include "uart.h"
 
 #ifndef UART_RX_CONDITION_MASK_IDLE
@@ -47,6 +48,14 @@ static void mine_wk2114_log_mirror_uart0(const char *log_buf, int32_t format_len
 /* WK2114 主口 UART 收包缓存。 */
 static uint8_t g_mine_wk2114_uart_rx_buffer[MINE_WK2114_UART_RX_BUFFER_SIZE] = {0};
 
+/*
+ * 主口回读 FIFO：
+ * 用于“读寄存器命令”的同步等待，不替代原有 OLED 事件展示。
+ */
+static uint8_t g_mine_wk2114_host_resp_fifo[MINE_WK2114_HOST_RESP_FIFO_SIZE] = {0};
+static volatile uint16_t g_mine_wk2114_host_resp_head = 0;
+static volatile uint16_t g_mine_wk2114_host_resp_tail = 0;
+
 /* 运行态缓存：就绪标记、各子通道波特率、通道使能状态。 */
 static bool g_mine_wk2114_uart_ready = false;
 static uint32_t g_mine_wk2114_subuart_baud[MINE_WK2114_SUBUART_COUNT] = {
@@ -58,7 +67,88 @@ static uint32_t g_mine_wk2114_subuart_baud[MINE_WK2114_SUBUART_COUNT] = {
 static bool g_mine_wk2114_subuart_ready[MINE_WK2114_SUBUART_COUNT] = { false, false, false, false };
 
 /* GENA 低 4 位用于 UT1~UT4 使能，保留位按手册保持为 1。 */
-static uint8_t g_mine_wk2114_gena_shadow = 0xF0;
+static uint8_t g_mine_wk2114_gena_shadow = MINE_WK2114_GENA_RESERVED_MASK;
+
+/**
+ * @brief 进入短临界区，保护主口回读 FIFO。
+ *
+ * @return unsigned int 中断状态快照。
+ */
+static unsigned int mine_wk2114_irq_lock(void)
+{
+    return osal_irq_lock();
+}
+
+/**
+ * @brief 退出短临界区，恢复中断状态。
+ *
+ * @param irq_status 进入临界区前保存的中断状态。
+ */
+static void mine_wk2114_irq_unlock(unsigned int irq_status)
+{
+    osal_irq_restore(irq_status);
+}
+
+/**
+ * @brief 清空主口回读 FIFO。
+ */
+static void mine_wk2114_host_resp_fifo_reset(void)
+{
+    unsigned int irq_status = mine_wk2114_irq_lock();
+
+    g_mine_wk2114_host_resp_head = 0;
+    g_mine_wk2114_host_resp_tail = 0;
+    mine_wk2114_irq_unlock(irq_status);
+}
+
+/**
+ * @brief 向主口回读 FIFO 写入一个字节（满时丢弃最旧数据）。
+ *
+ * @param byte 输入字节。
+ */
+static void mine_wk2114_host_resp_fifo_push(uint8_t byte)
+{
+    uint16_t next_head;
+    unsigned int irq_status = mine_wk2114_irq_lock();
+
+    next_head = (uint16_t)((g_mine_wk2114_host_resp_head + 1U) % MINE_WK2114_HOST_RESP_FIFO_SIZE);
+    if (next_head == g_mine_wk2114_host_resp_tail) {
+        g_mine_wk2114_host_resp_tail =
+            (uint16_t)((g_mine_wk2114_host_resp_tail + 1U) % MINE_WK2114_HOST_RESP_FIFO_SIZE);
+    }
+
+    g_mine_wk2114_host_resp_fifo[g_mine_wk2114_host_resp_head] = byte;
+    g_mine_wk2114_host_resp_head = next_head;
+    mine_wk2114_irq_unlock(irq_status);
+}
+
+/**
+ * @brief 从主口回读 FIFO 读取一个字节。
+ *
+ * @param byte 输出字节。
+ * @return true  读取成功。
+ * @return false FIFO 为空或参数非法。
+ */
+static bool mine_wk2114_host_resp_fifo_pop(uint8_t *byte)
+{
+    unsigned int irq_status;
+
+    if (byte == NULL) {
+        return false;
+    }
+
+    irq_status = mine_wk2114_irq_lock();
+    if (g_mine_wk2114_host_resp_head == g_mine_wk2114_host_resp_tail) {
+        mine_wk2114_irq_unlock(irq_status);
+        return false;
+    }
+
+    *byte = g_mine_wk2114_host_resp_fifo[g_mine_wk2114_host_resp_tail];
+    g_mine_wk2114_host_resp_tail =
+        (uint16_t)((g_mine_wk2114_host_resp_tail + 1U) % MINE_WK2114_HOST_RESP_FIFO_SIZE);
+    mine_wk2114_irq_unlock(irq_status);
+    return true;
+}
 
 /**
  * @brief WK2114 模块统一日志接口，双路输出到 OSAL 与 PRINT。
@@ -165,9 +255,94 @@ static errcode_t mine_wk2114_write_addr6(uint8_t addr6, uint8_t value)
 {
     uint8_t frame[2] = {0};
 
-    frame[0] = (uint8_t)(addr6 & 0x3FU);
+    frame[0] = (uint8_t)(MINE_WK2114_HOST_CMD_WRITE_REG | (addr6 & 0x3FU));
     frame[1] = value;
     return mine_wk2114_send_host_frame(frame, sizeof(frame), "HOST TX REG");
+}
+
+/**
+ * @brief 从 WK2114 指定 6bit 地址读取 1 字节寄存器。
+ *
+ * @param addr6 6bit 地址。
+ * @param value 读出值。
+ * @return errcode_t
+ * @retval ERRCODE_SUCC         读取成功。
+ * @retval ERRCODE_INVALID_PARAM 参数非法。
+ * @retval ERRCODE_FAIL         超时或主口异常。
+ */
+static errcode_t mine_wk2114_read_addr6(uint8_t addr6, uint8_t *value)
+{
+    uint8_t cmd;
+    errcode_t ret;
+    uint32_t start_ms;
+
+    if (value == NULL) {
+        return ERRCODE_INVALID_PARAM;
+    }
+
+    cmd = (uint8_t)(MINE_WK2114_HOST_CMD_READ_REG | (addr6 & 0x3FU));
+    mine_wk2114_host_resp_fifo_reset();
+
+    ret = mine_wk2114_send_host_frame(&cmd, 1, "HOST TX RREG");
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+
+    start_ms = (uint32_t)uapi_systick_get_ms();
+    while ((uint32_t)(uapi_systick_get_ms() - start_ms) <= MINE_WK2114_HOST_READ_TIMEOUT_MS) {
+        if (mine_wk2114_host_resp_fifo_pop(value)) {
+            return ERRCODE_SUCC;
+        }
+        osal_msleep(1);
+    }
+
+    mine_wk2114_oled_push_state("HOST RREG TO");
+    return ERRCODE_FAIL;
+}
+
+/**
+ * @brief 执行 WK2114 上电连通性检查。
+ *
+ * 检查流程基于规格书：
+ * 1) 先发 0x55 完成主口波特率自适应锁定；
+ * 2) 回读 GENA（0x00）确认器件有响应；
+ * 3) 校验 GENA 高 4 位保留位应为 1（手册 7.2.1 复位定义）。
+ *
+ * @return errcode_t
+ */
+static errcode_t mine_wk2114_check_link_ready(void)
+{
+    uint8_t sync_byte = MINE_WK2114_HOST_AUTOBAUD_SYNC_BYTE;
+    uint8_t gena = 0;
+    errcode_t ret;
+
+    mine_wk2114_host_resp_fifo_reset();
+
+    ret = mine_wk2114_send_host_frame(&sync_byte, 1, "HOST TX SYNC");
+    if (ret != ERRCODE_SUCC) {
+        mine_wk2114_oled_push_state("WK SYNC FAIL");
+        return ret;
+    }
+
+    /* 给主口自适应逻辑一个短暂锁定时间，避免首条读命令误判。 */
+    osal_msleep(MINE_WK2114_HOST_AUTOBAUD_LOCK_WAIT_MS);
+
+    ret = mine_wk2114_read_addr6(MINE_WK2114_ADDR_GENA, &gena);
+    if (ret != ERRCODE_SUCC) {
+        mine_wk2114_oled_push_state("WK LINK FAIL");
+        return ret;
+    }
+
+    if ((gena & MINE_WK2114_GENA_RESERVED_MASK) != MINE_WK2114_GENA_RESERVED_MASK) {
+        osal_printk("[mine wk2114] link check failed, GENA=0x%02X\r\n", gena);
+        mine_wk2114_oled_push_state("WK REG FAIL");
+        return ERRCODE_FAIL;
+    }
+
+    /* 同步影子寄存器，保持后续 enable 操作与当前芯片状态一致。 */
+    g_mine_wk2114_gena_shadow = (uint8_t)(gena & (MINE_WK2114_GENA_RESERVED_MASK | 0x0FU));
+    osal_printk("[mine wk2114] link ok, GENA=0x%02X\r\n", gena);
+    return ERRCODE_SUCC;
 }
 
 /**
@@ -340,7 +515,7 @@ static errcode_t mine_wk2114_send_fifo_chunk(uint8_t channel, const uint8_t *dat
         return ERRCODE_INVALID_PARAM;
     }
 
-    cmd = (uint8_t)(0x80U |
+    cmd = (uint8_t)(MINE_WK2114_HOST_CMD_WRITE_FIFO |
         ((mine_wk2114_channel_to_index(channel) & 0x03U) << 4) |
         mine_wk2114_fifo_len_to_nibble(len));
     frame[0] = cmd;
@@ -361,15 +536,26 @@ static errcode_t mine_wk2114_send_fifo_chunk(uint8_t channel, const uint8_t *dat
  */
 static void mine_wk2114_uart_rx_handler(const void *buffer, uint16_t length, bool error)
 {
+    const uint8_t *data_ptr = (const uint8_t *)buffer;
+    uint16_t idx;
+
     if (error) {
         mine_wk2114_oled_push_state("HOST RX ERR");
     }
 
-    if ((buffer == NULL) || (length == 0U)) {
+    if ((data_ptr == NULL) || (length == 0U)) {
         return;
     }
 
-    mine_wk2114_oled_push_data_event("HOST RX", (const uint8_t *)buffer, length);
+    /*
+     * 回读数据统一进入 FIFO，供读寄存器流程同步消费。
+     * 即使当前没有等待者，也会保留最近一段响应，便于后续排查。
+     */
+    for (idx = 0; idx < length; idx++) {
+        mine_wk2114_host_resp_fifo_push(data_ptr[idx]);
+    }
+
+    mine_wk2114_oled_push_data_event("HOST RX", data_ptr, length);
 }
 
 /**
@@ -418,8 +604,17 @@ errcode_t mine_wk2114_uart2_ext_init(void)
         return ret;
     }
 
+    /* 先允许主口收发，再执行规格书要求的链路就绪检查。 */
     g_mine_wk2114_uart_ready = true;
-    mine_wk2114_oled_push_state("UART2 HOST OK");
+
+    ret = mine_wk2114_check_link_ready();
+    if (ret != ERRCODE_SUCC) {
+        mine_wk2114_oled_push_state("WK2114 LINK FAIL");
+        g_mine_wk2114_uart_ready = false;
+        return ret;
+    }
+
+    mine_wk2114_oled_push_state("UART2+WK2114 OK");
     mine_wk2114_oled_set_channel(0, MINE_WK2114_HOST_UART_BAUD);
     return ERRCODE_SUCC;
 }
