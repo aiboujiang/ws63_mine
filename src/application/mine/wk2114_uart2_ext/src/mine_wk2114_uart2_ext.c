@@ -77,6 +77,20 @@ static bool g_mine_wk2114_subuart_ready[MINE_WK2114_SUBUART_COUNT] = { false, fa
 /* GENA 低 4 位用于 UT1~UT4 使能，保留位按手册保持为 1。 */
 static uint8_t g_mine_wk2114_gena_shadow = MINE_WK2114_GENA_RESERVED_MASK;
 
+/* UART2 活性诊断统计：用于确认主口是否真实发生收发。 */
+typedef struct {
+    uint32_t tx_frame_count;
+    uint32_t tx_byte_count;
+    uint32_t tx_fail_count;
+    uint32_t rx_callback_byte_count;
+    uint32_t rx_poll_byte_count;
+    uint32_t rx_drain_byte_count;
+    uint32_t read_cmd_count;
+    uint32_t read_timeout_count;
+} mine_wk2114_uart_diag_t;
+
+static mine_wk2114_uart_diag_t g_mine_wk2114_uart_diag = {0};
+
 /**
  * @brief 进入短临界区，保护主口回读 FIFO。
  *
@@ -95,6 +109,168 @@ static unsigned int mine_wk2114_irq_lock(void)
 static void mine_wk2114_irq_unlock(unsigned int irq_status)
 {
     osal_irq_restore(irq_status);
+}
+
+/**
+ * @brief 记录 UART2 发送成功统计。
+ *
+ * @param byte_count 成功发送字节数。
+ */
+static void mine_wk2114_uart_diag_record_tx_success(uint32_t byte_count)
+{
+    unsigned int irq_status = mine_wk2114_irq_lock();
+
+    g_mine_wk2114_uart_diag.tx_frame_count++;
+    g_mine_wk2114_uart_diag.tx_byte_count += byte_count;
+    mine_wk2114_irq_unlock(irq_status);
+}
+
+/**
+ * @brief 记录 UART2 发送失败统计。
+ */
+static void mine_wk2114_uart_diag_record_tx_fail(void)
+{
+    unsigned int irq_status = mine_wk2114_irq_lock();
+
+    g_mine_wk2114_uart_diag.tx_fail_count++;
+    mine_wk2114_irq_unlock(irq_status);
+}
+
+/**
+ * @brief 记录 RX 回调路径接收字节数。
+ *
+ * @param byte_count 回调接收字节数。
+ */
+static void mine_wk2114_uart_diag_record_rx_callback(uint32_t byte_count)
+{
+    unsigned int irq_status = mine_wk2114_irq_lock();
+
+    g_mine_wk2114_uart_diag.rx_callback_byte_count += byte_count;
+    mine_wk2114_irq_unlock(irq_status);
+}
+
+/**
+ * @brief 记录轮询兜底路径接收字节数。
+ *
+ * @param byte_count 轮询接收字节数。
+ */
+static void mine_wk2114_uart_diag_record_rx_poll(uint32_t byte_count)
+{
+    unsigned int irq_status = mine_wk2114_irq_lock();
+
+    g_mine_wk2114_uart_diag.rx_poll_byte_count += byte_count;
+    mine_wk2114_irq_unlock(irq_status);
+}
+
+/**
+ * @brief 记录清理历史 RX 字节统计。
+ *
+ * @param byte_count 清理字节数。
+ */
+static void mine_wk2114_uart_diag_record_rx_drain(uint32_t byte_count)
+{
+    unsigned int irq_status = mine_wk2114_irq_lock();
+
+    g_mine_wk2114_uart_diag.rx_drain_byte_count += byte_count;
+    mine_wk2114_irq_unlock(irq_status);
+}
+
+/**
+ * @brief 记录一次读寄存器请求。
+ */
+static void mine_wk2114_uart_diag_record_read_cmd(void)
+{
+    unsigned int irq_status = mine_wk2114_irq_lock();
+
+    g_mine_wk2114_uart_diag.read_cmd_count++;
+    mine_wk2114_irq_unlock(irq_status);
+}
+
+/**
+ * @brief 记录一次读寄存器超时。
+ */
+static void mine_wk2114_uart_diag_record_read_timeout(void)
+{
+    unsigned int irq_status = mine_wk2114_irq_lock();
+
+    g_mine_wk2114_uart_diag.read_timeout_count++;
+    mine_wk2114_irq_unlock(irq_status);
+}
+
+/**
+ * @brief 读取 UART2 活性诊断快照。
+ *
+ * @param snapshot 输出统计快照。
+ */
+static void mine_wk2114_uart_diag_snapshot(mine_wk2114_uart_diag_t *snapshot)
+{
+    unsigned int irq_status;
+
+    if (snapshot == NULL) {
+        return;
+    }
+
+    irq_status = mine_wk2114_irq_lock();
+    *snapshot = g_mine_wk2114_uart_diag;
+    mine_wk2114_irq_unlock(irq_status);
+}
+
+/**
+ * @brief 周期打印 UART2 收发活性统计。
+ *
+ * 该日志用于快速确认：
+ * - 发送路径是否持续有数据输出；
+ * - 接收路径是否通过回调或轮询获取到数据；
+ * - 读寄存器超时是否持续增长。
+ */
+static void mine_wk2114_uart_diag_report_periodic(void)
+{
+    static uint32_t last_report_ms = 0;
+    static uint32_t tx_without_rx_windows = 0;
+    static mine_wk2114_uart_diag_t last_snapshot = {0};
+    mine_wk2114_uart_diag_t cur_snapshot = {0};
+    uint32_t now_ms;
+    uint32_t delta_tx;
+    uint32_t delta_rx;
+    uint32_t delta_timeout;
+
+    now_ms = (uint32_t)uapi_systick_get_ms();
+    if ((uint32_t)(now_ms - last_report_ms) < MINE_WK2114_UART_DIAG_REPORT_MS) {
+        return;
+    }
+    last_report_ms = now_ms;
+
+    mine_wk2114_uart_diag_snapshot(&cur_snapshot);
+    delta_tx = cur_snapshot.tx_byte_count - last_snapshot.tx_byte_count;
+    delta_rx = (cur_snapshot.rx_callback_byte_count + cur_snapshot.rx_poll_byte_count) -
+        (last_snapshot.rx_callback_byte_count + last_snapshot.rx_poll_byte_count);
+    delta_timeout = cur_snapshot.read_timeout_count - last_snapshot.read_timeout_count;
+
+    mine_wk2114_log("[mine wk2114] uart2 diag total(tx=%luB/%luF fail=%lu rx_cb=%lu rx_poll=%lu drain=%lu rreg=%lu rto=%lu) delta(tx=%lu rx=%lu rto=%lu)\r\n",
+        (unsigned long)cur_snapshot.tx_byte_count,
+        (unsigned long)cur_snapshot.tx_frame_count,
+        (unsigned long)cur_snapshot.tx_fail_count,
+        (unsigned long)cur_snapshot.rx_callback_byte_count,
+        (unsigned long)cur_snapshot.rx_poll_byte_count,
+        (unsigned long)cur_snapshot.rx_drain_byte_count,
+        (unsigned long)cur_snapshot.read_cmd_count,
+        (unsigned long)cur_snapshot.read_timeout_count,
+        (unsigned long)delta_tx,
+        (unsigned long)delta_rx,
+        (unsigned long)delta_timeout);
+
+    if ((delta_tx > 0U) && (delta_rx == 0U)) {
+        tx_without_rx_windows++;
+    } else {
+        tx_without_rx_windows = 0;
+    }
+
+    if (tx_without_rx_windows >= 3U) {
+        mine_wk2114_log("[mine wk2114] uart2 warn: tx active but rx silent (%lu windows)\r\n",
+            (unsigned long)tx_without_rx_windows);
+    }
+
+    last_snapshot = cur_snapshot;
 }
 
 /**
@@ -177,7 +353,8 @@ static void mine_wk2114_host_hw_rx_drain(void)
     }
 
     if (drain_count > 0U) {
-        osal_printk("[mine wk2114] drain stale host rx=%u\r\n", (unsigned int)drain_count);
+        mine_wk2114_uart_diag_record_rx_drain((uint32_t)drain_count);
+        mine_wk2114_log("[mine wk2114] drain stale host rx=%u\r\n", (unsigned int)drain_count);
     }
 }
 
@@ -203,6 +380,7 @@ static bool mine_wk2114_host_resp_try_fetch(uint8_t *byte)
      * 这样即使回调未及时入队，也能在读寄存器窗口内拿到返回值。
      */
     if (uapi_uart_read(MINE_WK2114_HOST_UART_BUS, byte, 1, 0) > 0) {
+        mine_wk2114_uart_diag_record_rx_poll(1U);
         return true;
     }
 
@@ -294,10 +472,15 @@ static errcode_t mine_wk2114_send_host_frame(const uint8_t *frame, uint16_t len,
     }
 
     write_ret = uapi_uart_write(MINE_WK2114_HOST_UART_BUS, frame, len, 0);
-    if (write_ret < 0) {
+    if ((write_ret < 0) || ((uint32_t)write_ret != len)) {
+        mine_wk2114_uart_diag_record_tx_fail();
+        mine_wk2114_log("[mine wk2114] host tx fail/short, want=%u, ret=%ld\r\n",
+            (unsigned int)len, (long)write_ret);
         mine_wk2114_oled_push_state("HOST TX FAIL");
         return ERRCODE_FAIL;
     }
+
+    mine_wk2114_uart_diag_record_tx_success((uint32_t)write_ret);
 
     mine_wk2114_oled_push_data_event(prefix, frame, len);
     return ERRCODE_SUCC;
@@ -347,6 +530,7 @@ static errcode_t mine_wk2114_read_addr6(uint8_t addr6, uint8_t *value)
     cmd = (uint8_t)(MINE_WK2114_HOST_CMD_READ_REG | (addr6 & 0x3FU));
     mine_wk2114_host_resp_fifo_reset();
     mine_wk2114_host_hw_rx_drain();
+    mine_wk2114_uart_diag_record_read_cmd();
 
     ret = mine_wk2114_send_host_frame(&cmd, 1, "HOST TX RREG");
     if (ret != ERRCODE_SUCC) {
@@ -384,6 +568,7 @@ static errcode_t mine_wk2114_read_addr6(uint8_t addr6, uint8_t *value)
         return ERRCODE_SUCC;
     }
 
+    mine_wk2114_uart_diag_record_read_timeout();
     mine_wk2114_oled_push_state("HOST RREG TO");
     return ERRCODE_FAIL;
 }
@@ -754,6 +939,8 @@ static void mine_wk2114_uart_rx_handler(const void *buffer, uint16_t length, boo
         mine_wk2114_host_resp_fifo_push(data_ptr[idx]);
     }
 
+    mine_wk2114_uart_diag_record_rx_callback((uint32_t)length);
+
     mine_wk2114_oled_push_data_event("HOST RX", data_ptr, length);
 }
 
@@ -926,6 +1113,7 @@ static errcode_t mine_wk2114_bootstrap_with_retry(void)
         mine_wk2114_oled_push_state("INIT RETRY");
         osal_printk("[mine wk2114] init retry #%lu, ret=%x\r\n",
             (unsigned long)init_retry_count, ret);
+        mine_wk2114_uart_diag_report_periodic();
         mine_wk2114_oled_flush_pending();
         osal_msleep(MINE_WK2114_INIT_RETRY_WAIT_MS);
     }
@@ -941,6 +1129,7 @@ static errcode_t mine_wk2114_bootstrap_with_retry(void)
         mine_wk2114_oled_push_state("SUB1 RETRY");
         osal_printk("[mine wk2114] sub1 cfg retry #%lu, ret=%x\r\n",
             (unsigned long)sub1_retry_count, ret);
+        mine_wk2114_uart_diag_report_periodic();
         mine_wk2114_oled_flush_pending();
         osal_msleep(MINE_WK2114_INIT_RETRY_WAIT_MS);
     }
@@ -974,6 +1163,7 @@ static void *mine_wk2114_uart2_ext_task(const char *arg)
     }
 
     while (1) {
+        mine_wk2114_uart_diag_report_periodic();
         mine_wk2114_oled_flush_pending();
         osal_msleep(MINE_WK2114_TASK_LOOP_WAIT_MS);
     }

@@ -20,6 +20,9 @@
 /* 启动失败重试参数。 */
 #define MINE_WK2114_INIT_RETRY_WAIT_MS 1200
 
+/* UART2 活性诊断日志周期（毫秒）。 */
+#define MINE_WK2114_UART_DIAG_REPORT_MS 1000
+
 /* UART2 作为 WK2114 主接口。 */
 #define MINE_WK2114_HOST_UART_BUS UART_BUS_2
 #define MINE_WK2114_HOST_UART_TX_PIN 8
