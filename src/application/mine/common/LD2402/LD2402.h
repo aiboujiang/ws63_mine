@@ -56,6 +56,16 @@
 #define LD2402_CMD_TIMEOUT_MS       1000
 #define LD2402_MAX_GATES            32
 
+/*
+ * 工程模式能量帧布局（手册 5.6.2）：
+ * - 前 16 个距离门为运动能量；
+ * - 后 16 个距离门为微动/静止能量。
+ */
+#define LD2402_ENGINEERING_MOVE_GATES    16
+#define LD2402_ENGINEERING_STATIC_GATES  16
+#define LD2402_ENGINEERING_TOTAL_GATES   \
+    (LD2402_ENGINEERING_MOVE_GATES + LD2402_ENGINEERING_STATIC_GATES)
+
 /* ACK 规则：ACK 命令字 = 原命令字 + 0x0100。 */
 #define LD2402_ACK_CMD_OFFSET       0x0100
 #define LD2402_ACK_STATUS_OK        0x0000
@@ -71,9 +81,18 @@ typedef enum {
 
 /* 数据上报帧抽象。 */
 typedef struct {
+    /* 检测状态：0 无人，1 有人（运动），2 有人静止。 */
     LD2402_Status_t status;
+    /* 目标距离，单位厘米。 */
     uint16_t distance_cm;
+    /* 运动能量门数量（通常为 16）。 */
+    uint16_t move_gate_count;
+    /* 微动/静止能量门数量（通常为 16）。 */
+    uint16_t static_gate_count;
+    /* 运动能量数组。 */
     int32_t move_energy[LD2402_MAX_GATES];
+    /* 微动/静止能量数组。 */
+    int32_t static_energy[LD2402_MAX_GATES];
 } LD2402_DataFrame_t;
 
 /* 自动门限干扰查询结果。 */

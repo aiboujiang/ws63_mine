@@ -267,10 +267,84 @@ static void LD2402_ParseAckFrame(LD2402_Handle_t *h)
 }
 
 /**
+ * @brief 清空数据帧中的能量统计字段。
+ *
+ * @param frame 待清空的数据帧对象。
+ */
+static void LD2402_ClearDataFrameEnergy(LD2402_DataFrame_t *frame)
+{
+    if (frame == NULL) {
+        return;
+    }
+
+    frame->move_gate_count = 0;
+    frame->static_gate_count = 0;
+    (void)memset_s(frame->move_energy, sizeof(frame->move_energy), 0, sizeof(frame->move_energy));
+    (void)memset_s(frame->static_energy, sizeof(frame->static_energy), 0, sizeof(frame->static_energy));
+}
+
+/**
+ * @brief 解析工程模式能量区，拆分为运动能量与微动/静止能量。
+ *
+ * 手册 5.6.2（表 5-7）定义：
+ * 1) 能量区总长度通常为 32 * 4 字节；
+ * 2) 前 16 门为运动能量，后 16 门为微动/静止能量。
+ *
+ * 为兼容可能存在的裁剪帧或旧固件变体，这里保留“降级拆分”策略：
+ * - 标准长度（>=32门）时按 16/16 拆分；
+ * - 非标准长度时按前半段/后半段拆分。
+ *
+ * @param energy_ptr       能量区起始地址。
+ * @param energy_word_cnt  能量值个数（每个能量值 4 字节）。
+ * @param frame            输出数据帧对象。
+ */
+static void LD2402_ParseEngineeringEnergies(const uint8_t *energy_ptr,
+    uint16_t energy_word_cnt, LD2402_DataFrame_t *frame)
+{
+    uint16_t move_count;
+    uint16_t static_count;
+    uint16_t idx;
+
+    if ((energy_ptr == NULL) || (frame == NULL) || (energy_word_cnt == 0)) {
+        return;
+    }
+
+    if (energy_word_cnt >= LD2402_ENGINEERING_TOTAL_GATES) {
+        move_count = LD2402_ENGINEERING_MOVE_GATES;
+        static_count = LD2402_ENGINEERING_STATIC_GATES;
+    } else {
+        /*
+         * 非标准长度：优先保证“前半运动、后半静止”的语义，
+         * 这样上层至少能得到稳定的双通道趋势。
+         */
+        move_count = (uint16_t)(energy_word_cnt / 2U);
+        static_count = (uint16_t)(energy_word_cnt - move_count);
+    }
+
+    if (move_count > LD2402_MAX_GATES) {
+        move_count = LD2402_MAX_GATES;
+    }
+    if (static_count > LD2402_MAX_GATES) {
+        static_count = LD2402_MAX_GATES;
+    }
+
+    frame->move_gate_count = move_count;
+    frame->static_gate_count = static_count;
+
+    for (idx = 0; idx < move_count; idx++) {
+        frame->move_energy[idx] = (int32_t)ReadUint32_LE(&energy_ptr[idx * 4U]);
+    }
+
+    for (idx = 0; idx < static_count; idx++) {
+        frame->static_energy[idx] = (int32_t)ReadUint32_LE(&energy_ptr[(move_count + idx) * 4U]);
+    }
+}
+
+/**
  * @brief 解析数据上报帧并回调上层。
  *
- * 手册定义数据区由“状态 + 距离 + 各距离门能量值”组成，
- * 当前接口仅保留运动/静止融合能量数组供上层展示。
+ * 手册定义数据区由“状态 + 距离 + 各距离门能量值”组成。
+ * 在工程模式下，能量值可进一步拆分为“运动能量 + 微动/静止能量”。
  *
  * @param h 协议句柄。
  */
@@ -278,25 +352,27 @@ static void LD2402_ParseDataFrame(LD2402_Handle_t *h)
 {
     LD2402_DataFrame_t frame = {0};
     uint16_t energy_bytes;
-    uint16_t gate_count;
-    uint16_t idx;
+    uint16_t energy_word_cnt;
 
     if ((h->on_data_received == NULL) || (h->frame_len < LD2402_DATA_FRAME_MIN_DATA_LEN)) {
         return;
     }
 
-    frame.status = (LD2402_Status_t)h->rx_buffer[6];
+    /* 检测状态仅接受手册定义值 0/1/2，非法值统一视为无人。 */
+    if (h->rx_buffer[6] <= (uint8_t)LD2402_STATUS_STATIC) {
+        frame.status = (LD2402_Status_t)h->rx_buffer[6];
+    } else {
+        frame.status = LD2402_STATUS_NONE;
+    }
     frame.distance_cm = ReadUint16_LE(&h->rx_buffer[7]);
 
+    LD2402_ClearDataFrameEnergy(&frame);
     energy_bytes = (uint16_t)(h->frame_len - LD2402_DATA_FRAME_MIN_DATA_LEN);
-    gate_count = (uint16_t)(energy_bytes / 4);
-    /* 仅解析到库支持的最大门数，避免异常数据导致越界。 */
-    if (gate_count > LD2402_MAX_GATES) {
-        gate_count = LD2402_MAX_GATES;
-    }
+    energy_word_cnt = (uint16_t)(energy_bytes / 4U);
 
-    for (idx = 0; idx < gate_count; idx++) {
-        frame.move_energy[idx] = (int32_t)ReadUint32_LE(&h->rx_buffer[9 + idx * 4]);
+    /* 能量区按 4 字节对齐，余数字节按协议噪声处理并丢弃。 */
+    if (energy_word_cnt > 0) {
+        LD2402_ParseEngineeringEnergies(&h->rx_buffer[9], energy_word_cnt, &frame);
     }
 
     h->on_data_received(&frame);

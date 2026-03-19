@@ -83,6 +83,11 @@ static void mine_ld2402_set_status(const char *text)
         return;
     }
 
+    /* 状态未变化时不重复置脏，减少 OLED 与日志无效刷新。 */
+    if (strncmp(g_mine_ld2402_status_text, text, sizeof(g_mine_ld2402_status_text) - 1U) == 0) {
+        return;
+    }
+
     if (snprintf_s(g_mine_ld2402_status_text, sizeof(g_mine_ld2402_status_text),
         sizeof(g_mine_ld2402_status_text) - 1, "%s", text) > 0) {
         g_mine_ld2402_status_dirty = true;
@@ -406,6 +411,28 @@ static void mine_ld2402_delay_ms_adapter(uint32_t ms)
 }
 
 /**
+ * @brief 将手册定义的检测状态码转换为短文本。
+ *
+ * 手册 5.6.2 定义：0=无人，1=有人，2=有人静止。
+ *
+ * @param status 协议状态码。
+ * @return const char* 可读状态文本。
+ */
+static const char *mine_ld2402_status_to_text(LD2402_Status_t status)
+{
+    switch (status) {
+        case LD2402_STATUS_NONE:
+            return "OFF";
+        case LD2402_STATUS_MOVE:
+            return "MOVE";
+        case LD2402_STATUS_STATIC:
+            return "STATIC";
+        default:
+            return "UNK";
+    }
+}
+
+/**
  * @brief LD2402 数据帧回调。
  *
  * 将运动状态与距离压缩为 OLED 可显示文本。
@@ -418,8 +445,8 @@ static void mine_ld2402_data_callback(LD2402_DataFrame_t *data)
         return;
     }
 
-    mine_ld2402_set_status_fmt("RADAR:S%u D:%u",
-        (unsigned int)data->status, (unsigned int)data->distance_cm);
+    mine_ld2402_set_status_fmt("RADAR:%s D:%u",
+        mine_ld2402_status_to_text(data->status), (unsigned int)data->distance_cm);
 }
 
 /**
@@ -787,15 +814,16 @@ bool mine_ld2402_init(uart_bus_t bus)
     LD2402_Init(&g_mine_ld2402_handle, &hal);
     g_mine_ld2402_handle.on_data_received = mine_ld2402_data_callback;
 
-    /* 提前置 ready，确保初始化阶段下发命令时 ACK 能被回调解析。 */
-    g_mine_ld2402_ready = true;
-
     if (LD2402_GetVersion(&g_mine_ld2402_handle, version, sizeof(version)) == 0) {
         osal_printk("[mine ld2402] version:%s\r\n", version);
     } else {
         mine_ld2402_set_status("RADAR:NO ACK");
+        g_mine_ld2402_ready = false;
         return false;
     }
+
+    /* 握手成功后再置 ready，避免“初始化失败但状态仍可用”的误判。 */
+    g_mine_ld2402_ready = true;
 
     if (LD2402_GetSN_Char(&g_mine_ld2402_handle, sn_text, sizeof(sn_text)) == 0) {
         osal_printk("[mine ld2402] sn(char):%s\r\n", sn_text);
@@ -825,7 +853,12 @@ void mine_ld2402_feed(uart_bus_t bus, const uint8_t *data, uint16_t len)
 {
     uint16_t idx;
 
-    if ((!g_mine_ld2402_ready) || (bus != g_mine_ld2402_bus) || (data == NULL) || (len == 0)) {
+    /*
+     * 不以 ready 作为解析开关：
+     * - 初始化握手阶段同样需要解析 ACK；
+     * - 异常恢复阶段也需要持续喂包以重建状态机。
+     */
+    if ((bus != g_mine_ld2402_bus) || (data == NULL) || (len == 0)) {
         return;
     }
 
