@@ -52,6 +52,8 @@
 #define MINE_UART_RX_LOG_TEXT_MAX_LEN ((MINE_UART_RX_LOG_SHOW_MAX_BYTES * 2) + 1)
 /* ZW101 二进制接收日志最小打印间隔（毫秒），用于抑制高频刷屏。 */
 #define MINE_ZW101_BINARY_LOG_INTERVAL_MS 1000
+/* LD2402 二进制接收日志最小打印间隔（毫秒），用于抑制高频刷屏。 */
+#define MINE_LD2402_BINARY_LOG_INTERVAL_MS 1000
 
 /* ZW101 状态上报最大文本长度（不含 SSAPC 侧自动追加的数据标签）。 */
 #define MINE_ZW101_STATUS_FORWARD_TEXT_LEN 64
@@ -72,6 +74,12 @@ static unsigned int g_mine_uart_msg_size = sizeof(mine_sle_uart_slave_msg_t);
 /* ZW101 二进制日志节流状态。 */
 static uint32_t g_mine_zw101_binary_last_log_ms = 0;
 static uint32_t g_mine_zw101_binary_suppressed = 0;
+#endif
+
+#if MINE_LD2402_ENABLE
+/* LD2402 二进制日志节流状态。 */
+static uint32_t g_mine_ld2402_binary_last_log_ms = 0;
+static uint32_t g_mine_ld2402_binary_suppressed = 0;
 #endif
 
 /* 保留原 OSAL 日志出口，并镜像到 PRINT 通道。 */
@@ -433,11 +441,10 @@ static void mine_sle_uart_slave_dump_uart_rx(uart_bus_t bus, const uint8_t *buff
     uint16_t show_len;
     uint16_t idx;
     uint16_t pos = 0;
+    uint16_t printable_count = 0;
+    uint32_t printable_ratio_pct;
+    bool likely_binary = false;
     bool truncated = false;
-#if MINE_ZW101_ENABLE
-    /* 仅 ZW101 模式下需要根据可打印字符判定是否进行二进制日志节流。 */
-    bool has_printable_ascii = false;
-#endif
     uint8_t ch;
 
     if ((buffer == NULL) || (length == 0)) {
@@ -458,9 +465,7 @@ static void mine_sle_uart_slave_dump_uart_rx(uart_bus_t bus, const uint8_t *buff
         ch = buffer[idx];
         if ((ch >= 0x20U) && (ch <= 0x7EU)) {
             /* 直接显示可打印 ASCII，便于观察纯文本协议内容。 */
-#if MINE_ZW101_ENABLE
-            has_printable_ascii = true;
-#endif
+            printable_count++;
             log_text[pos++] = (char)ch;
             continue;
         }
@@ -489,6 +494,16 @@ static void mine_sle_uart_slave_dump_uart_rx(uart_bus_t bus, const uint8_t *buff
 
     log_text[pos] = '\0';
 
+    /*
+     * 通过可打印字符占比粗判“文本帧/二进制帧”：
+     * - 长度较长且可打印比例偏低时，按二进制流处理并节流日志；
+     * - 其余情况保持原有文本预览输出。
+     */
+    if (show_len > 0U) {
+        printable_ratio_pct = ((uint32_t)printable_count * 100U) / (uint32_t)show_len;
+        likely_binary = ((show_len >= 16U) && (printable_ratio_pct < 35U));
+    }
+
     if (pos == 0) {
         if (peer_connected) {
             osal_printk("[mine slave] %s rx len:%u (dump failed)\r\n",
@@ -501,7 +516,7 @@ static void mine_sle_uart_slave_dump_uart_rx(uart_bus_t bus, const uint8_t *buff
     }
 
 #if MINE_ZW101_ENABLE
-    if ((bus == MINE_ZW101_UART_BUS) && (!has_printable_ascii)) {
+    if ((bus == MINE_ZW101_UART_BUS) && likely_binary) {
         uint32_t now_ms = (uint32_t)uapi_systick_get_ms();
 
         if ((g_mine_zw101_binary_last_log_ms != 0U) &&
@@ -517,6 +532,26 @@ static void mine_sle_uart_slave_dump_uart_rx(uart_bus_t bus, const uint8_t *buff
         }
 
         g_mine_zw101_binary_last_log_ms = now_ms;
+    }
+#endif
+
+#if MINE_LD2402_ENABLE
+    if ((bus == MINE_LD2402_UART_BUS) && likely_binary) {
+        uint32_t now_ms = (uint32_t)uapi_systick_get_ms();
+
+        if ((g_mine_ld2402_binary_last_log_ms != 0U) &&
+            ((uint32_t)(now_ms - g_mine_ld2402_binary_last_log_ms) < MINE_LD2402_BINARY_LOG_INTERVAL_MS)) {
+            g_mine_ld2402_binary_suppressed++;
+            return;
+        }
+
+        osal_printk("[mine slave] LD2402 binary rx len:%u ratio:%lu%% suppressed:%lu\r\n",
+            (unsigned int)length,
+            (unsigned long)printable_ratio_pct,
+            (unsigned long)g_mine_ld2402_binary_suppressed);
+        g_mine_ld2402_binary_suppressed = 0;
+        g_mine_ld2402_binary_last_log_ms = now_ms;
+        return;
     }
 #endif
 
