@@ -67,6 +67,7 @@ static volatile uint16_t g_mine_wk2114_host_resp_tail = 0;
 
 /* 运行态缓存：就绪标记、各子通道波特率、通道使能状态。 */
 static bool g_mine_wk2114_uart_ready = false;
+static uint8_t g_mine_wk2114_uart_profile_index = 0;
 static uint32_t g_mine_wk2114_subuart_baud[MINE_WK2114_SUBUART_COUNT] = {
     MINE_WK2114_HOST_UART_BAUD,
     MINE_WK2114_HOST_UART_BAUD,
@@ -1073,6 +1074,53 @@ static void mine_wk2114_uart_rx_handler(const void *buffer, uint16_t length, boo
 }
 
 /**
+ * @brief 按配置索引初始化 UART2 引脚映射，支持现场自动探测。
+ *
+ * 配置说明：
+ * 0: TX=8 RX=7 MODE=2（默认板级配置）
+ * 1: TX=8 RX=7 MODE=1（同引脚不同复用）
+ * 2: TX=7 RX=8 MODE=2（收发交换）
+ * 3: TX=7 RX=8 MODE=1（收发交换+复用切换）
+ *
+ * @param profile_idx 配置索引。
+ * @param pin_cfg     输出 UART 引脚配置。
+ * @param pin_mode    输出引脚复用模式。
+ */
+static void mine_wk2114_build_uart_profile(uint8_t profile_idx, uart_pin_config_t *pin_cfg, uint8_t *pin_mode)
+{
+    if ((pin_cfg == NULL) || (pin_mode == NULL)) {
+        return;
+    }
+
+    switch (profile_idx) {
+        case 1:
+            pin_cfg->tx_pin = MINE_WK2114_HOST_UART_TX_PIN;
+            pin_cfg->rx_pin = MINE_WK2114_HOST_UART_RX_PIN;
+            *pin_mode = 1;
+            break;
+        case 2:
+            pin_cfg->tx_pin = MINE_WK2114_HOST_UART_RX_PIN;
+            pin_cfg->rx_pin = MINE_WK2114_HOST_UART_TX_PIN;
+            *pin_mode = MINE_WK2114_HOST_UART_PIN_MODE;
+            break;
+        case 3:
+            pin_cfg->tx_pin = MINE_WK2114_HOST_UART_RX_PIN;
+            pin_cfg->rx_pin = MINE_WK2114_HOST_UART_TX_PIN;
+            *pin_mode = 1;
+            break;
+        case 0:
+        default:
+            pin_cfg->tx_pin = MINE_WK2114_HOST_UART_TX_PIN;
+            pin_cfg->rx_pin = MINE_WK2114_HOST_UART_RX_PIN;
+            *pin_mode = MINE_WK2114_HOST_UART_PIN_MODE;
+            break;
+    }
+
+    pin_cfg->cts_pin = PIN_NONE;
+    pin_cfg->rts_pin = PIN_NONE;
+}
+
+/**
  * @brief 初始化 WK2114 主口 UART2 并注册接收回调。
  *
  * @return errcode_t
@@ -1087,22 +1135,17 @@ errcode_t mine_wk2114_uart2_ext_init(void)
     };
     uart_buffer_config_t uart_buffer_cfg = {0};
     uart_pin_config_t pin_cfg = {0};
+    uint8_t profile_try;
+    uint8_t profile_idx;
+    uint8_t pin_mode = MINE_WK2114_HOST_UART_PIN_MODE;
     errcode_t ret;
 
     if (g_mine_wk2114_uart_ready) {
         return ERRCODE_SUCC;
     }
 
-    pin_cfg.tx_pin = MINE_WK2114_HOST_UART_TX_PIN;
-    pin_cfg.rx_pin = MINE_WK2114_HOST_UART_RX_PIN;
-    pin_cfg.cts_pin = PIN_NONE;
-    pin_cfg.rts_pin = PIN_NONE;
-
     uart_buffer_cfg.rx_buffer = g_mine_wk2114_uart_rx_buffer;
     uart_buffer_cfg.rx_buffer_size = sizeof(g_mine_wk2114_uart_rx_buffer);
-
-    uapi_pin_set_mode(pin_cfg.tx_pin, MINE_WK2114_HOST_UART_PIN_MODE);
-    uapi_pin_set_mode(pin_cfg.rx_pin, MINE_WK2114_HOST_UART_PIN_MODE);
 
     /* 先完成 IRQ 引脚初始化，确保芯片一上电就能捕获中断边沿。 */
     ret = mine_wk2114_irq_gpio_init();
@@ -1112,40 +1155,65 @@ errcode_t mine_wk2114_uart2_ext_init(void)
         return ret;
     }
 
-    (void)uapi_uart_deinit(MINE_WK2114_HOST_UART_BUS);
-    ret = uapi_uart_init(MINE_WK2114_HOST_UART_BUS, &pin_cfg, &attr, NULL, &uart_buffer_cfg);
-    if (ret != ERRCODE_SUCC) {
-        osal_printk("[mine wk2114] uart init stage failed, ret=%x\r\n", ret);
-        mine_wk2114_oled_push_state("UART2 INIT FAIL");
-        return ret;
-    }
+    for (profile_try = 0; profile_try < 4U; profile_try++) {
+        profile_idx = (uint8_t)((g_mine_wk2114_uart_profile_index + profile_try) % 4U);
+        mine_wk2114_build_uart_profile(profile_idx, &pin_cfg, &pin_mode);
+
+        uapi_pin_set_mode(pin_cfg.tx_pin, pin_mode);
+        uapi_pin_set_mode(pin_cfg.rx_pin, pin_mode);
+
+        (void)uapi_uart_deinit(MINE_WK2114_HOST_UART_BUS);
+        ret = uapi_uart_init(MINE_WK2114_HOST_UART_BUS, &pin_cfg, &attr, NULL, &uart_buffer_cfg);
+        if (ret != ERRCODE_SUCC) {
+            osal_printk("[mine wk2114] uart init profile=%u failed, ret=%x\r\n",
+                (unsigned int)profile_idx,
+                ret);
+            continue;
+        }
 
 #if defined(CONFIG_UART_SUPPORT_RX)
-    ret = uapi_uart_register_rx_callback(MINE_WK2114_HOST_UART_BUS,
-        (UART_RX_CONDITION_MASK_FULL |
-        UART_RX_CONDITION_MASK_SUFFICIENT_DATA |
-        UART_RX_CONDITION_MASK_IDLE),
-        1,
-        mine_wk2114_uart_rx_handler);
-    if (ret != ERRCODE_SUCC) {
-        osal_printk("[mine wk2114] rx callback register failed, ret=%x\r\n", ret);
-        mine_wk2114_oled_push_state("UART2 RXCB FAIL");
-        return ret;
-    }
+        ret = uapi_uart_register_rx_callback(MINE_WK2114_HOST_UART_BUS,
+            (UART_RX_CONDITION_MASK_FULL |
+            UART_RX_CONDITION_MASK_SUFFICIENT_DATA |
+            UART_RX_CONDITION_MASK_IDLE),
+            1,
+            mine_wk2114_uart_rx_handler);
+        if (ret != ERRCODE_SUCC) {
+            osal_printk("[mine wk2114] rx cb profile=%u failed, ret=%x\r\n",
+                (unsigned int)profile_idx,
+                ret);
+            (void)uapi_uart_deinit(MINE_WK2114_HOST_UART_BUS);
+            continue;
+        }
 #else
-    mine_wk2114_log("[mine wk2114] uart rx callback api unavailable\r\n");
-    mine_wk2114_oled_push_state("UART2 RX UNSUP");
-    return ERRCODE_FAIL;
+        mine_wk2114_log("[mine wk2114] uart rx callback api unavailable\r\n");
+        mine_wk2114_oled_push_state("UART2 RX UNSUP");
+        return ERRCODE_FAIL;
 #endif
 
-    /* 先允许主口收发，再执行规格书要求的链路就绪检查。 */
-    g_mine_wk2114_uart_ready = true;
+        /* 先允许主口收发，再执行规格书要求的链路就绪检查。 */
+        g_mine_wk2114_uart_ready = true;
+        ret = mine_wk2114_check_link_ready();
+        if (ret == ERRCODE_SUCC) {
+            g_mine_wk2114_uart_profile_index = profile_idx;
+            mine_wk2114_log("[mine wk2114] uart profile ok idx=%u tx=%u rx=%u mode=%u\r\n",
+                (unsigned int)profile_idx,
+                (unsigned int)pin_cfg.tx_pin,
+                (unsigned int)pin_cfg.rx_pin,
+                (unsigned int)pin_mode);
+            break;
+        }
 
-    ret = mine_wk2114_check_link_ready();
+        osal_printk("[mine wk2114] link fail profile=%u, ret=%x\r\n",
+            (unsigned int)profile_idx,
+            ret);
+        g_mine_wk2114_uart_ready = false;
+        (void)uapi_uart_deinit(MINE_WK2114_HOST_UART_BUS);
+    }
+
     if (ret != ERRCODE_SUCC) {
         osal_printk("[mine wk2114] link check stage failed, ret=%x\r\n", ret);
         mine_wk2114_oled_push_state("WK2114 LINK FAIL");
-        g_mine_wk2114_uart_ready = false;
         return ret;
     }
 
