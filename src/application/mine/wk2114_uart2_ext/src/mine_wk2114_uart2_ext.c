@@ -607,6 +607,31 @@ static errcode_t mine_wk2114_send_autobaud_sync_sequence(void)
 }
 
 /**
+ * @brief 自适应失败后的增强 0x55 突发同步。
+ */
+static errcode_t mine_wk2114_send_autobaud_sync_fallback_burst(void)
+{
+    uint8_t sync = MINE_WK2114_HOST_AUTOBAUD_SYNC_BYTE;
+    uint8_t i;
+    errcode_t ret;
+
+    for (i = 0; i < MINE_WK2114_HOST_AUTOBAUD_FALLBACK_BURST_COUNT; i++) {
+        ret = mine_wk2114_send_host_frame(&sync, 1);
+        if (ret != ERRCODE_SUCC) {
+            return ret;
+        }
+        if (MINE_WK2114_HOST_AUTOBAUD_FALLBACK_INTERVAL_MS > 0U) {
+            osal_msleep(MINE_WK2114_HOST_AUTOBAUD_FALLBACK_INTERVAL_MS);
+        }
+    }
+
+    mine_wk2114_log("[mine wk2114] sync55 fallback burst count=%u\r\n",
+        (unsigned int)MINE_WK2114_HOST_AUTOBAUD_FALLBACK_BURST_COUNT);
+    osal_msleep(MINE_WK2114_HOST_AUTOBAUD_FALLBACK_WAIT_MS);
+    return ERRCODE_SUCC;
+}
+
+/**
  * @brief 链路检查：复位 -> 0x55 -> 读GENA -> 写读回GENA。
  */
 static errcode_t mine_wk2114_check_link_ready(void)
@@ -636,8 +661,20 @@ static errcode_t mine_wk2114_check_link_ready(void)
     /* C: 固定寄存器读校验，GENA 默认应为 0xF0。 */
     ret = mine_wk2114_verify_register_value(MINE_WK2114_ADDR_GENA, MINE_WK2114_GENA_RESERVED_MASK, "GENA");
     if (ret != ERRCODE_SUCC) {
-        mine_wk2114_log("[mine wk2114] link check read GENA timeout\r\n");
-        return ret;
+        /* 关键流程注释：首轮读失败时，补一轮增强 0x55 突发，再重试一次 GENA 读校验。 */
+        mine_wk2114_log("[mine wk2114] first GENA read failed, retry after fallback sync\r\n");
+        ret = mine_wk2114_send_autobaud_sync_fallback_burst();
+        if (ret != ERRCODE_SUCC) {
+            mine_wk2114_log("[mine wk2114] fallback sync55 failed\r\n");
+            return ret;
+        }
+        mine_wk2114_log_pin_snapshot("after-fallback-sync55");
+
+        ret = mine_wk2114_verify_register_value(MINE_WK2114_ADDR_GENA, MINE_WK2114_GENA_RESERVED_MASK, "GENA");
+        if (ret != ERRCODE_SUCC) {
+            mine_wk2114_log("[mine wk2114] link check read GENA timeout\r\n");
+            return ret;
+        }
     }
 
     /* D: 写读回校验，先置 UT1EN，再恢复默认值。 */
