@@ -495,6 +495,10 @@ static errcode_t mine_wk2114_send_autobaud_sync_sequence(void)
         }
     }
 
+    mine_wk2114_log("[mine wk2114] sync55 done count=%u irq_level=%u\r\n",
+        (unsigned int)MINE_WK2114_HOST_AUTOBAUD_SYNC_RETRY,
+        (unsigned int)uapi_gpio_get_val(MINE_WK2114_IRQ_GPIO_PIN));
+
     /* 关键流程注释：应用笔记要求发 0x55 后等待锁定。 */
     osal_msleep(MINE_WK2114_HOST_AUTOBAUD_LOCK_WAIT_MS);
     return ERRCODE_SUCC;
@@ -774,6 +778,13 @@ errcode_t mine_wk2114_uart2_ext_init(void)
     for (profile_try = 0; profile_try < MINE_WK2114_HOST_UART_PROFILE_COUNT; profile_try++) {
         profile_idx = (uint8_t)((g_mine_wk2114_uart_profile_index + profile_try) % MINE_WK2114_HOST_UART_PROFILE_COUNT);
         mine_wk2114_build_uart_profile(profile_idx, &pin_cfg, &pin_mode);
+
+        mine_wk2114_log("[mine wk2114] try profile=%u tx=%u rx=%u mode=%u irq=%u\r\n",
+            (unsigned int)profile_idx,
+            (unsigned int)pin_cfg.tx_pin,
+            (unsigned int)pin_cfg.rx_pin,
+            (unsigned int)pin_mode,
+            (unsigned int)uapi_gpio_get_val(MINE_WK2114_IRQ_GPIO_PIN));
 
         uapi_pin_set_mode(pin_cfg.tx_pin, pin_mode);
         uapi_pin_set_mode(pin_cfg.rx_pin, pin_mode);
