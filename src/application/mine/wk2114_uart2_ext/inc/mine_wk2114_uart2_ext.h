@@ -17,43 +17,39 @@ extern "C" {
 #endif
 
 /**
- * @brief 初始化 WK2114 UART2 扩展模块。
+ * @brief 初始化 WK2114 扩展模块。
  *
- * 初始化过程包含主口波特率自适应与连通性检查：
- * 先发送 0x55 锁定主口波特率，再回读 GENA 寄存器确认设备在线。
+ * 初始化流程基于应用笔记：
+ * 1) 上电后先做硬件复位；
+ * 2) 发送 0x55 锁定主口波特率；
+ * 3) 读取固定寄存器 GENA(默认 0xF0)确认链路；
+ * 4) 执行 GENA 写读回，确认读写都正常。
  *
  * @return errcode_t
  * @retval ERRCODE_SUCC 初始化成功。
- * @retval 其他值       初始化失败。
+ * @retval 其他         初始化失败。
  */
 errcode_t mine_wk2114_uart2_ext_init(void);
 
 /**
- * @brief 配置并使能指定子串口。
+ * @brief 配置并使能指定子串口波特率。
  *
- * 该接口会按规格书流程设置 SPAGE/BAUD/PRES/SCR/FCR，
- * 同时更新 OLED 通道与波特率显示。
+ * 会按应用笔记流程配置 SPAGE/BAUD/PRES/SCR/FCR，
+ * 并对关键寄存器进行读回校验。
  *
- * @param channel   子串口号，范围 1~4。
- * @param baud_rate 目标波特率。
+ * @param channel 子串口号，范围 1~4。
+ * @param baud_rate 子串口波特率。
  * @return errcode_t
- * @retval ERRCODE_SUCC         配置成功。
- * @retval ERRCODE_INVALID_PARAM 参数非法。
- * @retval 其他值               底层发送失败。
  */
 errcode_t mine_wk2114_uart2_ext_set_subuart_baud(uint8_t channel, uint32_t baud_rate);
 
 /**
- * @brief 通过 WK2114 向指定子串口发送数据。
+ * @brief 通过 WK2114 子串口发送数据。
  *
  * @param channel 子串口号，范围 1~4。
- * @param data    待发送数据。
- * @param len     数据长度。
+ * @param data 数据指针。
+ * @param len 数据长度。
  * @return errcode_t
- * @retval ERRCODE_SUCC          发送成功。
- * @retval ERRCODE_UART_NOT_INIT 模块未初始化。
- * @retval ERRCODE_INVALID_PARAM 参数非法。
- * @retval 其他值                发送失败。
  */
 errcode_t mine_wk2114_uart2_ext_send(uint8_t channel, const uint8_t *data, uint16_t len);
 
