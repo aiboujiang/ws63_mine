@@ -92,6 +92,11 @@ typedef struct {
 
 static mine_wk2114_uart_diag_t g_mine_wk2114_uart_diag = {0};
 
+/* WK2114 IRQ 事件统计：中断回调置位，任务线程消费并记录。 */
+static volatile bool g_mine_wk2114_irq_pending = false;
+static volatile uint32_t g_mine_wk2114_irq_trigger_count = 0;
+static uint32_t g_mine_wk2114_irq_handle_count = 0;
+
 /**
  * @brief 进入短临界区，保护主口回读 FIFO。
  *
@@ -275,12 +280,104 @@ static void mine_wk2114_uart_diag_report_periodic(void)
 }
 
 /**
- * @brief 对 WK2114 执行硬件复位脉冲（GPIO9）。
+ * @brief WK2114 IRQ 中断回调，仅置位标记并累计次数。
+ *
+ * @param pin   触发中断的 GPIO 引脚。
+ * @param param 回调预留参数。
+ */
+static void mine_wk2114_irq_gpio_handler(pin_t pin, uintptr_t param)
+{
+    unused(pin);
+    unused(param);
+
+    g_mine_wk2114_irq_trigger_count++;
+    g_mine_wk2114_irq_pending = true;
+}
+
+/**
+ * @brief 初始化 WK2114 IRQ 引脚（GPIO13，上拉输入，下降沿中断）。
+ *
+ * @return errcode_t
+ */
+static errcode_t mine_wk2114_irq_gpio_init(void)
+{
+    errcode_t ret;
+
+    uapi_gpio_init();
+    (void)uapi_pin_set_mode(MINE_WK2114_IRQ_GPIO_PIN, MINE_WK2114_IRQ_PIN_MODE);
+    (void)uapi_pin_set_pull(MINE_WK2114_IRQ_GPIO_PIN, PIN_PULL_TYPE_UP);
+
+    ret = uapi_gpio_set_dir(MINE_WK2114_IRQ_GPIO_PIN, GPIO_DIRECTION_INPUT);
+    if (ret != ERRCODE_SUCC) {
+        mine_wk2114_log("[mine wk2114] irq pin dir failed, ret=%x\r\n", ret);
+        mine_wk2114_oled_push_state("WK IRQ DIR FAIL");
+        return ret;
+    }
+
+    /* 重复初始化时先清旧回调，避免注册冲突。 */
+    (void)uapi_gpio_unregister_isr_func(MINE_WK2114_IRQ_GPIO_PIN);
+    ret = uapi_gpio_register_isr_func(MINE_WK2114_IRQ_GPIO_PIN,
+        MINE_WK2114_IRQ_EDGE_MODE,
+        mine_wk2114_irq_gpio_handler);
+    if (ret != ERRCODE_SUCC) {
+        mine_wk2114_log("[mine wk2114] irq register failed, ret=%x\r\n", ret);
+        mine_wk2114_oled_push_state("WK IRQ REG FAIL");
+        return ret;
+    }
+
+    ret = uapi_gpio_enable_interrupt(MINE_WK2114_IRQ_GPIO_PIN);
+    if (ret != ERRCODE_SUCC) {
+        mine_wk2114_log("[mine wk2114] irq enable failed, ret=%x\r\n", ret);
+        mine_wk2114_oled_push_state("WK IRQ EN FAIL");
+        return ret;
+    }
+
+    return ERRCODE_SUCC;
+}
+
+/**
+ * @brief 在任务线程处理 IRQ 事件，输出状态与计数。
+ */
+static void mine_wk2114_process_irq_event(void)
+{
+    bool irq_pending;
+    uint32_t irq_total;
+    gpio_level_t irq_level;
+    unsigned int irq_status;
+
+    irq_status = mine_wk2114_irq_lock();
+    irq_pending = g_mine_wk2114_irq_pending;
+    irq_total = g_mine_wk2114_irq_trigger_count;
+    g_mine_wk2114_irq_pending = false;
+    mine_wk2114_irq_unlock(irq_status);
+
+    if (!irq_pending) {
+        return;
+    }
+
+    g_mine_wk2114_irq_handle_count++;
+    irq_level = uapi_gpio_get_val(MINE_WK2114_IRQ_GPIO_PIN);
+
+    /* IRQ 为低电平有效：进入处理时若仍为低，说明设备仍有待处理中断源。 */
+    if (irq_level == GPIO_LEVEL_LOW) {
+        mine_wk2114_oled_push_state("WK IRQ ACTIVE");
+    } else {
+        mine_wk2114_oled_push_state("WK IRQ EDGE");
+    }
+
+    mine_wk2114_log("[mine wk2114] irq evt total=%lu handled=%lu level=%u\r\n",
+        (unsigned long)irq_total,
+        (unsigned long)g_mine_wk2114_irq_handle_count,
+        (unsigned int)irq_level);
+}
+
+/**
+ * @brief 对 WK2114 执行硬件复位脉冲（GPIO10）。
  *
  * 复位流程：
- * 1) GPIO9 拉低保持一段时间，触发芯片复位；
- * 2) 正常模式下 GPIO9 拉高释放复位；
- * 3) 调试模式下可保持 GPIO9 持续低电平，不再释放。
+ * 1) GPIO10 拉低保持一段时间，触发芯片复位；
+ * 2) 正常模式下 GPIO10 拉高释放复位；
+ * 3) 调试模式下可保持 GPIO10 持续低电平，不再释放。
  *
  * @return errcode_t
  */
@@ -290,6 +387,7 @@ static errcode_t mine_wk2114_hw_reset_chip(void)
 
     uapi_gpio_init();
     (void)uapi_pin_set_mode(MINE_WK2114_RESET_GPIO_PIN, HAL_PIO_FUNC_GPIO);
+    (void)uapi_pin_set_pull(MINE_WK2114_RESET_GPIO_PIN, PIN_PULL_TYPE_UP);
 
     ret = uapi_gpio_set_dir(MINE_WK2114_RESET_GPIO_PIN, GPIO_DIRECTION_OUTPUT);
     if (ret != ERRCODE_SUCC) {
@@ -308,8 +406,8 @@ static errcode_t mine_wk2114_hw_reset_chip(void)
     osal_msleep(MINE_WK2114_RESET_HOLD_MS);
 
 #if (MINE_WK2114_RESET_FORCE_LOW_ONLY == 1U)
-    /* 调试期间保持 GPIO9 低电平，供外部仪器确认复位脚状态。 */
-    mine_wk2114_log("[mine wk2114] reset pin forced low on gpio9 for debug\r\n");
+    /* 调试期间保持 RESET 低电平，供外部仪器确认复位脚状态。 */
+    mine_wk2114_log("[mine wk2114] reset pin forced low for debug\r\n");
     mine_wk2114_oled_push_state("WK RST HOLD LO");
     return ERRCODE_SUCC;
 #endif
@@ -322,7 +420,7 @@ static errcode_t mine_wk2114_hw_reset_chip(void)
     }
 
     osal_msleep(MINE_WK2114_RESET_RELEASE_WAIT_MS);
-    mine_wk2114_log("[mine wk2114] hw reset pulse done on gpio9\r\n");
+    mine_wk2114_log("[mine wk2114] hw reset pulse done on gpio10\r\n");
     return ERRCODE_SUCC;
 }
 
@@ -1006,6 +1104,14 @@ errcode_t mine_wk2114_uart2_ext_init(void)
     uapi_pin_set_mode(pin_cfg.tx_pin, MINE_WK2114_HOST_UART_PIN_MODE);
     uapi_pin_set_mode(pin_cfg.rx_pin, MINE_WK2114_HOST_UART_PIN_MODE);
 
+    /* 先完成 IRQ 引脚初始化，确保芯片一上电就能捕获中断边沿。 */
+    ret = mine_wk2114_irq_gpio_init();
+    if (ret != ERRCODE_SUCC) {
+        osal_printk("[mine wk2114] irq init failed, ret=%x\r\n", ret);
+        mine_wk2114_oled_push_state("WK IRQ INIT FAIL");
+        return ret;
+    }
+
     (void)uapi_uart_deinit(MINE_WK2114_HOST_UART_BUS);
     ret = uapi_uart_init(MINE_WK2114_HOST_UART_BUS, &pin_cfg, &attr, NULL, &uart_buffer_cfg);
     if (ret != ERRCODE_SUCC) {
@@ -1199,6 +1305,8 @@ static void *mine_wk2114_uart2_ext_task(const char *arg)
     }
 
     while (1) {
+        /* 周期线程中消费 IRQ 置位事件，避免仅注册不处理。 */
+        mine_wk2114_process_irq_event();
         mine_wk2114_uart_diag_report_periodic();
         mine_wk2114_oled_flush_pending();
         osal_msleep(MINE_WK2114_TASK_LOOP_WAIT_MS);
