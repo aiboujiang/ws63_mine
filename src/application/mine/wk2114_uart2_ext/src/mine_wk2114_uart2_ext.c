@@ -815,6 +815,65 @@ static errcode_t mine_wk2114_read_addr6_retry(uint8_t addr6, uint8_t retry_max, 
 }
 
 /**
+ * @brief 读取寄存器并校验固定值，用于主口链路有效性确认。
+ *
+ * @param addr6    6bit 寄存器地址。
+ * @param expected 期望值。
+ * @param reg_name 寄存器名称（用于日志）。
+ * @return errcode_t
+ */
+static errcode_t mine_wk2114_verify_register_value(uint8_t addr6, uint8_t expected, const char *reg_name)
+{
+    uint8_t read_value = 0;
+    errcode_t ret;
+
+    ret = mine_wk2114_read_addr6_retry(addr6, MINE_WK2114_LINK_CHECK_READ_RETRY, &read_value);
+    if (ret != ERRCODE_SUCC) {
+        mine_wk2114_log("[mine wk2114] verify %s read timeout\r\n", (reg_name == NULL) ? "REG" : reg_name);
+        return ret;
+    }
+
+    if (read_value != expected) {
+        mine_wk2114_log("[mine wk2114] verify %s mismatch, got=0x%02X expect=0x%02X\r\n",
+            (reg_name == NULL) ? "REG" : reg_name,
+            (unsigned int)read_value,
+            (unsigned int)expected);
+        return ERRCODE_FAIL;
+    }
+
+    return ERRCODE_SUCC;
+}
+
+/**
+ * @brief 写寄存器后立即回读校验，确保写操作真实生效。
+ *
+ * @param addr6    6bit 寄存器地址。
+ * @param value    写入值。
+ * @param reg_name 寄存器名称（用于日志）。
+ * @return errcode_t
+ */
+static errcode_t mine_wk2114_write_readback_verify(uint8_t addr6, uint8_t value, const char *reg_name)
+{
+    errcode_t ret;
+
+    ret = mine_wk2114_write_addr6(addr6, value);
+    if (ret != ERRCODE_SUCC) {
+        mine_wk2114_log("[mine wk2114] write %s failed, ret=%x\r\n",
+            (reg_name == NULL) ? "REG" : reg_name,
+            ret);
+        return ret;
+    }
+
+    ret = mine_wk2114_verify_register_value(addr6, value, reg_name);
+    if (ret != ERRCODE_SUCC) {
+        mine_wk2114_log("[mine wk2114] write-readback %s failed\r\n", (reg_name == NULL) ? "REG" : reg_name);
+        return ret;
+    }
+
+    return ERRCODE_SUCC;
+}
+
+/**
  * @brief 执行 WK2114 主口自动波特率锁定序列。
  *
  * 按手册 9.1 的 0x55 机制实现，并增加多次发送以提升冷启动锁定稳定性。
@@ -857,6 +916,7 @@ static errcode_t mine_wk2114_send_autobaud_sync_sequence(void)
 static errcode_t mine_wk2114_check_link_ready(void)
 {
     uint8_t gena_origin = 0;
+    uint8_t gena_test = 0;
     errcode_t ret;
 
     ret = mine_wk2114_hw_reset_chip();
@@ -884,20 +944,29 @@ static errcode_t mine_wk2114_check_link_ready(void)
         return ret;
     }
 
-    ret = mine_wk2114_read_addr6_retry(MINE_WK2114_ADDR_GENA, MINE_WK2114_LINK_CHECK_READ_RETRY, &gena_origin);
+    /* C: 先读固定寄存器默认值，确认主口通信已打通。 */
+    ret = mine_wk2114_verify_register_value(MINE_WK2114_ADDR_GENA, MINE_WK2114_GENA_RESERVED_MASK, "GENA");
     if (ret != ERRCODE_SUCC) {
         osal_printk("[mine wk2114] link check read GENA timeout\r\n");
         mine_wk2114_oled_push_state("WK REG FAIL");
         return ERRCODE_FAIL;
     }
 
-    if (gena_origin != MINE_WK2114_GENA_RESERVED_MASK) {
-        osal_printk("[mine wk2114] link check GENA mismatch, got=0x%02X expect=0x%02X\r\n",
-            (unsigned int)gena_origin,
-            (unsigned int)MINE_WK2114_GENA_RESERVED_MASK);
-        mine_wk2114_oled_push_state("WK REG FAIL");
+    /* D: 再做一次 GENA 写读回校验，确认写寄存器链路正常。 */
+    gena_test = (uint8_t)(MINE_WK2114_GENA_RESERVED_MASK | 0x01U);
+    ret = mine_wk2114_write_readback_verify(MINE_WK2114_ADDR_GENA, gena_test, "GENA");
+    if (ret != ERRCODE_SUCC) {
+        mine_wk2114_oled_push_state("WK WREG FAIL");
         return ERRCODE_FAIL;
     }
+
+    ret = mine_wk2114_write_readback_verify(MINE_WK2114_ADDR_GENA, MINE_WK2114_GENA_RESERVED_MASK, "GENA");
+    if (ret != ERRCODE_SUCC) {
+        mine_wk2114_oled_push_state("WK WREG FAIL");
+        return ERRCODE_FAIL;
+    }
+
+    gena_origin = MINE_WK2114_GENA_RESERVED_MASK;
 
     /* 影子值按默认复位值初始化，后续 enable 流程仅更新低 4 位。 */
     g_mine_wk2114_gena_shadow = MINE_WK2114_GENA_RESERVED_MASK;
@@ -993,8 +1062,18 @@ static errcode_t mine_wk2114_config_subuart(uint8_t channel, uint32_t baud_rate)
         return ret;
     }
 
+    ret = mine_wk2114_verify_register_value(sub_addr, 0x01U, "SPAGE(P1)");
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+
     sub_addr = mine_wk2114_make_sub_addr(channel, MINE_WK2114_SUBREG_BAUD1);
     ret = mine_wk2114_write_addr6(sub_addr, (uint8_t)((baud_reg >> 8) & 0xFFU));
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+
+    ret = mine_wk2114_verify_register_value(sub_addr, (uint8_t)((baud_reg >> 8) & 0xFFU), "BAUD1");
     if (ret != ERRCODE_SUCC) {
         return ret;
     }
@@ -1005,8 +1084,18 @@ static errcode_t mine_wk2114_config_subuart(uint8_t channel, uint32_t baud_rate)
         return ret;
     }
 
+    ret = mine_wk2114_verify_register_value(sub_addr, (uint8_t)(baud_reg & 0xFFU), "BAUD0");
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+
     sub_addr = mine_wk2114_make_sub_addr(channel, MINE_WK2114_SUBREG_PRES);
     ret = mine_wk2114_write_addr6(sub_addr, (uint8_t)(pres & 0x0FU));
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+
+    ret = mine_wk2114_verify_register_value(sub_addr, (uint8_t)(pres & 0x0FU), "PRES");
     if (ret != ERRCODE_SUCC) {
         return ret;
     }
@@ -1018,8 +1107,18 @@ static errcode_t mine_wk2114_config_subuart(uint8_t channel, uint32_t baud_rate)
         return ret;
     }
 
+    ret = mine_wk2114_verify_register_value(sub_addr, 0x00U, "SPAGE(P0)");
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+
     sub_addr = mine_wk2114_make_sub_addr(channel, MINE_WK2114_SUBREG_SCR);
     ret = mine_wk2114_write_addr6(sub_addr, 0x03);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+
+    ret = mine_wk2114_verify_register_value(sub_addr, 0x03U, "SCR");
     if (ret != ERRCODE_SUCC) {
         return ret;
     }
@@ -1030,8 +1129,19 @@ static errcode_t mine_wk2114_config_subuart(uint8_t channel, uint32_t baud_rate)
         return ret;
     }
 
+    /* FCR 的复位位会自动清零，回读校验时仅比较高 2 位触点配置。 */
+    ret = mine_wk2114_verify_register_value(sub_addr, 0x0CU, "FCR");
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+
     /* 3) 使能全局对应通道时钟。 */
     ret = mine_wk2114_enable_global_channel(channel);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+
+    ret = mine_wk2114_verify_register_value(MINE_WK2114_ADDR_GENA, g_mine_wk2114_gena_shadow, "GENA");
     if (ret != ERRCODE_SUCC) {
         return ret;
     }
