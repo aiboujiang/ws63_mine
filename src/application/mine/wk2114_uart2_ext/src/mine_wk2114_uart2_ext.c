@@ -295,7 +295,7 @@ static void mine_wk2114_irq_gpio_handler(pin_t pin, uintptr_t param)
 }
 
 /**
- * @brief 初始化 WK2114 IRQ 引脚（GPIO13，上拉输入，下降沿中断）。
+ * @brief 初始化 WK2114 IRQ 引脚（GPIO13，上拉输入，低电平触发中断）。
  *
  * @return errcode_t
  */
