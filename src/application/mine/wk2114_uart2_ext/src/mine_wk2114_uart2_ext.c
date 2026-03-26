@@ -46,8 +46,6 @@ static volatile uint16_t g_mine_wk2114_host_resp_tail = 0;
 
 /* 模块运行状态。 */
 static bool g_mine_wk2114_ready = false;
-/* 记录最近成功的 UART2 profile，下一次优先从该配置开始。 */
-static uint8_t g_mine_wk2114_uart_profile_index = 0;
 static uint8_t g_mine_wk2114_gena_shadow = MINE_WK2114_GENA_RESERVED_MASK;
 static uint32_t g_mine_wk2114_subuart_baud[MINE_WK2114_SUBUART_COUNT] = {
     MINE_WK2114_HOST_UART_BAUD,
@@ -745,49 +743,6 @@ static errcode_t mine_wk2114_send_fifo_chunk(uint8_t channel, const uint8_t *dat
 }
 
 /**
- * @brief 构建 UART2 初始化 profile（复用模式与收发方向组合）。
- *
- * profile 说明：
- * 0: tx=8 rx=7 mode=默认模式
- * 1: tx=8 rx=7 mode=备选模式
- * 2: tx=7 rx=8 mode=默认模式（收发互换）
- * 3: tx=7 rx=8 mode=备选模式（收发互换）
- */
-static void mine_wk2114_build_uart_profile(uint8_t profile_idx, uart_pin_config_t *pin_cfg, uint8_t *pin_mode)
-{
-    if ((pin_cfg == NULL) || (pin_mode == NULL)) {
-        return;
-    }
-
-    switch (profile_idx) {
-        case 1:
-            pin_cfg->tx_pin = MINE_WK2114_HOST_UART_TX_PIN;
-            pin_cfg->rx_pin = MINE_WK2114_HOST_UART_RX_PIN;
-            *pin_mode = MINE_WK2114_HOST_UART_ALT_PIN_MODE;
-            break;
-        case 2:
-            pin_cfg->tx_pin = MINE_WK2114_HOST_UART_RX_PIN;
-            pin_cfg->rx_pin = MINE_WK2114_HOST_UART_TX_PIN;
-            *pin_mode = MINE_WK2114_HOST_UART_PIN_MODE;
-            break;
-        case 3:
-            pin_cfg->tx_pin = MINE_WK2114_HOST_UART_RX_PIN;
-            pin_cfg->rx_pin = MINE_WK2114_HOST_UART_TX_PIN;
-            *pin_mode = MINE_WK2114_HOST_UART_ALT_PIN_MODE;
-            break;
-        case 0:
-        default:
-            pin_cfg->tx_pin = MINE_WK2114_HOST_UART_TX_PIN;
-            pin_cfg->rx_pin = MINE_WK2114_HOST_UART_RX_PIN;
-            *pin_mode = MINE_WK2114_HOST_UART_PIN_MODE;
-            break;
-    }
-
-    pin_cfg->cts_pin = PIN_NONE;
-    pin_cfg->rts_pin = PIN_NONE;
-}
-
-/**
  * @brief 初始化 UART2 主口和回调。
  */
 errcode_t mine_wk2114_uart2_ext_init(void)
@@ -800,9 +755,6 @@ errcode_t mine_wk2114_uart2_ext_init(void)
     };
     uart_pin_config_t pin_cfg = {0};
     uart_buffer_config_t buf_cfg = {0};
-    uint8_t profile_try;
-    uint8_t profile_idx;
-    uint8_t pin_mode = MINE_WK2114_HOST_UART_PIN_MODE;
     errcode_t ret;
 
     if (g_mine_wk2114_ready) {
@@ -812,72 +764,56 @@ errcode_t mine_wk2114_uart2_ext_init(void)
     buf_cfg.rx_buffer = g_mine_wk2114_uart_rx_buffer;
     buf_cfg.rx_buffer_size = sizeof(g_mine_wk2114_uart_rx_buffer);
 
+    /* 对齐已调通的 slave 配置：固定 UART2 引脚与复用模式。 */
+    pin_cfg.tx_pin = MINE_WK2114_HOST_UART_TX_PIN;
+    pin_cfg.rx_pin = MINE_WK2114_HOST_UART_RX_PIN;
+    pin_cfg.cts_pin = PIN_NONE;
+    pin_cfg.rts_pin = PIN_NONE;
+
     ret = mine_wk2114_irq_gpio_init();
     if (ret != ERRCODE_SUCC) {
         return ret;
     }
 
-    for (profile_try = 0; profile_try < MINE_WK2114_HOST_UART_PROFILE_COUNT; profile_try++) {
-        profile_idx = (uint8_t)((g_mine_wk2114_uart_profile_index + profile_try) % MINE_WK2114_HOST_UART_PROFILE_COUNT);
-        mine_wk2114_build_uart_profile(profile_idx, &pin_cfg, &pin_mode);
+    mine_wk2114_log("[mine wk2114] uart2 cfg tx=%u rx=%u mode=%u irq=%u\r\n",
+        (unsigned int)pin_cfg.tx_pin,
+        (unsigned int)pin_cfg.rx_pin,
+        (unsigned int)MINE_WK2114_HOST_UART_PIN_MODE,
+        (unsigned int)uapi_gpio_get_val(MINE_WK2114_IRQ_GPIO_PIN));
 
-        mine_wk2114_log("[mine wk2114] try profile=%u tx=%u rx=%u mode=%u irq=%u\r\n",
-            (unsigned int)profile_idx,
-            (unsigned int)pin_cfg.tx_pin,
-            (unsigned int)pin_cfg.rx_pin,
-            (unsigned int)pin_mode,
-            (unsigned int)uapi_gpio_get_val(MINE_WK2114_IRQ_GPIO_PIN));
+    uapi_pin_set_mode(pin_cfg.tx_pin, MINE_WK2114_HOST_UART_PIN_MODE);
+    uapi_pin_set_mode(pin_cfg.rx_pin, MINE_WK2114_HOST_UART_PIN_MODE);
 
-        uapi_pin_set_mode(pin_cfg.tx_pin, pin_mode);
-        uapi_pin_set_mode(pin_cfg.rx_pin, pin_mode);
-
-        (void)uapi_uart_deinit(MINE_WK2114_HOST_UART_BUS);
-        ret = uapi_uart_init(MINE_WK2114_HOST_UART_BUS, &pin_cfg, &attr, NULL, &buf_cfg);
-        if (ret != ERRCODE_SUCC) {
-            mine_wk2114_log("[mine wk2114] uart init profile=%u failed, ret=%x\r\n",
-                (unsigned int)profile_idx,
-                ret);
-            continue;
-        }
-
-#if defined(CONFIG_UART_SUPPORT_RX)
-        ret = uapi_uart_register_rx_callback(MINE_WK2114_HOST_UART_BUS,
-            (UART_RX_CONDITION_MASK_FULL | UART_RX_CONDITION_MASK_SUFFICIENT_DATA | UART_RX_CONDITION_MASK_IDLE),
-            1,
-            mine_wk2114_uart_rx_handler);
-        if (ret != ERRCODE_SUCC) {
-            mine_wk2114_log("[mine wk2114] rx callback profile=%u failed, ret=%x\r\n",
-                (unsigned int)profile_idx,
-                ret);
-            (void)uapi_uart_deinit(MINE_WK2114_HOST_UART_BUS);
-            continue;
-        }
-#else
-        mine_wk2114_log("[mine wk2114] uart rx callback unsupported\r\n");
-        return ERRCODE_FAIL;
-#endif
-
-        g_mine_wk2114_ready = true;
-        ret = mine_wk2114_check_link_ready();
-        if (ret == ERRCODE_SUCC) {
-            g_mine_wk2114_uart_profile_index = profile_idx;
-            mine_wk2114_log("[mine wk2114] uart profile ok idx=%u tx=%u rx=%u mode=%u\r\n",
-                (unsigned int)profile_idx,
-                (unsigned int)pin_cfg.tx_pin,
-                (unsigned int)pin_cfg.rx_pin,
-                (unsigned int)pin_mode);
-            return ERRCODE_SUCC;
-        }
-
-        mine_wk2114_log("[mine wk2114] link fail profile=%u ret=%x\r\n",
-            (unsigned int)profile_idx,
-            ret);
-        g_mine_wk2114_ready = false;
-        (void)uapi_uart_deinit(MINE_WK2114_HOST_UART_BUS);
+    (void)uapi_uart_deinit(MINE_WK2114_HOST_UART_BUS);
+    ret = uapi_uart_init(MINE_WK2114_HOST_UART_BUS, &pin_cfg, &attr, NULL, &buf_cfg);
+    if (ret != ERRCODE_SUCC) {
+        mine_wk2114_log("[mine wk2114] uart init failed, ret=%x\r\n", ret);
+        return ret;
     }
 
-    mine_wk2114_log("[mine wk2114] all uart profile failed\r\n");
+#if defined(CONFIG_UART_SUPPORT_RX)
+    /* 对齐 slave：回调触发条件使用 IDLE。 */
+    ret = uapi_uart_register_rx_callback(MINE_WK2114_HOST_UART_BUS,
+        UART_RX_CONDITION_MASK_IDLE,
+        1,
+        mine_wk2114_uart_rx_handler);
+    if (ret != ERRCODE_SUCC) {
+        mine_wk2114_log("[mine wk2114] rx callback register failed, ret=%x\r\n", ret);
+        return ret;
+    }
+#else
+    mine_wk2114_log("[mine wk2114] uart rx callback unsupported\r\n");
     return ERRCODE_FAIL;
+#endif
+
+    g_mine_wk2114_ready = true;
+    ret = mine_wk2114_check_link_ready();
+    if (ret != ERRCODE_SUCC) {
+        g_mine_wk2114_ready = false;
+        return ret;
+    }
+
+    return ERRCODE_SUCC;
 }
 
 /**
