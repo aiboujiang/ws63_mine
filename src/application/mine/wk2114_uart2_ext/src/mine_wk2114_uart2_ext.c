@@ -350,11 +350,17 @@ static errcode_t mine_wk2114_write_addr6(uint8_t addr6, uint8_t value)
 }
 
 /**
- * @brief 读取 6bit 地址寄存器。
+ * @brief 执行一次读寄存器命令。
+ *
+ * @param addr6 6bit 寄存器地址。
+ * @param with_dummy true=发送 cmd+dummy 两字节，false=仅发送 cmd 一字节。
+ * @param value 读到的寄存器值输出。
+ * @return errcode_t
  */
-static errcode_t mine_wk2114_read_addr6(uint8_t addr6, uint8_t *value)
+static errcode_t mine_wk2114_read_addr6_once(uint8_t addr6, bool with_dummy, uint8_t *value)
 {
-    uint8_t cmd;
+    uint8_t frame[2] = {0};
+    uint16_t frame_len;
     uint8_t rx;
     uint8_t last = 0;
     bool got_data = false;
@@ -367,10 +373,13 @@ static errcode_t mine_wk2114_read_addr6(uint8_t addr6, uint8_t *value)
         return ERRCODE_INVALID_PARAM;
     }
 
-    cmd = (uint8_t)(MINE_WK2114_HOST_CMD_READ_REG | (addr6 & 0x3FU));
+    frame[0] = (uint8_t)(MINE_WK2114_HOST_CMD_READ_REG | (addr6 & 0x3FU));
+    frame[1] = MINE_WK2114_HOST_READ_DUMMY_BYTE;
+    frame_len = with_dummy ? 2U : 1U;
+
     mine_wk2114_host_uart_rx_drain();
     mine_wk2114_host_resp_fifo_reset();
-    ret = mine_wk2114_send_host_frame(&cmd, 1);
+    ret = mine_wk2114_send_host_frame(frame, frame_len);
     if (ret != ERRCODE_SUCC) {
         return ret;
     }
@@ -407,6 +416,33 @@ static errcode_t mine_wk2114_read_addr6(uint8_t addr6, uint8_t *value)
 
     if (got_data) {
         *value = last;
+        return ERRCODE_SUCC;
+    }
+
+    return ERRCODE_FAIL;
+}
+
+/**
+ * @brief 读取 6bit 地址寄存器（兼容两种主口读命令格式）。
+ */
+static errcode_t mine_wk2114_read_addr6(uint8_t addr6, uint8_t *value)
+{
+    errcode_t ret;
+
+    if (value == NULL) {
+        return ERRCODE_INVALID_PARAM;
+    }
+
+    /* 关键流程注释：优先按单字节读命令尝试，失败后自动回退到 cmd+dummy。 */
+    ret = mine_wk2114_read_addr6_once(addr6, false, value);
+    if (ret == ERRCODE_SUCC) {
+        mine_wk2114_log("[mine wk2114] read addr6=0x%02X by cmd-only\r\n", (unsigned int)addr6);
+        return ERRCODE_SUCC;
+    }
+
+    ret = mine_wk2114_read_addr6_once(addr6, true, value);
+    if (ret == ERRCODE_SUCC) {
+        mine_wk2114_log("[mine wk2114] read addr6=0x%02X by cmd+dummy\r\n", (unsigned int)addr6);
         return ERRCODE_SUCC;
     }
 
