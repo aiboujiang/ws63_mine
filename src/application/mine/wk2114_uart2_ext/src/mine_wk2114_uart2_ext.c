@@ -105,6 +105,14 @@ static uint8_t mine_wk2114_make_sub_addr(uint8_t channel, uint8_t reg4)
 }
 
 /**
+ * @brief 计算指定子串口在全局位图中的掩码。
+ */
+static uint8_t mine_wk2114_channel_bit(uint8_t channel)
+{
+    return (uint8_t)(1U << mine_wk2114_channel_index(channel));
+}
+
+/**
  * @brief 统一日志输出：OSAL + PRINT + UART0。
  */
 void mine_wk2114_log(const char *fmt, ...)
@@ -261,7 +269,15 @@ static errcode_t mine_wk2114_hw_reset_chip(void)
         mine_wk2114_log("[mine wk2114] reset release-high failed, ret=%x\r\n", ret);
         return ret;
     }
-    osal_msleep(MINE_WK2114_RESET_RELEASE_WAIT_MS);
+    
+    /* 关键流程注释：释放复位后，等待WK2114内部自检完成并拉低IRQ引脚 */
+    for (uint32_t wait_idx = 0; wait_idx < MINE_WK2114_RESET_RELEASE_WAIT_MS; wait_idx += 5U) {
+        osal_msleep(5);
+        if (uapi_gpio_get_val(MINE_WK2114_IRQ_GPIO_PIN) == GPIO_LEVEL_LOW) {
+            mine_wk2114_log("[mine wk2114] irq goes low after %u ms hardware reset\r\n", (unsigned int)(wait_idx + 5U));
+            break;
+        }
+    }
 
     mine_wk2114_log("[mine wk2114] hw reset pulse done on gpio10\r\n");
     return ERRCODE_SUCC;
@@ -583,25 +599,24 @@ static errcode_t mine_wk2114_write_readback_verify(uint8_t addr6, uint8_t value,
  */
 static errcode_t mine_wk2114_send_autobaud_sync_sequence(void)
 {
-    uint8_t sync = MINE_WK2114_HOST_AUTOBAUD_SYNC_BYTE;
+    uint8_t syncs[MINE_WK2114_HOST_AUTOBAUD_SYNC_RETRY];
     uint8_t i;
     errcode_t ret;
 
     for (i = 0; i < MINE_WK2114_HOST_AUTOBAUD_SYNC_RETRY; i++) {
-        ret = mine_wk2114_send_host_frame(&sync, 1);
-        if (ret != ERRCODE_SUCC) {
-            return ret;
-        }
-        if (MINE_WK2114_HOST_AUTOBAUD_SYNC_INTERVAL_MS > 0U) {
-            osal_msleep(MINE_WK2114_HOST_AUTOBAUD_SYNC_INTERVAL_MS);
-        }
+        syncs[i] = MINE_WK2114_HOST_AUTOBAUD_SYNC_BYTE;
+    }
+
+    ret = mine_wk2114_send_host_frame(syncs, MINE_WK2114_HOST_AUTOBAUD_SYNC_RETRY);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
     }
 
     mine_wk2114_log("[mine wk2114] sync55 done count=%u irq_level=%u\r\n",
         (unsigned int)MINE_WK2114_HOST_AUTOBAUD_SYNC_RETRY,
         (unsigned int)uapi_gpio_get_val(MINE_WK2114_IRQ_GPIO_PIN));
 
-    /* 关键流程注释：应用笔记要求发 0x55 后等待锁定。 */
+    /* 关键流程注释：等待WK2114内部波特率锁定完成 */
     osal_msleep(MINE_WK2114_HOST_AUTOBAUD_LOCK_WAIT_MS);
     return ERRCODE_SUCC;
 }
@@ -611,18 +626,17 @@ static errcode_t mine_wk2114_send_autobaud_sync_sequence(void)
  */
 static errcode_t mine_wk2114_send_autobaud_sync_fallback_burst(void)
 {
-    uint8_t sync = MINE_WK2114_HOST_AUTOBAUD_SYNC_BYTE;
+    uint8_t syncs[MINE_WK2114_HOST_AUTOBAUD_FALLBACK_BURST_COUNT];
     uint8_t i;
     errcode_t ret;
 
     for (i = 0; i < MINE_WK2114_HOST_AUTOBAUD_FALLBACK_BURST_COUNT; i++) {
-        ret = mine_wk2114_send_host_frame(&sync, 1);
-        if (ret != ERRCODE_SUCC) {
-            return ret;
-        }
-        if (MINE_WK2114_HOST_AUTOBAUD_FALLBACK_INTERVAL_MS > 0U) {
-            osal_msleep(MINE_WK2114_HOST_AUTOBAUD_FALLBACK_INTERVAL_MS);
-        }
+        syncs[i] = MINE_WK2114_HOST_AUTOBAUD_SYNC_BYTE; // fallback to sync byte inside for loop
+    }
+
+    ret = mine_wk2114_send_host_frame(syncs, MINE_WK2114_HOST_AUTOBAUD_FALLBACK_BURST_COUNT);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
     }
 
     mine_wk2114_log("[mine wk2114] sync55 fallback burst count=%u\r\n",
@@ -720,16 +734,59 @@ static errcode_t mine_wk2114_calc_baud_param(uint32_t baud_rate, uint16_t *baud_
  */
 static errcode_t mine_wk2114_enable_global_channel(uint8_t channel)
 {
-    uint8_t bit_index;
+    if (!mine_wk2114_channel_valid(channel)) {
+        return ERRCODE_INVALID_PARAM;
+    }
+
+    g_mine_wk2114_gena_shadow = (uint8_t)((g_mine_wk2114_gena_shadow | MINE_WK2114_GENA_RESERVED_MASK) |
+        mine_wk2114_channel_bit(channel));
+
+    return mine_wk2114_write_readback_verify(MINE_WK2114_ADDR_GENA, g_mine_wk2114_gena_shadow, "GENA");
+}
+
+/**
+ * @brief 触发指定子串口的软件复位。
+ *
+ * 关键流程注释：GRST 对应位写 1 后会由硬件自动清零，
+ * 因此只做写动作并短暂等待复位完成，不做读回强校验。
+ */
+static errcode_t mine_wk2114_soft_reset_channel(uint8_t channel)
+{
+    errcode_t ret;
 
     if (!mine_wk2114_channel_valid(channel)) {
         return ERRCODE_INVALID_PARAM;
     }
 
-    bit_index = mine_wk2114_channel_index(channel);
-    g_mine_wk2114_gena_shadow = (uint8_t)((g_mine_wk2114_gena_shadow | MINE_WK2114_GENA_RESERVED_MASK) | (uint8_t)(1U << bit_index));
+    ret = mine_wk2114_write_addr6(MINE_WK2114_ADDR_GRST, mine_wk2114_channel_bit(channel));
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
 
-    return mine_wk2114_write_readback_verify(MINE_WK2114_ADDR_GENA, g_mine_wk2114_gena_shadow, "GENA");
+    osal_msleep(2);
+    return ERRCODE_SUCC;
+}
+
+/**
+ * @brief 使能指定子串口对应的全局中断使能位。
+ */
+static errcode_t mine_wk2114_enable_global_channel_irq(uint8_t channel)
+{
+    uint8_t gier = 0;
+    errcode_t ret;
+
+    if (!mine_wk2114_channel_valid(channel)) {
+        return ERRCODE_INVALID_PARAM;
+    }
+
+    ret = mine_wk2114_read_addr6_retry(MINE_WK2114_ADDR_GIER, MINE_WK2114_LINK_CHECK_READ_RETRY, &gier);
+    if (ret != ERRCODE_SUCC) {
+        mine_wk2114_log("[mine wk2114] read GIER timeout\r\n");
+        return ret;
+    }
+
+    gier = (uint8_t)(gier | mine_wk2114_channel_bit(channel));
+    return mine_wk2114_write_readback_verify(MINE_WK2114_ADDR_GIER, gier, "GIER");
 }
 
 /**
@@ -747,7 +804,25 @@ static errcode_t mine_wk2114_config_subuart(uint8_t channel, uint32_t baud_rate)
         return ret;
     }
 
-    /* E: 先切 PAGE1 配波特率参数。 */
+    /* 关键流程注释：对齐官方 startup，先开子串口时钟位。 */
+    ret = mine_wk2114_enable_global_channel(channel);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+
+    /* 关键流程注释：对齐官方 startup，时钟使能后先执行一次子串口软复位。 */
+    ret = mine_wk2114_soft_reset_channel(channel);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+
+    /* 关键流程注释：对齐官方 startup，打开对应子串口的全局中断门控。 */
+    ret = mine_wk2114_enable_global_channel_irq(channel);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+
+    /* E: 对齐官方 termios，先切 PAGE1 配波特率参数。 */
     addr = mine_wk2114_make_sub_addr(channel, MINE_WK2114_SUBREG_SPAGE);
     ret = mine_wk2114_write_readback_verify(addr, 0x01U, "SPAGE(P1)");
     if (ret != ERRCODE_SUCC) {
@@ -772,6 +847,19 @@ static errcode_t mine_wk2114_config_subuart(uint8_t channel, uint32_t baud_rate)
         return ret;
     }
 
+    /* 对齐官方 startup：PAGE1 下配置收发 FIFO 触点阈值。 */
+    addr = mine_wk2114_make_sub_addr(channel, MINE_WK2114_SUBREG_RFTL);
+    ret = mine_wk2114_write_readback_verify(addr, MINE_WK2114_RFTL_INIT_LEVEL, "RFTL");
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+
+    addr = mine_wk2114_make_sub_addr(channel, MINE_WK2114_SUBREG_TFTL);
+    ret = mine_wk2114_write_readback_verify(addr, MINE_WK2114_TFTL_INIT_LEVEL, "TFTL");
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+
     /* 切回 PAGE0，打开收发与 FIFO。 */
     addr = mine_wk2114_make_sub_addr(channel, MINE_WK2114_SUBREG_SPAGE);
     ret = mine_wk2114_write_readback_verify(addr, 0x00U, "SPAGE(P0)");
@@ -785,18 +873,26 @@ static errcode_t mine_wk2114_config_subuart(uint8_t channel, uint32_t baud_rate)
         return ret;
     }
 
-    addr = mine_wk2114_make_sub_addr(channel, MINE_WK2114_SUBREG_FCR);
-    ret = mine_wk2114_write_addr6(addr, 0x0FU);
-    if (ret != ERRCODE_SUCC) {
-        return ret;
-    }
-    /* FCR 的复位位会自动清 0，回读只校验触点位。 */
-    ret = mine_wk2114_verify_register_value(addr, 0x0CU, "FCR");
+    /* 对齐官方 startup：使能 RFTRIG/RXOUT 中断，关闭 TX 触点中断。 */
+    addr = mine_wk2114_make_sub_addr(channel, MINE_WK2114_SUBREG_SIER);
+    ret = mine_wk2114_write_readback_verify(addr, MINE_WK2114_SIER_INIT_MASK, "SIER");
     if (ret != ERRCODE_SUCC) {
         return ret;
     }
 
-    ret = mine_wk2114_enable_global_channel(channel);
+    addr = mine_wk2114_make_sub_addr(channel, MINE_WK2114_SUBREG_FCR);
+    ret = mine_wk2114_write_addr6(addr, MINE_WK2114_FCR_INIT_ASSERT);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+
+    ret = mine_wk2114_write_addr6(addr, MINE_WK2114_FCR_INIT_RELEASE);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+
+    /* FCR 初始化完成后做一次读回，确保 FIFO 使能与复位释放生效。 */
+    ret = mine_wk2114_verify_register_value(addr, MINE_WK2114_FCR_INIT_RELEASE, "FCR");
     if (ret != ERRCODE_SUCC) {
         return ret;
     }
