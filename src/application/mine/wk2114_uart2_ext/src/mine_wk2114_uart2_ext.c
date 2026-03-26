@@ -440,11 +440,17 @@ static errcode_t mine_wk2114_read_addr6(uint8_t addr6, uint8_t *value)
         return ERRCODE_SUCC;
     }
 
+    /*
+     * 关键流程注释：按规格书，主口读寄存器默认仅发送 1 字节 CMD。
+     * cmd+dummy 仅作为可选排障路径，默认关闭避免偏离标准时序。
+     */
+#if (MINE_WK2114_HOST_READ_DUMMY_FALLBACK_ENABLE == 1U)
     ret = mine_wk2114_read_addr6_once(addr6, true, value);
     if (ret == ERRCODE_SUCC) {
         mine_wk2114_log("[mine wk2114] read addr6=0x%02X by cmd+dummy\r\n", (unsigned int)addr6);
         return ERRCODE_SUCC;
     }
+#endif
 
     return ERRCODE_FAIL;
 }
