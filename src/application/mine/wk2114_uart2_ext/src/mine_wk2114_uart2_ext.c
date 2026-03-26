@@ -173,7 +173,7 @@ static errcode_t mine_wk2114_irq_gpio_init(void)
 }
 
 /**
- * @brief 执行硬件复位：高10ms -> 低10ms -> 高20ms。
+ * @brief 执行硬件复位：高10ms -> 低1500ms -> 高20ms。
  */
 static errcode_t mine_wk2114_hw_reset_chip(void)
 {
@@ -202,7 +202,8 @@ static errcode_t mine_wk2114_hw_reset_chip(void)
         mine_wk2114_log("[mine wk2114] reset pull-low failed, ret=%x\r\n", ret);
         return ret;
     }
-    osal_msleep(MINE_WK2114_RESET_HOLD_MS);
+    /* 关键流程注释：拉长低电平保持时间，验证 RST 脉冲是否被芯片可靠识别。 */
+    osal_msleep(MINE_WK2114_RESET_LOW_HOLD_MS);
 
 #if (MINE_WK2114_RESET_FORCE_LOW_ONLY == 1U)
     mine_wk2114_log("[mine wk2114] reset force-low mode enabled\r\n");

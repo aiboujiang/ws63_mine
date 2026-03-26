@@ -30,6 +30,8 @@
 
 #define MINE_WK2114_RESET_GPIO_PIN GPIO_10
 #define MINE_WK2114_RESET_HOLD_MS 10U
+/* 调试用：RST 低电平保持 1.5s，用于验证硬件复位是否真正生效。 */
+#define MINE_WK2114_RESET_LOW_HOLD_MS 1500U
 #define MINE_WK2114_RESET_RELEASE_WAIT_MS 20U
 
 #define MINE_WK2114_IRQ_GPIO_PIN GPIO_13
@@ -56,7 +58,6 @@
 #define MINE_WK2114_HOST_RX_DRAIN_MAX 64U
 
 /* 设备与子串口参数。 */
-/* 板级实物使用 12MHz 外部晶振，波特率参数计算必须与硬件一致。 */
 #define MINE_WK2114_XTAL_HZ 12000000U
 #define MINE_WK2114_SUBUART_COUNT 4
 #define MINE_WK2114_SUBUART_MIN 1
