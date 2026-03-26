@@ -142,6 +142,38 @@ static void mine_wk2114_log_pin_snapshot(const char *stage)
 }
 
 /**
+ * @brief 以 GPIO 输入方式采样主口 RX 原始电平。
+ *
+ * 关键流程注释：该探针在 UART 初始化前执行，
+ * 用于区分“UART配置/回调问题”和“外部硬件把线强拉低”。
+ */
+static void mine_wk2114_probe_host_rx_gpio_level(const char *stage)
+{
+    uint8_t i;
+    uint8_t low_cnt = 0;
+    uint8_t high_cnt = 0;
+
+    uapi_gpio_init();
+    (void)uapi_pin_set_mode(MINE_WK2114_HOST_UART_RX_GPIO_PIN, HAL_PIO_FUNC_GPIO);
+    (void)uapi_pin_set_pull(MINE_WK2114_HOST_UART_RX_GPIO_PIN, PIN_PULL_TYPE_UP);
+    (void)uapi_gpio_set_dir(MINE_WK2114_HOST_UART_RX_GPIO_PIN, GPIO_DIRECTION_INPUT);
+
+    for (i = 0; i < 8U; i++) {
+        if (uapi_gpio_get_val(MINE_WK2114_HOST_UART_RX_GPIO_PIN) == GPIO_LEVEL_LOW) {
+            low_cnt++;
+        } else {
+            high_cnt++;
+        }
+        osal_msleep(2);
+    }
+
+    mine_wk2114_log("[mine wk2114] %s rx-gpio-probe low=%u high=%u\r\n",
+        (stage == NULL) ? "stage" : stage,
+        (unsigned int)low_cnt,
+        (unsigned int)high_cnt);
+}
+
+/**
  * @brief IRQ 回调：只做最小动作，置位并计数。
  */
 static void mine_wk2114_irq_handler(pin_t pin, uintptr_t param)
@@ -808,6 +840,9 @@ errcode_t mine_wk2114_uart2_ext_init(void)
     if (ret != ERRCODE_SUCC) {
         return ret;
     }
+
+    /* 关键流程注释：初始化 UART2 前先采样原始 RX GPIO 电平，提前识别硬件硬拉低。 */
+    mine_wk2114_probe_host_rx_gpio_level("before-uart-init");
 
     mine_wk2114_log("[mine wk2114] uart2 cfg tx=%u rx=%u mode=%u irq=%u\r\n",
         (unsigned int)pin_cfg.tx_pin,
