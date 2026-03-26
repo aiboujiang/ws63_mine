@@ -93,6 +93,56 @@ typedef struct {
 
 static mine_wk2114_uart_diag_t g_mine_wk2114_uart_diag = {0};
 
+/**
+ * @brief OLED 已按需求移除，这里保留空实现以兼容原流程调用。
+ */
+static void mine_wk2114_oled_init(void)
+{
+}
+
+/**
+ * @brief OLED 已移除：空实现。
+ */
+static void mine_wk2114_oled_flush_pending(void)
+{
+}
+
+/**
+ * @brief OLED 已移除：空实现。
+ *
+ * @param text 未使用参数。
+ */
+static void mine_wk2114_oled_push_state(const char *text)
+{
+    unused(text);
+}
+
+/**
+ * @brief OLED 已移除：空实现。
+ *
+ * @param prefix 未使用参数。
+ * @param data   未使用参数。
+ * @param len    未使用参数。
+ */
+static void mine_wk2114_oled_push_data_event(const char *prefix, const uint8_t *data, uint16_t len)
+{
+    unused(prefix);
+    unused(data);
+    unused(len);
+}
+
+/**
+ * @brief OLED 已移除：空实现。
+ *
+ * @param channel   未使用参数。
+ * @param baud_rate 未使用参数。
+ */
+static void mine_wk2114_oled_set_channel(uint8_t channel, uint32_t baud_rate)
+{
+    unused(channel);
+    unused(baud_rate);
+}
+
 /* WK2114 IRQ 事件统计：中断回调置位，任务线程消费并记录。 */
 static volatile bool g_mine_wk2114_irq_pending = false;
 static volatile uint32_t g_mine_wk2114_irq_trigger_count = 0;
@@ -376,9 +426,9 @@ static void mine_wk2114_process_irq_event(void)
  * @brief 对 WK2114 执行硬件复位脉冲（GPIO10）。
  *
  * 复位流程：
- * 1) GPIO10 拉低保持一段时间，触发芯片复位；
- * 2) 正常模式下 GPIO10 拉高释放复位；
- * 3) 调试模式下可保持 GPIO10 持续低电平，不再释放。
+ * 1) GPIO10 先拉高并保持 10ms；
+ * 2) GPIO10 拉低并保持 10ms，触发芯片复位；
+ * 3) GPIO10 拉高并保持 20ms，完成复位释放。
  *
  * @return errcode_t
  */
@@ -397,13 +447,21 @@ static errcode_t mine_wk2114_hw_reset_chip(void)
         return ret;
     }
 
+    /* 按手册示例：先拉高 10ms，再拉低 10ms，最后拉高 20ms。 */
+    ret = uapi_gpio_set_val(MINE_WK2114_RESET_GPIO_PIN, GPIO_LEVEL_HIGH);
+    if (ret != ERRCODE_SUCC) {
+        mine_wk2114_log("[mine wk2114] reset pin pre-high failed, ret=%x\r\n", ret);
+        mine_wk2114_oled_push_state("WK RST PREHI FAIL");
+        return ret;
+    }
+    osal_msleep(MINE_WK2114_RESET_HOLD_MS);
+
     ret = uapi_gpio_set_val(MINE_WK2114_RESET_GPIO_PIN, GPIO_LEVEL_LOW);
     if (ret != ERRCODE_SUCC) {
         mine_wk2114_log("[mine wk2114] reset pin pull low failed, ret=%x\r\n", ret);
         mine_wk2114_oled_push_state("WK RST LOW FAIL");
         return ret;
     }
-
     osal_msleep(MINE_WK2114_RESET_HOLD_MS);
 
 #if (MINE_WK2114_RESET_FORCE_LOW_ONLY == 1U)
@@ -777,7 +835,7 @@ static errcode_t mine_wk2114_send_autobaud_sync_sequence(void)
         osal_msleep(MINE_WK2114_HOST_AUTOBAUD_SYNC_INTERVAL_MS);
     }
 
-    /* 给芯片自适应锁定逻辑留出稳定时间，避免首条读命令超时。 */
+    /* 按手册示例：发 0x55 后等待 100ms 完成主口波特率锁定。 */
     osal_msleep(MINE_WK2114_HOST_AUTOBAUD_LOCK_WAIT_MS);
     return ERRCODE_SUCC;
 }

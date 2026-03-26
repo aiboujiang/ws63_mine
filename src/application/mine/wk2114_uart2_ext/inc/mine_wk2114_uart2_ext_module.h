@@ -66,11 +66,11 @@
 
 /* 主口读寄存器超时与自适应锁定等待。 */
 #define MINE_WK2114_HOST_READ_TIMEOUT_MS 200U
-#define MINE_WK2114_HOST_AUTOBAUD_LOCK_WAIT_MS 20U
+#define MINE_WK2114_HOST_AUTOBAUD_LOCK_WAIT_MS 100U
 
 /* 按手册 9.1：复位后发送单字节 0x55 完成主口波特率锁定。 */
-#define MINE_WK2114_HOST_AUTOBAUD_SYNC_RETRY 8U
-#define MINE_WK2114_HOST_AUTOBAUD_SYNC_INTERVAL_MS 1U
+#define MINE_WK2114_HOST_AUTOBAUD_SYNC_RETRY 1U
+#define MINE_WK2114_HOST_AUTOBAUD_SYNC_INTERVAL_MS 0U
 
 /* 回读稳定等待与链路检查重读次数。 */
 #define MINE_WK2114_HOST_RESP_STABLE_WAIT_MS 2U
@@ -93,24 +93,6 @@
 #define MINE_WK2114_GENA_RESERVED_MASK 0xF0U
 #define MINE_WK2114_GENA_CHANNEL_MASK 0x0FU
 
-/* OLED 面板布局。 */
-#define MINE_WK2114_OLED_LINE_COUNT 8
-#define MINE_WK2114_OLED_LINE_CHARS 21
-#define MINE_WK2114_OLED_STATE_LINE_COUNT 2
-#define MINE_WK2114_OLED_STATE_TOTAL_CHARS (MINE_WK2114_OLED_LINE_CHARS * MINE_WK2114_OLED_STATE_LINE_COUNT)
-#define MINE_WK2114_OLED_DATA_LINE_COUNT 2
-#define MINE_WK2114_OLED_DATA_TOTAL_CHARS (MINE_WK2114_OLED_LINE_CHARS * MINE_WK2114_OLED_DATA_LINE_COUNT)
-#define MINE_WK2114_OLED_EVENT_BUFFER_LEN 64
-#define MINE_WK2114_OLED_LINE_TITLE 0
-#define MINE_WK2114_OLED_LINE_STATE0 1
-#define MINE_WK2114_OLED_LINE_STATE1 2
-#define MINE_WK2114_OLED_LINE_STATE MINE_WK2114_OLED_LINE_STATE0
-#define MINE_WK2114_OLED_LINE_DATA0 3
-#define MINE_WK2114_OLED_LINE_DATA1 4
-#define MINE_WK2114_OLED_LINE_CFG 5
-#define MINE_WK2114_OLED_LINE_RX 6
-#define MINE_WK2114_OLED_LINE_TX 7
-
 /* 日志缓存。 */
 #define MINE_WK2114_LOG_BUFFER_LEN 192
 
@@ -120,39 +102,5 @@
  * @param fmt printf 风格格式化字符串。
  */
 void mine_wk2114_log(const char *fmt, ...);
-
-/**
- * @brief 初始化 WK2114 OLED 页面。
- */
-void mine_wk2114_oled_init(void);
-
-/**
- * @brief 刷新 OLED 脏行到屏幕。
- */
-void mine_wk2114_oled_flush_pending(void);
-
-/**
- * @brief 更新 OLED 状态行。
- *
- * @param text 状态文本。
- */
-void mine_wk2114_oled_push_state(const char *text);
-
-/**
- * @brief 上报一条数据事件到 OLED。
- *
- * @param prefix 方向前缀（含 RX/TX 字样）。
- * @param data   数据指针。
- * @param len    数据长度。
- */
-void mine_wk2114_oled_push_data_event(const char *prefix, const uint8_t *data, uint16_t len);
-
-/**
- * @brief 更新 OLED 当前通道/波特率显示。
- *
- * @param channel   子串口号，1~4；传 0 表示未选择。
- * @param baud_rate 当前波特率。
- */
-void mine_wk2114_oled_set_channel(uint8_t channel, uint32_t baud_rate);
 
 #endif /* MINE_WK2114_UART2_EXT_MODULE_H */
