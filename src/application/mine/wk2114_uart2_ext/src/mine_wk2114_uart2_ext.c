@@ -59,6 +59,10 @@ static bool g_mine_wk2114_subuart_ready[MINE_WK2114_SUBUART_COUNT] = { false, fa
 static volatile bool g_mine_wk2114_irq_pending = false;
 static volatile uint32_t g_mine_wk2114_irq_count = 0;
 
+/* 主口接收诊断统计：用于判断是“无回包”还是“回包不匹配”。 */
+static volatile uint32_t g_mine_wk2114_rx_cb_bytes = 0;
+static volatile uint32_t g_mine_wk2114_rx_poll_bytes = 0;
+
 /**
  * @brief 临界区加锁。
  */
@@ -310,6 +314,8 @@ static void mine_wk2114_uart_rx_handler(const void *buffer, uint16_t length, boo
     for (i = 0; i < length; i++) {
         mine_wk2114_host_resp_fifo_push(data[i]);
     }
+
+    g_mine_wk2114_rx_cb_bytes += (uint32_t)length;
 }
 
 /**
@@ -407,6 +413,7 @@ static errcode_t mine_wk2114_read_addr6_once(uint8_t addr6, bool with_dummy, uin
             last = rx;
             got_data = true;
             stable_wait_ms = 0;
+            g_mine_wk2114_rx_poll_bytes++;
         } else {
             osal_msleep(1);
         }
@@ -426,10 +433,15 @@ static errcode_t mine_wk2114_read_addr6_once(uint8_t addr6, bool with_dummy, uin
 static errcode_t mine_wk2114_read_addr6(uint8_t addr6, uint8_t *value)
 {
     errcode_t ret;
+    uint32_t rx_cb_before;
+    uint32_t rx_poll_before;
 
     if (value == NULL) {
         return ERRCODE_INVALID_PARAM;
     }
+
+    rx_cb_before = g_mine_wk2114_rx_cb_bytes;
+    rx_poll_before = g_mine_wk2114_rx_poll_bytes;
 
     /* 关键流程注释：优先按单字节读命令尝试，失败后自动回退到 cmd+dummy。 */
     ret = mine_wk2114_read_addr6_once(addr6, false, value);
@@ -450,6 +462,10 @@ static errcode_t mine_wk2114_read_addr6(uint8_t addr6, uint8_t *value)
     }
 #endif
 
+    mine_wk2114_log("[mine wk2114] read addr6=0x%02X timeout cb_delta=%lu poll_delta=%lu\r\n",
+        (unsigned int)addr6,
+        (unsigned long)(g_mine_wk2114_rx_cb_bytes - rx_cb_before),
+        (unsigned long)(g_mine_wk2114_rx_poll_bytes - rx_poll_before));
     return ERRCODE_FAIL;
 }
 
