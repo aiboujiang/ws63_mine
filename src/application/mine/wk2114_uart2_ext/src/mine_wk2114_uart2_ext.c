@@ -130,6 +130,18 @@ void mine_wk2114_log(const char *fmt, ...)
 }
 
 /**
+ * @brief 记录关键连线电平快照（无示波器排障）。
+ */
+static void mine_wk2114_log_pin_snapshot(const char *stage)
+{
+    mine_wk2114_log("[mine wk2114] %s pin irq=%u rst=%u rx=%u\r\n",
+        (stage == NULL) ? "stage" : stage,
+        (unsigned int)uapi_gpio_get_val(MINE_WK2114_IRQ_GPIO_PIN),
+        (unsigned int)uapi_gpio_get_val(MINE_WK2114_RESET_GPIO_PIN),
+        (unsigned int)uapi_gpio_get_val(MINE_WK2114_HOST_UART_RX_GPIO_PIN));
+}
+
+/**
  * @brief IRQ 回调：只做最小动作，置位并计数。
  */
 static void mine_wk2114_irq_handler(pin_t pin, uintptr_t param)
@@ -462,10 +474,12 @@ static errcode_t mine_wk2114_read_addr6(uint8_t addr6, uint8_t *value)
     }
 #endif
 
-    mine_wk2114_log("[mine wk2114] read addr6=0x%02X timeout cb_delta=%lu poll_delta=%lu\r\n",
+    mine_wk2114_log("[mine wk2114] read addr6=0x%02X timeout cb_delta=%lu poll_delta=%lu rx_level=%u\r\n",
         (unsigned int)addr6,
         (unsigned long)(g_mine_wk2114_rx_cb_bytes - rx_cb_before),
-        (unsigned long)(g_mine_wk2114_rx_poll_bytes - rx_poll_before));
+        (unsigned long)(g_mine_wk2114_rx_poll_bytes - rx_poll_before),
+        (unsigned int)uapi_gpio_get_val(MINE_WK2114_HOST_UART_RX_GPIO_PIN));
+    mine_wk2114_log_pin_snapshot("read-timeout");
     return ERRCODE_FAIL;
 }
 
@@ -572,6 +586,8 @@ static errcode_t mine_wk2114_check_link_ready(void)
     if (ret != ERRCODE_SUCC) {
         return ret;
     }
+    /* 关键流程注释：复位后先抓一次三线电平，快速判断芯片是否离开复位并有中断空闲态。 */
+    mine_wk2114_log_pin_snapshot("after-reset");
 
 #if (MINE_WK2114_RESET_FORCE_LOW_ONLY == 1U)
     return ERRCODE_FAIL;
@@ -582,6 +598,8 @@ static errcode_t mine_wk2114_check_link_ready(void)
         mine_wk2114_log("[mine wk2114] sync 0x55 failed\r\n");
         return ret;
     }
+    /* 关键流程注释：0x55 后再次采样，区分“发送失败”与“发送成功但对端不回包”。 */
+    mine_wk2114_log_pin_snapshot("after-sync55");
 
     /* C: 固定寄存器读校验，GENA 默认应为 0xF0。 */
     ret = mine_wk2114_verify_register_value(MINE_WK2114_ADDR_GENA, MINE_WK2114_GENA_RESERVED_MASK, "GENA");
@@ -797,8 +815,11 @@ errcode_t mine_wk2114_uart2_ext_init(void)
         (unsigned int)MINE_WK2114_HOST_UART_PIN_MODE,
         (unsigned int)uapi_gpio_get_val(MINE_WK2114_IRQ_GPIO_PIN));
 
+    /* 关键流程注释：主口 RX 加弱上拉，避免对端高阻阶段被误判为持续低电平。 */
+    (void)uapi_pin_set_pull(pin_cfg.rx_pin, PIN_PULL_TYPE_UP);
     uapi_pin_set_mode(pin_cfg.tx_pin, MINE_WK2114_HOST_UART_PIN_MODE);
     uapi_pin_set_mode(pin_cfg.rx_pin, MINE_WK2114_HOST_UART_PIN_MODE);
+    mine_wk2114_log_pin_snapshot("uart-pins-configured");
 
     (void)uapi_uart_deinit(MINE_WK2114_HOST_UART_BUS);
     ret = uapi_uart_init(MINE_WK2114_HOST_UART_BUS, &pin_cfg, &attr, NULL, &buf_cfg);
