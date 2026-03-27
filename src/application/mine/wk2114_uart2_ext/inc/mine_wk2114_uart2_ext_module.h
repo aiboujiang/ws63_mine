@@ -74,8 +74,12 @@
 #define MINE_WK2114_LINK_CHECK_READ_RETRY 6U
 #define MINE_WK2114_HOST_RX_DRAIN_MAX 64U
 
-/* UART2 conduction self-test parameters: Used to verify if chip-side UART2 TX/RX loopback is effective. */
-#define MINE_WK2114_UART2_LOOPBACK_SELFTEST_ENABLE 1U
+/*
+ * UART2 物理短接回环自检参数。
+ * 说明：该自检仅适用于“TX 与 RX 物理短接”场景；
+ * 正常连接 WK2114 时必须关闭，否则会把正常链路误判为回环失败。
+ */
+#define MINE_WK2114_UART2_LOOPBACK_SELFTEST_ENABLE 0U
 #define MINE_WK2114_UART2_LOOPBACK_TIMEOUT_MS 80U
 #define MINE_WK2114_UART2_LOOPBACK_PAYLOAD_LEN 4U
 

@@ -348,7 +348,7 @@ static void mine_wk2114_host_uart_rx_drain(void)
  * 关键流程注释：首先确保 UART2 接收缓冲区为空，然后发送测试数据
  * 通过 UART2 通道接收数据，如果接收数据与发送数据一致，则认为配置正确
  */
-static errcode_t mine_wk2114_uart2_loopback_self_test(void)
+static __attribute__((unused)) errcode_t mine_wk2114_uart2_loopback_self_test(void)
 {
     const uint8_t tx[MINE_WK2114_UART2_LOOPBACK_PAYLOAD_LEN] = {0x55U, 0xA5U, 0x5AU, 0x0FU};
     uint8_t rx[MINE_WK2114_UART2_LOOPBACK_PAYLOAD_LEN] = {0};
