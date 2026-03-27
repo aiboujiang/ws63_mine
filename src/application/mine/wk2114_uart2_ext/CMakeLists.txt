@@ -1,10 +1,43 @@
 #===============================================================================
-# @brief    CMake file for mine WK2114 UART2 extension module
+# @brief    CMake file for wk2114 uart2 ext
 #===============================================================================
 
-add_subdirectory_if_exist(src)
+set(COMPONENT_NAME "mine_wk2114_uart2_ext")
 
-set(SOURCES "${SOURCES}" PARENT_SCOPE)
-set(PUBLIC_HEADER "${PUBLIC_HEADER}"
-    "${CMAKE_CURRENT_SOURCE_DIR}/inc"
-    PARENT_SCOPE)
+set(SOURCES
+    "src/mine_wk2114_uart2_ext.c"
+)
+
+set(PUBLIC_HEADER
+)
+
+set(PRIVATE_HEADER
+    "inc"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../common/inc"
+)
+
+set(PRIVATE_DEFINES
+)
+
+set(PUBLIC_DEFINES
+)
+
+set(COMPONENT_PUBLIC_CCFLAGS
+)
+
+set(COMPONENT_CCFLAGS
+)
+
+set(WHOLE_LINK
+    true
+)
+
+set(MAIN_COMPONENT
+    false
+)
+
+if(NOT "${COMPONENT_NAME}" IN_LIST RAM_COMPONENT)
+    list(APPEND RAM_COMPONENT ${COMPONENT_NAME})
+endif()
+
+build_component()

@@ -1,78 +1,69 @@
-/*
- * Copyright (c) HiSilicon (Shanghai) Technologies Co., Ltd.
- * 描述: Mine WK2114 UART2 扩展模块公共接口。
+/**
+ * @file mine_wk2114_uart2_ext.h
+ * @brief WK2114 UART expansion chip driver for Hi3863
  */
 
 #ifndef MINE_WK2114_UART2_EXT_H
 #define MINE_WK2114_UART2_EXT_H
 
 #include <stdint.h>
-
 #include "errcode.h"
 
-#ifdef __cplusplus
-#if __cplusplus
-extern "C" {
-#endif
-#endif
+/* ---------------- ȫ�ּĴ������� (Page x) ---------------- */
+#define WK2XXX_GENA  0x00
+#define WK2XXX_GRST  0x01
+#define WK2XXX_GIER  0x10
+#define WK2XXX_GIFR  0x11
 
-/**
- * @brief 初始化 WK2114 芯片。
- *
- * 初始化包含以下流程：
- * 1) 拉高RST 10ms
- * 2) 拉低RST 10ms复位
- * 3) 再拉高20ms完成复位
- * 4) 复位完成后发送0x55完成波特率匹配
- *
- * @return errcode_t
- * @retval ERRCODE_SUCC 初始化成功
- * @retval 其他         初始化失败
- */
-errcode_t mine_wk2114_init_chip(void);
+/* ---------------- �Ӵ��ڼĴ������� (Page 0) ---------------- */
+#define WK2XXX_SPAGE 0x03
+#define WK2XXX_SCR   0x04
+#define WK2XXX_LCR   0x05
+#define WK2XXX_FCR   0x06
+#define WK2XXX_SIER  0x07
+#define WK2XXX_SIFR  0x08
+#define WK2XXX_TFCNT 0x09
+#define WK2XXX_RFCNT 0x0A
+#define WK2XXX_FSR   0x0B
+#define WK2XXX_LSR   0x0C
+#define WK2XXX_FDAT  0x0D
 
-/**
- * @brief 初始化 WK2114 扩展模块。
- *
- * 初始化包含应用笔记流程：
- * 1) 上电复位和硬件复位
- * 2) 发送 0x55 自适应波特率
- * 3) 读取固定寄存器 GENA(默认 0xF0)确认链路
- * 4) 执行 GENA 写回操作，确认读写正常
- *
- * @return errcode_t
- * @retval ERRCODE_SUCC 初始化成功
- * @retval 其他         初始化失败
- */
+/* ---------------- �Ӵ��ڼĴ������� (Page 1) ---------------- */
+#define WK2XXX_BAUD1 0x04
+#define WK2XXX_BAUD0 0x05
+#define WK2XXX_PRES  0x06
+#define WK2XXX_RFTL  0x07
+#define WK2XXX_TFTL  0x08
+
+/* ---------------- �ؼ���־λ ---------------- */
+#define WK2XXX_TXEN       (1<<0)
+#define WK2XXX_RXEN       (1<<1)
+#define WK2XXX_RFTRIG_IEN (1<<0)
+#define WK2XXX_RXOUT_IEN  (1<<1)
+#define WK2XXX_UT1INT     (1<<0)
+#define WK2XXX_UT2INT     (1<<1)
+#define WK2XXX_UT3INT     (1<<2)
+#define WK2XXX_UT4INT     (1<<3)
+
+/* ---------------- ������ö�� ---------------- */
+enum WKBaud {
+    B600, B1200, B2400, B4800, B9600, B19200, B38400, B57600, B115200, B500000
+};
+
+/* ---------------- �ӿ����� ---------------- */
+void WK_RstInit(void);
+void WkWriteGReg(uint8_t greg, uint8_t dat);
+uint8_t WkReadGReg(uint8_t greg);
+void WkWriteSReg(uint8_t port, uint8_t sreg, uint8_t dat);
+uint8_t WkReadSReg(uint8_t port, uint8_t sreg);
+void WkWriteSFifo(uint8_t port, uint8_t *dat, uint8_t num);
+void WkReadSFifo(uint8_t port, uint8_t *rec, uint8_t num);
+void Wk_BaudAdaptive(void);
+void Wk_Init(uint8_t port);
+void Wk_DeInit(uint8_t port);
+void Wk_SetBaud(uint8_t port, enum WKBaud baud);
+
+/* ---------------- Ӧ�ò���� ---------------- */
 errcode_t mine_wk2114_uart2_ext_init(void);
 
-/**
- * @brief 设置指定子串口波特率。
- *
- * 包含应用笔记流程：
- * 1) 读取固定寄存器 SPAGE/BAUD/PRES/SCR/FCR
- * 2) 读取关键寄存器的值进行校验。
- *
- * @param channel 子串口号，范围 1~4
- * @param baud_rate 子串口波特率
- * @return errcode_t
- */
-errcode_t mine_wk2114_uart2_ext_set_subuart_baud(uint8_t channel, uint32_t baud_rate);
-
-/**
- * @brief 通过 WK2114 串口发送数据。
- *
- * @param channel 子串口号，范围 1~4
- * @param data 数据指针。
- * @param len 数据长度
- * @return errcode_t
- */
-errcode_t mine_wk2114_uart2_ext_send(uint8_t channel, const uint8_t *data, uint16_t len);
-
-#ifdef __cplusplus
-#if __cplusplus
-}
-#endif
-#endif
-
-#endif /* MINE_WK2114_UART2_EXT_H */
+#endif // MINE_WK2114_UART2_EXT_H
