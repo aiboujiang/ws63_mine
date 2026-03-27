@@ -38,6 +38,8 @@ static void (*g_mine_wk2114_raw_osal_printk)(const char *fmt, ...) = osal_printk
 
 /* UART2 主口接收缓存。 */
 static uint8_t g_mine_wk2114_uart_rx_buffer[MINE_WK2114_HOST_UART_RX_BUFFER_SIZE] = {0};
+/* 当前初始化尝试对应的 RX GPIO 探针脚位。 */
+static pin_t g_mine_wk2114_host_rx_gpio_probe_pin = MINE_WK2114_HOST_UART_RX_GPIO_PIN;
 
 /* 读寄存器响应 FIFO。 */
 static uint8_t g_mine_wk2114_host_resp_fifo[MINE_WK2114_HOST_RESP_FIFO_SIZE] = {0};
@@ -146,7 +148,7 @@ static void mine_wk2114_log_pin_snapshot(const char *stage)
         (stage == NULL) ? "stage" : stage,
         (unsigned int)uapi_gpio_get_val(MINE_WK2114_IRQ_GPIO_PIN),
         (unsigned int)uapi_gpio_get_val(MINE_WK2114_RESET_GPIO_PIN),
-        (unsigned int)uapi_gpio_get_val(MINE_WK2114_HOST_UART_RX_GPIO_PIN));
+    (unsigned int)uapi_gpio_get_val(g_mine_wk2114_host_rx_gpio_probe_pin));
 }
 
 /**
@@ -162,12 +164,12 @@ static void mine_wk2114_probe_host_rx_gpio_level(const char *stage)
     uint8_t high_cnt = 0;
 
     uapi_gpio_init();
-    (void)uapi_pin_set_mode(MINE_WK2114_HOST_UART_RX_GPIO_PIN, HAL_PIO_FUNC_GPIO);
-    (void)uapi_pin_set_pull(MINE_WK2114_HOST_UART_RX_GPIO_PIN, PIN_PULL_TYPE_UP);
-    (void)uapi_gpio_set_dir(MINE_WK2114_HOST_UART_RX_GPIO_PIN, GPIO_DIRECTION_INPUT);
+    (void)uapi_pin_set_mode(g_mine_wk2114_host_rx_gpio_probe_pin, HAL_PIO_FUNC_GPIO);
+    (void)uapi_pin_set_pull(g_mine_wk2114_host_rx_gpio_probe_pin, PIN_PULL_TYPE_UP);
+    (void)uapi_gpio_set_dir(g_mine_wk2114_host_rx_gpio_probe_pin, GPIO_DIRECTION_INPUT);
 
     for (i = 0; i < 8U; i++) {
-        if (uapi_gpio_get_val(MINE_WK2114_HOST_UART_RX_GPIO_PIN) == GPIO_LEVEL_LOW) {
+        if (uapi_gpio_get_val(g_mine_wk2114_host_rx_gpio_probe_pin) == GPIO_LEVEL_LOW) {
             low_cnt++;
         } else {
             high_cnt++;
@@ -313,6 +315,67 @@ static void mine_wk2114_host_uart_rx_drain(void)
     if (drain_count > 0U) {
         mine_wk2114_log("[mine wk2114] drain stale host rx=%u\r\n", (unsigned int)drain_count);
     }
+}
+
+/**
+ * @brief 芯片侧 UART2 回环导通自检（TX/RX 短接场景）。
+ *
+ * 关键流程注释：该检查仅验证“UART2 发出的字节能否从 UART2 收回”，
+ * 用于快速区分 UART2 通道不通 与 WK2114 主口协议不匹配 两类问题。
+ */
+static errcode_t mine_wk2114_uart2_loopback_self_test(void)
+{
+    const uint8_t tx[MINE_WK2114_UART2_LOOPBACK_PAYLOAD_LEN] = {0x55U, 0xA5U, 0x5AU, 0x0FU};
+    uint8_t rx[MINE_WK2114_UART2_LOOPBACK_PAYLOAD_LEN] = {0};
+    uint8_t rx_count = 0;
+    uint32_t start_ms;
+    int32_t wlen;
+    int32_t rlen;
+
+    mine_wk2114_host_uart_rx_drain();
+    start_ms = (uint32_t)uapi_systick_get_ms();
+
+    wlen = uapi_uart_write(MINE_WK2114_HOST_UART_BUS, tx, MINE_WK2114_UART2_LOOPBACK_PAYLOAD_LEN, 0);
+    if (wlen != (int32_t)MINE_WK2114_UART2_LOOPBACK_PAYLOAD_LEN) {
+        mine_wk2114_log("[mine wk2114] uart2 loopback tx failed wlen=%ld\r\n", (long)wlen);
+        return ERRCODE_FAIL;
+    }
+
+    while ((uint32_t)(uapi_systick_get_ms() - start_ms) < MINE_WK2114_UART2_LOOPBACK_TIMEOUT_MS) {
+        rlen = uapi_uart_read(MINE_WK2114_HOST_UART_BUS,
+            &rx[rx_count],
+            (uint16_t)(MINE_WK2114_UART2_LOOPBACK_PAYLOAD_LEN - rx_count),
+            0);
+        if (rlen > 0) {
+            rx_count = (uint8_t)(rx_count + (uint8_t)rlen);
+            if (rx_count >= MINE_WK2114_UART2_LOOPBACK_PAYLOAD_LEN) {
+                break;
+            }
+            continue;
+        }
+        osal_msleep(1);
+    }
+
+    if (rx_count != MINE_WK2114_UART2_LOOPBACK_PAYLOAD_LEN) {
+        mine_wk2114_log("[mine wk2114] uart2 loopback timeout rx_count=%u\r\n", (unsigned int)rx_count);
+        return ERRCODE_FAIL;
+    }
+
+    if (memcmp(tx, rx, MINE_WK2114_UART2_LOOPBACK_PAYLOAD_LEN) != 0) {
+        mine_wk2114_log("[mine wk2114] uart2 loopback mismatch tx=%02X %02X %02X %02X rx=%02X %02X %02X %02X\r\n",
+            (unsigned int)tx[0],
+            (unsigned int)tx[1],
+            (unsigned int)tx[2],
+            (unsigned int)tx[3],
+            (unsigned int)rx[0],
+            (unsigned int)rx[1],
+            (unsigned int)rx[2],
+            (unsigned int)rx[3]);
+        return ERRCODE_FAIL;
+    }
+
+    mine_wk2114_log("[mine wk2114] uart2 loopback pass\r\n");
+    return ERRCODE_SUCC;
 }
 
 /**
@@ -526,7 +589,7 @@ static errcode_t mine_wk2114_read_addr6(uint8_t addr6, uint8_t *value)
         (unsigned int)addr6,
         (unsigned long)(g_mine_wk2114_rx_cb_bytes - rx_cb_before),
         (unsigned long)(g_mine_wk2114_rx_poll_bytes - rx_poll_before),
-        (unsigned int)uapi_gpio_get_val(MINE_WK2114_HOST_UART_RX_GPIO_PIN));
+        (unsigned int)uapi_gpio_get_val(g_mine_wk2114_host_rx_gpio_probe_pin));
     mine_wk2114_log_pin_snapshot("read-timeout");
     return ERRCODE_FAIL;
 }
@@ -955,12 +1018,32 @@ errcode_t mine_wk2114_uart2_ext_init(void)
     uart_pin_config_t pin_cfg = {0};
     uart_buffer_config_t buf_cfg = {0};
     errcode_t ret;
-    uint8_t mode_candidates[2] = {
+    uint8_t tx_pin_candidates[MINE_WK2114_HOST_UART_PROFILE_COUNT] = {
+        (uint8_t)MINE_WK2114_HOST_UART_TX_PIN,
+        (uint8_t)MINE_WK2114_HOST_UART_TX_PIN,
+        (uint8_t)MINE_WK2114_HOST_UART_SWAP_TX_PIN,
+        (uint8_t)MINE_WK2114_HOST_UART_SWAP_TX_PIN,
+    };
+    uint8_t rx_pin_candidates[MINE_WK2114_HOST_UART_PROFILE_COUNT] = {
+        (uint8_t)MINE_WK2114_HOST_UART_RX_PIN,
+        (uint8_t)MINE_WK2114_HOST_UART_RX_PIN,
+        (uint8_t)MINE_WK2114_HOST_UART_SWAP_RX_PIN,
+        (uint8_t)MINE_WK2114_HOST_UART_SWAP_RX_PIN,
+    };
+    pin_t rx_gpio_probe_candidates[MINE_WK2114_HOST_UART_PROFILE_COUNT] = {
+        MINE_WK2114_HOST_UART_RX_GPIO_PIN,
+        MINE_WK2114_HOST_UART_RX_GPIO_PIN,
+        MINE_WK2114_HOST_UART_SWAP_RX_GPIO_PIN,
+        MINE_WK2114_HOST_UART_SWAP_RX_GPIO_PIN,
+    };
+    uint8_t mode_candidates[MINE_WK2114_HOST_UART_PROFILE_COUNT] = {
+        (uint8_t)MINE_WK2114_HOST_UART_PIN_MODE,
+        (uint8_t)MINE_WK2114_HOST_UART_ALT_PIN_MODE,
         (uint8_t)MINE_WK2114_HOST_UART_PIN_MODE,
         (uint8_t)MINE_WK2114_HOST_UART_ALT_PIN_MODE,
     };
-    uint8_t mode_try_count = 1;
-    uint8_t mode_idx;
+    uint8_t profile_try_count = 1;
+    uint8_t profile_idx;
     uint8_t mode;
 
     if (g_mine_wk2114_ready) {
@@ -970,7 +1053,7 @@ errcode_t mine_wk2114_uart2_ext_init(void)
     buf_cfg.rx_buffer = g_mine_wk2114_uart_rx_buffer;
     buf_cfg.rx_buffer_size = sizeof(g_mine_wk2114_uart_rx_buffer);
 
-    /* 对齐已调通的 slave 配置：固定 UART2 引脚与复用模式。 */
+    /* 对齐已调通的 slave 配置：默认使用 UART2 固定引脚。 */
     pin_cfg.tx_pin = MINE_WK2114_HOST_UART_TX_PIN;
     pin_cfg.rx_pin = MINE_WK2114_HOST_UART_RX_PIN;
     pin_cfg.cts_pin = PIN_NONE;
@@ -984,23 +1067,28 @@ errcode_t mine_wk2114_uart2_ext_init(void)
     /* 关键流程注释：初始化 UART2 前先采样原始 RX GPIO 电平，提前识别硬件硬拉低。 */
     mine_wk2114_probe_host_rx_gpio_level("before-uart-init");
 
-    if (mode_candidates[1] != mode_candidates[0]) {
-        mode_try_count = 2;
+    if ((mode_candidates[1] != mode_candidates[0]) ||
+        (tx_pin_candidates[2] != tx_pin_candidates[0]) ||
+        (rx_pin_candidates[2] != rx_pin_candidates[0])) {
+        profile_try_count = MINE_WK2114_HOST_UART_PROFILE_COUNT;
     }
 
     /*
      * 关键流程注释：优先使用当前配置模式，若链路检查失败则自动回退到备用模式，
      * 用于现场快速排除 pinmux 选择与板级连线不一致的问题。
      */
-    for (mode_idx = 0; mode_idx < mode_try_count; mode_idx++) {
-        mode = mode_candidates[mode_idx];
+    for (profile_idx = 0; profile_idx < profile_try_count; profile_idx++) {
+        pin_cfg.tx_pin = tx_pin_candidates[profile_idx];
+        pin_cfg.rx_pin = rx_pin_candidates[profile_idx];
+        g_mine_wk2114_host_rx_gpio_probe_pin = rx_gpio_probe_candidates[profile_idx];
+        mode = mode_candidates[profile_idx];
         mine_wk2114_log("[mine wk2114] uart2 cfg tx=%u rx=%u mode=%u irq=%u try=%u/%u\r\n",
             (unsigned int)pin_cfg.tx_pin,
             (unsigned int)pin_cfg.rx_pin,
             (unsigned int)mode,
             (unsigned int)uapi_gpio_get_val(MINE_WK2114_IRQ_GPIO_PIN),
-            (unsigned int)(mode_idx + 1U),
-            (unsigned int)mode_try_count);
+            (unsigned int)(profile_idx + 1U),
+            (unsigned int)profile_try_count);
 
         /* 关键流程注释：主口 RX 加弱上拉，避免对端高阻阶段被误判为持续低电平。 */
         (void)uapi_pin_set_pull(pin_cfg.rx_pin, PIN_PULL_TYPE_UP);
@@ -1016,6 +1104,17 @@ errcode_t mine_wk2114_uart2_ext_init(void)
                 ret);
             continue;
         }
+
+#if (MINE_WK2114_UART2_LOOPBACK_SELFTEST_ENABLE == 1U)
+        ret = mine_wk2114_uart2_loopback_self_test();
+        if (ret != ERRCODE_SUCC) {
+            mine_wk2114_log("[mine wk2114] uart2 loopback failed mode=%u tx=%u rx=%u\r\n",
+                (unsigned int)mode,
+                (unsigned int)pin_cfg.tx_pin,
+                (unsigned int)pin_cfg.rx_pin);
+            continue;
+        }
+#endif
 
 #if defined(CONFIG_UART_SUPPORT_RX)
         /* 对齐 slave：回调触发条件使用 IDLE。 */
