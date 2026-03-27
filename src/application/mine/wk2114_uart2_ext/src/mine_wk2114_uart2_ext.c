@@ -1,6 +1,6 @@
 /*
  * Copyright (c) HiSilicon (Shanghai) Technologies Co., Ltd.
- * ÃèÊö: Mine WK2114 UART2 À©Õ¹Ä£¿éÖ÷ÊµÏÖ¡£
+ * æè¿°: Mine WK2114 UART2 æ‰©å±•æ¨¡å—å®ç°ã€‚
  */
 
 #include "mine_wk2114_uart2_ext_module.h"
@@ -33,20 +33,20 @@
 #define PRINT(fmt, arg...)
 #endif
 
-/* ±£ÁôÔ­Ê¼ÈÕÖ¾³ö¿Ú£¬±ÜÃâµİ¹éµ÷ÓÃ¡£ */
+/* å¦‚æœåŸå§‹OSALæ‰“å°å‡½æ•°å­˜åœ¨ï¼Œåˆ™è¦†ç›–å®ƒ */
 static void (*g_mine_wk2114_raw_osal_printk)(const char *fmt, ...) = osal_printk;
 
-/* UART2 Ö÷¿Ú½ÓÊÕ»º´æ¡£ */
+/* UART2 æ¥æ”¶ç¼“å†²åŒº */
 static uint8_t g_mine_wk2114_uart_rx_buffer[MINE_WK2114_HOST_UART_RX_BUFFER_SIZE] = {0};
-/* µ±Ç°³õÊ¼»¯³¢ÊÔ¶ÔÓ¦µÄ RX GPIO Ì½Õë½ÅÎ»¡£ */
+/* å½“å‰æ¢æµ‹çš„ RX GPIO é€»è¾‘å¼•è„šå· */
 static pin_t g_mine_wk2114_host_rx_gpio_probe_pin = MINE_WK2114_HOST_UART_RX_GPIO_PIN;
 
-/* ¶Á¼Ä´æÆ÷ÏìÓ¦ FIFO¡£ */
+/* ä¸»åº”ç­” FIFO */
 static uint8_t g_mine_wk2114_host_resp_fifo[MINE_WK2114_HOST_RESP_FIFO_SIZE] = {0};
 static volatile uint16_t g_mine_wk2114_host_resp_head = 0;
 static volatile uint16_t g_mine_wk2114_host_resp_tail = 0;
 
-/* Ä£¿éÔËĞĞ×´Ì¬¡£ */
+/* æ¨¡å—çŠ¶æ€ */
 static bool g_mine_wk2114_ready = false;
 static uint8_t g_mine_wk2114_gena_shadow = MINE_WK2114_GENA_RESERVED_MASK;
 static uint32_t g_mine_wk2114_subuart_baud[MINE_WK2114_SUBUART_COUNT] = {
@@ -57,16 +57,21 @@ static uint32_t g_mine_wk2114_subuart_baud[MINE_WK2114_SUBUART_COUNT] = {
 };
 static bool g_mine_wk2114_subuart_ready[MINE_WK2114_SUBUART_COUNT] = { false, false, false, false };
 
-/* IRQ Í³¼Æ×´Ì¬¡£ */
+/* IRQ çŠ¶æ€ */
 static volatile bool g_mine_wk2114_irq_pending = false;
 static volatile uint32_t g_mine_wk2114_irq_count = 0;
 
-/* Ö÷¿Ú½ÓÊÕÕï¶ÏÍ³¼Æ£ºÓÃÓÚÅĞ¶ÏÊÇ¡°ÎŞ»Ø°ü¡±»¹ÊÇ¡°»Ø°ü²»Æ¥Åä¡±¡£ */
+/* æ¥æ”¶å›è°ƒå­—èŠ‚æ•°ç»Ÿè®¡ï¼Œæ¥æ”¶è½®è¯¢å­—èŠ‚æ•°ç»Ÿè®¡ */
 static volatile uint32_t g_mine_wk2114_rx_cb_bytes = 0;
 static volatile uint32_t g_mine_wk2114_rx_poll_bytes = 0;
 
+/* å‰ç½®å£°æ˜ï¼šé¿å…å…ˆè°ƒç”¨åå®šä¹‰è§¦å‘éšå¼å£°æ˜ã€‚ */
+static errcode_t mine_wk2114_send_autobaud_sync_sequence(void);
+static errcode_t mine_wk2114_verify_register_value(uint8_t addr6, uint8_t expected, const char *reg_name);
+static __attribute__((unused)) errcode_t mine_wk2114_send_autobaud_sync_fallback_burst(void);
+
 /**
- * @brief ÁÙ½çÇø¼ÓËø¡£
+ * @brief ç¦ç”¨ä¸­æ–­
  */
 static unsigned int mine_wk2114_irq_lock(void)
 {
@@ -74,7 +79,7 @@ static unsigned int mine_wk2114_irq_lock(void)
 }
 
 /**
- * @brief ÁÙ½çÇø½âËø¡£
+ * @brief ä½¿èƒ½ä¸­æ–­
  */
 static void mine_wk2114_irq_unlock(unsigned int irq_state)
 {
@@ -82,7 +87,7 @@ static void mine_wk2114_irq_unlock(unsigned int irq_state)
 }
 
 /**
- * @brief ¼ì²é×Ó´®¿ÚºÅÊÇ·ñºÏ·¨¡£
+ * @brief æ£€æŸ¥é€šé“æ˜¯å¦æœ‰æ•ˆ
  */
 static bool mine_wk2114_channel_valid(uint8_t channel)
 {
@@ -90,7 +95,7 @@ static bool mine_wk2114_channel_valid(uint8_t channel)
 }
 
 /**
- * @brief ×Ó´®¿ÚºÅ×ªË÷Òı£¨1~4 -> 0~3£©¡£
+ * @brief é€šé“å·è½¬ç´¢å¼• 1~4 -> 0~3
  */
 static uint8_t mine_wk2114_channel_index(uint8_t channel)
 {
@@ -98,7 +103,7 @@ static uint8_t mine_wk2114_channel_index(uint8_t channel)
 }
 
 /**
- * @brief ¹¹Ôì×Ó´®¿Ú 6bit µØÖ·£ºC1C0 + A3A2A1A0¡£
+ * @brief æ„é€ å­é€šé“åœ°å€ 6bit åœ°å€ C1C0 + A3A2A1A0
  */
 static uint8_t mine_wk2114_make_sub_addr(uint8_t channel, uint8_t reg4)
 {
@@ -107,7 +112,7 @@ static uint8_t mine_wk2114_make_sub_addr(uint8_t channel, uint8_t reg4)
 }
 
 /**
- * @brief ¼ÆËãÖ¸¶¨×Ó´®¿ÚÔÚÈ«¾ÖÎ»Í¼ÖĞµÄÑÚÂë¡£
+ * @brief è¿”å›æŒ‡å®šé€šé“åœ¨å…¨å±€ä½å›¾ä¸­çš„ä½
  */
 static uint8_t mine_wk2114_channel_bit(uint8_t channel)
 {
@@ -115,7 +120,7 @@ static uint8_t mine_wk2114_channel_bit(uint8_t channel)
 }
 
 /**
- * @brief Í³Ò»ÈÕÖ¾Êä³ö£ºOSAL + PRINT + UART0¡£
+ * @brief ç»Ÿè®¡ä¸€æ¡æ—¥å¿—ï¼Œè¾“å‡ºåˆ° OSAL + PRINT + UART0
  */
 void mine_wk2114_log(const char *fmt, ...)
 {
@@ -140,7 +145,7 @@ void mine_wk2114_log(const char *fmt, ...)
 }
 
 /**
- * @brief ¼ÇÂ¼¹Ø¼üÁ¬ÏßµçÆ½¿ìÕÕ£¨ÎŞÊ¾²¨Æ÷ÅÅÕÏ£©¡£
+ * @brief è®°å½•å…³é”®å¼•è„šçŠ¶æ€ï¼Œæ˜¾ç¤ºå½“å‰çŠ¶æ€
  */
 static void mine_wk2114_log_pin_snapshot(const char *stage)
 {
@@ -152,10 +157,9 @@ static void mine_wk2114_log_pin_snapshot(const char *stage)
 }
 
 /**
- * @brief ÒÔ GPIO ÊäÈë·½Ê½²ÉÑùÖ÷¿Ú RX Ô­Ê¼µçÆ½¡£
+ * @brief é€šè¿‡ GPIO é…ç½®æ–¹å¼æ¢æµ‹ RX åŸå§‹çŠ¶æ€
  *
- * ¹Ø¼üÁ÷³Ì×¢ÊÍ£º¸ÃÌ½ÕëÔÚ UART ³õÊ¼»¯Ç°Ö´ĞĞ£¬
- * ÓÃÓÚÇø·Ö¡°UARTÅäÖÃ/»Øµ÷ÎÊÌâ¡±ºÍ¡°Íâ²¿Ó²¼ş°ÑÏßÇ¿À­µÍ¡±¡£
+ * å…³é”®æµç¨‹æ³¨é‡Šï¼šå…ˆå°†UARTåˆå§‹åŒ–å‰æ‰§è¡Œï¼Œç¡®ä¿UARTæ”¶å‘/ä¸­æ–­/å¤–éƒ¨ä¸­æ–­éƒ½æœªä½¿èƒ½
  */
 static void mine_wk2114_probe_host_rx_gpio_level(const char *stage)
 {
@@ -184,7 +188,7 @@ static void mine_wk2114_probe_host_rx_gpio_level(const char *stage)
 }
 
 /**
- * @brief IRQ »Øµ÷£ºÖ»×ö×îĞ¡¶¯×÷£¬ÖÃÎ»²¢¼ÆÊı¡£
+ * @brief IRQ ä¸­æ–­å¤„ç†å‡½æ•°ï¼Œä»…è®°å½•ä¸­æ–­æ¬¡æ•°å’Œä¸­æ–­çŠ¶æ€
  */
 static void mine_wk2114_irq_handler(pin_t pin, uintptr_t param)
 {
@@ -196,7 +200,7 @@ static void mine_wk2114_irq_handler(pin_t pin, uintptr_t param)
 }
 
 /**
- * @brief ÅäÖÃ IRQ Òı½Å£¨GPIO13£¬µÍµçÆ½ÓĞĞ§£©¡£
+ * @brief åˆå§‹åŒ– IRQ ä¸­æ–­ï¼ŒGPIO13 å¼•è„šä½¿èƒ½ä¸­æ–­
  */
 static errcode_t mine_wk2114_irq_gpio_init(void)
 {
@@ -229,7 +233,7 @@ static errcode_t mine_wk2114_irq_gpio_init(void)
 }
 
 /**
- * @brief Ö´ĞĞÓ²¼ş¸´Î»£º¸ß10ms -> µÍ1500ms -> ¸ß20ms¡£
+ * @brief æ‰§è¡Œç¡¬ä»¶å¤ä½
  */
 static errcode_t mine_wk2114_hw_reset_chip(void)
 {
@@ -245,48 +249,69 @@ static errcode_t mine_wk2114_hw_reset_chip(void)
         return ret;
     }
 
-    /* ¹Ø¼üÁ÷³Ì×¢ÊÍ£ºÏÈ¸ø¸ßµçÆ½ÎÈ¶¨£¬ÔÙÖ´ĞĞµÍÂö³å¸´Î»¡£ */
+    /* å…³é”®æµç¨‹æ³¨é‡Šï¼šå…ˆå°†RSTæ‹‰é«˜10ms */
     ret = uapi_gpio_set_val(MINE_WK2114_RESET_GPIO_PIN, GPIO_LEVEL_HIGH);
     if (ret != ERRCODE_SUCC) {
         mine_wk2114_log("[mine wk2114] reset pre-high failed, ret=%x\r\n", ret);
         return ret;
     }
-    osal_msleep(MINE_WK2114_RESET_HOLD_MS);
+    osal_msleep(MINE_WK2114_RESET_HOLD_MS);  // æ‹‰é«˜10ms
 
     ret = uapi_gpio_set_val(MINE_WK2114_RESET_GPIO_PIN, GPIO_LEVEL_LOW);
     if (ret != ERRCODE_SUCC) {
         mine_wk2114_log("[mine wk2114] reset pull-low failed, ret=%x\r\n", ret);
         return ret;
     }
-    /* ¹Ø¼üÁ÷³Ì×¢ÊÍ£ºÀ­³¤µÍµçÆ½±£³ÖÊ±¼ä£¬ÑéÖ¤ RST Âö³åÊÇ·ñ±»Ğ¾Æ¬¿É¿¿Ê¶±ğ¡£ */
-    osal_msleep(MINE_WK2114_RESET_LOW_HOLD_MS);
-
-#if (MINE_WK2114_RESET_FORCE_LOW_ONLY == 1U)
-    mine_wk2114_log("[mine wk2114] reset force-low mode enabled\r\n");
-    return ERRCODE_SUCC;
-#endif
+    osal_msleep(MINE_WK2114_RESET_LOW_HOLD_MS);  // æ‹‰ä½10mså¤ä½
 
     ret = uapi_gpio_set_val(MINE_WK2114_RESET_GPIO_PIN, GPIO_LEVEL_HIGH);
     if (ret != ERRCODE_SUCC) {
         mine_wk2114_log("[mine wk2114] reset release-high failed, ret=%x\r\n", ret);
         return ret;
     }
-    
-    /* ¹Ø¼üÁ÷³Ì×¢ÊÍ£ºÊÍ·Å¸´Î»ºó£¬µÈ´ıWK2114ÄÚ²¿×Ô¼ìÍê³É²¢À­µÍIRQÒı½Å */
-    for (uint32_t wait_idx = 0; wait_idx < MINE_WK2114_RESET_RELEASE_WAIT_MS; wait_idx += 5U) {
-        osal_msleep(5);
-        if (uapi_gpio_get_val(MINE_WK2114_IRQ_GPIO_PIN) == GPIO_LEVEL_LOW) {
-            mine_wk2114_log("[mine wk2114] irq goes low after %u ms hardware reset\r\n", (unsigned int)(wait_idx + 5U));
-            break;
-        }
-    }
+    osal_msleep(MINE_WK2114_RESET_RELEASE_WAIT_MS);  // æ‹‰é«˜20mså®Œæˆå¤ä½
 
     mine_wk2114_log("[mine wk2114] hw reset pulse done on gpio10\r\n");
     return ERRCODE_SUCC;
 }
 
 /**
- * @brief Çå¿ÕÈí¼şÏìÓ¦ FIFO¡£
+ * @brief åˆå§‹åŒ–WK2114èŠ¯ç‰‡ï¼ŒåŒ…å«å®Œæ•´çš„è‡ªé€‚åº”æ³¢ç‰¹ç‡æµç¨‹
+ * 
+ * æµç¨‹ï¼šæ‹‰é«˜RST10msï¼Œæ‹‰ä½RST10mså¤ä½ï¼Œå†æ‹‰é«˜20mså®Œæˆå¤ä½ï¼Œ
+ * å¤ä½å®Œæˆåå‘é€0x55å®Œæˆæ³¢ç‰¹ç‡åŒ¹é…
+ */
+errcode_t mine_wk2114_init_chip(void)
+{
+    errcode_t ret;
+    
+    // æ‰§è¡Œç¡¬ä»¶å¤ä½
+    ret = mine_wk2114_hw_reset_chip();
+    if (ret != ERRCODE_SUCC) {
+        mine_wk2114_log("[mine wk2114] hardware reset failed, ret=%x\r\n", ret);
+        return ret;
+    }
+    
+    // å¤ä½å®Œæˆåå‘é€0x55å®Œæˆæ³¢ç‰¹ç‡åŒ¹é…
+    ret = mine_wk2114_send_autobaud_sync_sequence();
+    if (ret != ERRCODE_SUCC) {
+        mine_wk2114_log("[mine wk2114] autobaud sync failed, ret=%x\r\n", ret);
+        return ret;
+    }
+    
+    // éªŒè¯è¿æ¥æ˜¯å¦æˆåŠŸ
+    ret = mine_wk2114_verify_register_value(MINE_WK2114_ADDR_GENA, MINE_WK2114_GENA_RESERVED_MASK, "GENA");
+    if (ret != ERRCODE_SUCC) {
+        mine_wk2114_log("[mine wk2114] verify GENA failed after init, ret=%x\r\n", ret);
+        return ret;
+    }
+    
+    mine_wk2114_log("[mine wk2114] chip initialized successfully\r\n");
+    return ERRCODE_SUCC;
+}
+
+/**
+ * @brief é‡ç½®ä¸»åº”ç­” FIFO
  */
 static void mine_wk2114_host_resp_fifo_reset(void)
 {
@@ -297,10 +322,10 @@ static void mine_wk2114_host_resp_fifo_reset(void)
 }
 
 /**
- * @brief ÇåÀíÖ÷¿ÚÓ²¼ş RX FIFO ÖĞµÄ²ĞÁô×Ö½Ú¡£
+ * @brief æ¸…ç©ºä¸» UART RX FIFO ä¸­çš„æ®‹ç•™å­—èŠ‚
  *
- * ¹Ø¼üÁ÷³Ì×¢ÊÍ£ºÉÏÒ»ÂÖÊ§°ÜºóÈô²ĞÁôÔà×Ö½Ú£¬»áÎÛÈ¾ÏÂÒ»´Î¶Á¼Ä´æÆ÷½á¹û£¬
- * Òò´ËÔÚ·¢Æğ¶ÁÃüÁîÇ°ÏÈ×öÒ»´ÎÓĞÏŞÇåÀí¡£
+ * å…³é”®æµç¨‹æ³¨é‡Šï¼šå¦‚æœä¸€æ¬¡è¯»å–å¤±è´¥ï¼Œåˆ™è®¤ä¸ºæ²¡æœ‰æ®‹ç•™å­—èŠ‚ï¼Œå¦åˆ™ç»§ç»­è¯»å–
+ * è¯»å–åˆ°çš„å­—èŠ‚ä¸ä¼šè¢«ä½¿ç”¨ï¼Œä»…ç”¨äºæ¸…ç©º FIFO
  */
 static void mine_wk2114_host_uart_rx_drain(void)
 {
@@ -318,10 +343,10 @@ static void mine_wk2114_host_uart_rx_drain(void)
 }
 
 /**
- * @brief Ğ¾Æ¬²à UART2 »Ø»·µ¼Í¨×Ô¼ì£¨TX/RX ¶Ì½Ó³¡¾°£©¡£
+ * @brief ç¯å› UART2 é€šé“å¹¶æµ‹è¯• TX/RX å¼•è„šé…ç½®æ˜¯å¦æ­£ç¡®
  *
- * ¹Ø¼üÁ÷³Ì×¢ÊÍ£º¸Ã¼ì²é½öÑéÖ¤¡°UART2 ·¢³öµÄ×Ö½ÚÄÜ·ñ´Ó UART2 ÊÕ»Ø¡±£¬
- * ÓÃÓÚ¿ìËÙÇø·Ö UART2 Í¨µÀ²»Í¨ Óë WK2114 Ö÷¿ÚĞ­Òé²»Æ¥Åä Á½ÀàÎÊÌâ¡£
+ * å…³é”®æµç¨‹æ³¨é‡Šï¼šé¦–å…ˆç¡®ä¿ UART2 æ¥æ”¶ç¼“å†²åŒºä¸ºç©ºï¼Œç„¶åå‘é€æµ‹è¯•æ•°æ®
+ * é€šè¿‡ UART2 é€šé“æ¥æ”¶æ•°æ®ï¼Œå¦‚æœæ¥æ”¶æ•°æ®ä¸å‘é€æ•°æ®ä¸€è‡´ï¼Œåˆ™è®¤ä¸ºé…ç½®æ­£ç¡®
  */
 static errcode_t mine_wk2114_uart2_loopback_self_test(void)
 {
@@ -379,7 +404,7 @@ static errcode_t mine_wk2114_uart2_loopback_self_test(void)
 }
 
 /**
- * @brief ÏòÈí¼ş FIFO Ğ´ 1 ×Ö½Ú£¨ÂúÔò¸²¸Ç×î¾ÉÊı¾İ£©¡£
+ * @brief ä¸»åº”ç­” FIFO å†™ 1 å­—èŠ‚ï¼Œå¦‚æœæ»¡åˆ™ä¸¢å¼ƒæœ€æ—§çš„æ•°æ®
  */
 static void mine_wk2114_host_resp_fifo_push(uint8_t byte)
 {
@@ -397,7 +422,7 @@ static void mine_wk2114_host_resp_fifo_push(uint8_t byte)
 }
 
 /**
- * @brief ´ÓÈí¼ş FIFO È¡ 1 ×Ö½Ú¡£
+ * @brief ä¸»åº”ç­” FIFO è¯» 1 å­—èŠ‚
  */
 static bool mine_wk2114_host_resp_fifo_pop(uint8_t *byte)
 {
@@ -420,7 +445,7 @@ static bool mine_wk2114_host_resp_fifo_pop(uint8_t *byte)
 }
 
 /**
- * @brief Ö÷¿Ú RX »Øµ÷£º½«Êı¾İ·ÅÈëÏìÓ¦ FIFO¡£
+ * @brief å¤„ç† RX ä¸­æ–­æ¥æ”¶çš„æ•°æ®ï¼Œå¹¶å­˜å…¥åº”ç­” FIFO
  */
 static void mine_wk2114_uart_rx_handler(const void *buffer, uint16_t length, bool error)
 {
@@ -442,7 +467,7 @@ static void mine_wk2114_uart_rx_handler(const void *buffer, uint16_t length, boo
 }
 
 /**
- * @brief ·¢ËÍÖ÷¿ÚÖ¡¡£
+ * @brief å‘é€ä¸»å¸§
  */
 static errcode_t mine_wk2114_send_host_frame(const uint8_t *frame, uint16_t len)
 {
@@ -465,7 +490,7 @@ static errcode_t mine_wk2114_send_host_frame(const uint8_t *frame, uint16_t len)
 }
 
 /**
- * @brief Ïò 6bit µØÖ·Ğ´ 1 ×Ö½Ú¼Ä´æÆ÷¡£
+ * @brief å‘ 6bit åœ°å€å†™ 1 å­—èŠ‚çš„å¯„å­˜å™¨
  */
 static errcode_t mine_wk2114_write_addr6(uint8_t addr6, uint8_t value)
 {
@@ -477,11 +502,11 @@ static errcode_t mine_wk2114_write_addr6(uint8_t addr6, uint8_t value)
 }
 
 /**
- * @brief Ö´ĞĞÒ»´Î¶Á¼Ä´æÆ÷ÃüÁî¡£
+ * @brief æ‰§è¡Œä¸€æ¬¡è¯»å¯„å­˜å™¨æ“ä½œ
  *
- * @param addr6 6bit ¼Ä´æÆ÷µØÖ·¡£
- * @param with_dummy true=·¢ËÍ cmd+dummy Á½×Ö½Ú£¬false=½ö·¢ËÍ cmd Ò»×Ö½Ú¡£
- * @param value ¶Áµ½µÄ¼Ä´æÆ÷ÖµÊä³ö¡£
+ * @param addr6 6bit çš„å¯„å­˜å™¨åœ°å€
+ * @param with_dummy true=å‘é€ cmd+dummy ä¸¤ä¸ªå­—èŠ‚ï¼Œfalse=å‘é€ä¸€ä¸ª cmd å­—èŠ‚
+ * @param value è¯»å–åˆ°çš„å¯„å­˜å™¨å€¼
  * @return errcode_t
  */
 static errcode_t mine_wk2114_read_addr6_once(uint8_t addr6, bool with_dummy, uint8_t *value)
@@ -522,7 +547,7 @@ static errcode_t mine_wk2114_read_addr6_once(uint8_t addr6, bool with_dummy, uin
             stable_wait_ms = 0;
         }
 
-        /* ¹Ø¼üÁ÷³Ì×¢ÊÍ£ºÊÕµ½Êı¾İºóµÈ´ı¶ÌÎÈ¶¨´°¿Ú£¬±ÜÃâ¶Áµ½°ë°ü¡£ */
+        /* å…³é”®æµç¨‹æ³¨é‡Šï¼šå¦‚æœæ”¶åˆ°æ•°æ®å¹¶ä¸”ä¸å†æœ‰æ–°æ•°æ®ï¼Œåˆ™ç­‰å¾…ç¨³å®š */
         if (got_data && (!got_new_data)) {
             stable_wait_ms++;
             if (stable_wait_ms >= MINE_WK2114_HOST_RESP_STABLE_WAIT_MS) {
@@ -531,7 +556,7 @@ static errcode_t mine_wk2114_read_addr6_once(uint8_t addr6, bool with_dummy, uin
             }
         }
 
-        /* »Øµ÷Ã»½øÊ±£¬ÂÖÑ¯Ó²¼ş FIFO ¶µµ×¡£ */
+        /* ä¸­æ–­æ— æ•°æ®æ—¶è½®è¯¢ RX FIFO */
         if (uapi_uart_read(MINE_WK2114_HOST_UART_BUS, &rx, 1, 0) > 0) {
             last = rx;
             got_data = true;
@@ -551,7 +576,7 @@ static errcode_t mine_wk2114_read_addr6_once(uint8_t addr6, bool with_dummy, uin
 }
 
 /**
- * @brief ¶ÁÈ¡ 6bit µØÖ·¼Ä´æÆ÷£¨¼æÈİÁ½ÖÖÖ÷¿Ú¶ÁÃüÁî¸ñÊ½£©¡£
+ * @brief è¯»å– 6bit åœ°å€çš„å¯„å­˜å™¨å€¼ï¼Œé‡‡ç”¨ä¸¤ç§æ–¹å¼è¯»å–
  */
 static errcode_t mine_wk2114_read_addr6(uint8_t addr6, uint8_t *value)
 {
@@ -566,7 +591,7 @@ static errcode_t mine_wk2114_read_addr6(uint8_t addr6, uint8_t *value)
     rx_cb_before = g_mine_wk2114_rx_cb_bytes;
     rx_poll_before = g_mine_wk2114_rx_poll_bytes;
 
-    /* ¹Ø¼üÁ÷³Ì×¢ÊÍ£ºÓÅÏÈ°´µ¥×Ö½Ú¶ÁÃüÁî³¢ÊÔ£¬Ê§°Üºó×Ô¶¯»ØÍËµ½ cmd+dummy¡£ */
+    /* å…³é”®æµç¨‹æ³¨é‡Šï¼šé¦–å…ˆå°è¯•ä»…å‘é€ cmdï¼Œå¦‚æœå¤±è´¥åˆ™è‡ªåŠ¨å›é€€åˆ° cmd+dummy */
     ret = mine_wk2114_read_addr6_once(addr6, false, value);
     if (ret == ERRCODE_SUCC) {
         mine_wk2114_log("[mine wk2114] read addr6=0x%02X by cmd-only\r\n", (unsigned int)addr6);
@@ -574,8 +599,8 @@ static errcode_t mine_wk2114_read_addr6(uint8_t addr6, uint8_t *value)
     }
 
     /*
-     * ¹Ø¼üÁ÷³Ì×¢ÊÍ£º°´¹æ¸ñÊé£¬Ö÷¿Ú¶Á¼Ä´æÆ÷Ä¬ÈÏ½ö·¢ËÍ 1 ×Ö½Ú CMD¡£
-     * cmd+dummy ½ö×÷Îª¿ÉÑ¡ÅÅÕÏÂ·¾¶£¬Ä¬ÈÏ¹Ø±Õ±ÜÃâÆ«Àë±ê×¼Ê±Ğò¡£
+     * å…³é”®æµç¨‹æ³¨é‡Šï¼šå¦‚æœä¸Šè¿°å¤±è´¥ï¼Œåˆ™é»˜è®¤å‘é€ 1 å­—èŠ‚ CMD
+     * cmd+dummy ä½œä¸ºå¤‡é€‰æ–¹æ¡ˆï¼Œå¦‚æœé»˜è®¤å‘é€å¤±è´¥åˆ™å…³é—­è‡ªåŠ¨å›é€€
      */
 #if (MINE_WK2114_HOST_READ_DUMMY_FALLBACK_ENABLE == 1U)
     ret = mine_wk2114_read_addr6_once(addr6, true, value);
@@ -595,7 +620,7 @@ static errcode_t mine_wk2114_read_addr6(uint8_t addr6, uint8_t *value)
 }
 
 /**
- * @brief ¶Á¼Ä´æÆ÷ÖØÊÔ¡£
+ * @brief è¯»å–å¯„å­˜å™¨å€¼ï¼Œé‡è¯•
  */
 static errcode_t mine_wk2114_read_addr6_retry(uint8_t addr6, uint8_t retry_max, uint8_t *value)
 {
@@ -618,7 +643,7 @@ static errcode_t mine_wk2114_read_addr6_retry(uint8_t addr6, uint8_t retry_max, 
 }
 
 /**
- * @brief Ğ£Ñé¼Ä´æÆ÷¹Ì¶¨Öµ¡£
+ * @brief éªŒè¯å¯„å­˜å™¨å€¼
  */
 static errcode_t mine_wk2114_verify_register_value(uint8_t addr6, uint8_t expected, const char *reg_name)
 {
@@ -643,7 +668,7 @@ static errcode_t mine_wk2114_verify_register_value(uint8_t addr6, uint8_t expect
 }
 
 /**
- * @brief Ğ´ºó¶Á»ØĞ£Ñé¡£
+ * @brief å†™å¯„å­˜å™¨å¹¶è¯»å›éªŒè¯
  */
 static errcode_t mine_wk2114_write_readback_verify(uint8_t addr6, uint8_t value, const char *reg_name)
 {
@@ -658,7 +683,7 @@ static errcode_t mine_wk2114_write_readback_verify(uint8_t addr6, uint8_t value,
 }
 
 /**
- * @brief Ö´ĞĞ 0x55 Ö÷¿Ú²¨ÌØÂÊ×ÔÊÊÓ¦¡£
+ * @brief æ‰§è¡Œ 0x55 é‡å¤å‘é€ä»¥åŒ¹é…æ³¢ç‰¹ç‡
  */
 static errcode_t mine_wk2114_send_autobaud_sync_sequence(void)
 {
@@ -679,15 +704,15 @@ static errcode_t mine_wk2114_send_autobaud_sync_sequence(void)
         (unsigned int)MINE_WK2114_HOST_AUTOBAUD_SYNC_RETRY,
         (unsigned int)uapi_gpio_get_val(MINE_WK2114_IRQ_GPIO_PIN));
 
-    /* ¹Ø¼üÁ÷³Ì×¢ÊÍ£ºµÈ´ıWK2114ÄÚ²¿²¨ÌØÂÊËø¶¨Íê³É */
+    /* å…³é”®æµç¨‹æ³¨é‡Šï¼šç­‰å¾…WK2114å†…éƒ¨å®Œæˆè‡ªé€‚åº” */
     osal_msleep(MINE_WK2114_HOST_AUTOBAUD_LOCK_WAIT_MS);
     return ERRCODE_SUCC;
 }
 
 /**
- * @brief ×ÔÊÊÓ¦Ê§°ÜºóµÄÔöÇ¿ 0x55 Í»·¢Í¬²½¡£
+ * @brief è‡ªé€‚åº”å¤±è´¥æ—¶ï¼Œå‘é€å¤§é‡ 0x55 ä»¥åŒ¹é…æ³¢ç‰¹ç‡
  */
-static errcode_t mine_wk2114_send_autobaud_sync_fallback_burst(void)
+static __attribute__((unused)) errcode_t mine_wk2114_send_autobaud_sync_fallback_burst(void)
 {
     uint8_t syncs[MINE_WK2114_HOST_AUTOBAUD_FALLBACK_BURST_COUNT];
     uint8_t i;
@@ -709,52 +734,59 @@ static errcode_t mine_wk2114_send_autobaud_sync_fallback_burst(void)
 }
 
 /**
- * @brief Á´Â·¼ì²é£º¸´Î» -> 0x55 -> ¶ÁGENA -> Ğ´¶Á»ØGENA¡£
+ * @brief è¯»å–å­ä¸²å£å‘é€ FIFO è®¡æ•°ï¼ˆTFCNTï¼‰
+ *
+ * @param channel å­ä¸²å£å·ï¼ˆ1~4ï¼‰
+ * @param tfcnt è¾“å‡ºè®¡æ•°å€¼
+ * @return errcode_t
+ */
+static errcode_t mine_wk2114_read_sub_tfcnt(uint8_t channel, uint8_t *tfcnt)
+{
+    uint8_t addr;
+
+    if ((!mine_wk2114_channel_valid(channel)) || (tfcnt == NULL)) {
+        return ERRCODE_INVALID_PARAM;
+    }
+
+    addr = mine_wk2114_make_sub_addr(channel, MINE_WK2114_SUBREG_TFCNT);
+    return mine_wk2114_read_addr6_retry(addr, MINE_WK2114_LINK_CHECK_READ_RETRY, tfcnt);
+}
+
+/**
+ * @brief è¯»å–å­ä¸²å£ FIFO çŠ¶æ€å¯„å­˜å™¨ï¼ˆFSRï¼‰
+ *
+ * @param channel å­ä¸²å£å·ï¼ˆ1~4ï¼‰
+ * @param fsr è¾“å‡ºçŠ¶æ€å€¼
+ * @return errcode_t
+ */
+static errcode_t mine_wk2114_read_sub_fsr(uint8_t channel, uint8_t *fsr)
+{
+    uint8_t addr;
+
+    if ((!mine_wk2114_channel_valid(channel)) || (fsr == NULL)) {
+        return ERRCODE_INVALID_PARAM;
+    }
+
+    addr = mine_wk2114_make_sub_addr(channel, MINE_WK2114_SUBREG_FSR);
+    return mine_wk2114_read_addr6_retry(addr, MINE_WK2114_LINK_CHECK_READ_RETRY, fsr);
+}
+
+/**
+ * @brief æµç¨‹ï¼šå¤ä½ -> 0x55 -> è¯»GENA -> å†™GENA
  */
 static errcode_t mine_wk2114_check_link_ready(void)
 {
     uint8_t gena_test;
     errcode_t ret;
 
-    ret = mine_wk2114_hw_reset_chip();
+    // ä½¿ç”¨æ–°çš„åˆå§‹åŒ–å‡½æ•°ï¼Œå®ƒåŒ…å«äº†å¤ä½å’Œè‡ªé€‚åº”æ³¢ç‰¹ç‡çš„å®Œæ•´æµç¨‹
+    ret = mine_wk2114_init_chip();
     if (ret != ERRCODE_SUCC) {
+        mine_wk2114_log("[mine wk2114] chip initialization failed\r\n");
         return ret;
     }
-    /* ¹Ø¼üÁ÷³Ì×¢ÊÍ£º¸´Î»ºóÏÈ×¥Ò»´ÎÈıÏßµçÆ½£¬¿ìËÙÅĞ¶ÏĞ¾Æ¬ÊÇ·ñÀë¿ª¸´Î»²¢ÓĞÖĞ¶Ï¿ÕÏĞÌ¬¡£ */
-    mine_wk2114_log_pin_snapshot("after-reset");
 
-#if (MINE_WK2114_RESET_FORCE_LOW_ONLY == 1U)
-    return ERRCODE_FAIL;
-#endif
-
-    ret = mine_wk2114_send_autobaud_sync_sequence();
-    if (ret != ERRCODE_SUCC) {
-        mine_wk2114_log("[mine wk2114] sync 0x55 failed\r\n");
-        return ret;
-    }
-    /* ¹Ø¼üÁ÷³Ì×¢ÊÍ£º0x55 ºóÔÙ´Î²ÉÑù£¬Çø·Ö¡°·¢ËÍÊ§°Ü¡±Óë¡°·¢ËÍ³É¹¦µ«¶Ô¶Ë²»»Ø°ü¡±¡£ */
-    mine_wk2114_log_pin_snapshot("after-sync55");
-
-    /* C: ¹Ì¶¨¼Ä´æÆ÷¶ÁĞ£Ñé£¬GENA Ä¬ÈÏÓ¦Îª 0xF0¡£ */
-    ret = mine_wk2114_verify_register_value(MINE_WK2114_ADDR_GENA, MINE_WK2114_GENA_RESERVED_MASK, "GENA");
-    if (ret != ERRCODE_SUCC) {
-        /* ¹Ø¼üÁ÷³Ì×¢ÊÍ£ºÊ×ÂÖ¶ÁÊ§°ÜÊ±£¬²¹Ò»ÂÖÔöÇ¿ 0x55 Í»·¢£¬ÔÙÖØÊÔÒ»´Î GENA ¶ÁĞ£Ñé¡£ */
-        mine_wk2114_log("[mine wk2114] first GENA read failed, retry after fallback sync\r\n");
-        ret = mine_wk2114_send_autobaud_sync_fallback_burst();
-        if (ret != ERRCODE_SUCC) {
-            mine_wk2114_log("[mine wk2114] fallback sync55 failed\r\n");
-            return ret;
-        }
-        mine_wk2114_log_pin_snapshot("after-fallback-sync55");
-
-        ret = mine_wk2114_verify_register_value(MINE_WK2114_ADDR_GENA, MINE_WK2114_GENA_RESERVED_MASK, "GENA");
-        if (ret != ERRCODE_SUCC) {
-            mine_wk2114_log("[mine wk2114] link check read GENA timeout\r\n");
-            return ret;
-        }
-    }
-
-    /* D: Ğ´¶Á»ØĞ£Ñé£¬ÏÈÖÃ UT1EN£¬ÔÙ»Ö¸´Ä¬ÈÏÖµ¡£ */
+    /* D: å†™å›éªŒè¯ï¼Œå…ˆå†™ UT1EN ç„¶åæ¢å¤é»˜è®¤å€¼ã€‚ */
     gena_test = (uint8_t)(MINE_WK2114_GENA_RESERVED_MASK | 0x01U);
     ret = mine_wk2114_write_readback_verify(MINE_WK2114_ADDR_GENA, gena_test, "GENA");
     if (ret != ERRCODE_SUCC) {
@@ -772,28 +804,37 @@ static errcode_t mine_wk2114_check_link_ready(void)
 }
 
 /**
- * @brief ²¨ÌØÂÊ¼Ä´æÆ÷¼ÆËã£¨Ó¦ÓÃ±Ê¼Ç¹«Ê½£©¡£
+ * @brief è®¡ç®—åˆå§‹å¯„å­˜å™¨å‚æ•°ï¼ˆåˆå§‹æ¨¡å¼ï¼‰
  */
 static errcode_t mine_wk2114_calc_baud_param(uint32_t baud_rate, uint16_t *baud_reg, uint8_t *pres)
 {
-    uint64_t reg_x10;
+    uint64_t reg_x16;
+    uint64_t integer_part;
+    uint64_t fraction_x16;
 
     if ((baud_rate == 0U) || (baud_reg == NULL) || (pres == NULL)) {
         return ERRCODE_INVALID_PARAM;
     }
 
-    reg_x10 = ((uint64_t)MINE_WK2114_XTAL_HZ * 10ULL + (uint64_t)(16U * baud_rate / 2U)) / (uint64_t)(16U * baud_rate);
-    if (reg_x10 < 10ULL) {
+    /* åº”ç”¨ç¬”è®° 5.2 å…¬å¼ï¼šXTAL/(16*baud)=æ•´æ•°+å°æ•°ï¼ŒBAUD=æ•´æ•°-1ï¼ŒPRES=å°æ•°*16ï¼ˆå–æ•´ï¼‰ */
+    reg_x16 = ((uint64_t)MINE_WK2114_XTAL_HZ * 16ULL + (uint64_t)(8U * baud_rate)) / (uint64_t)(16U * baud_rate);
+    if (reg_x16 < 16ULL) {
         return ERRCODE_INVALID_PARAM;
     }
 
-    *baud_reg = (uint16_t)((reg_x10 / 10ULL) - 1ULL);
-    *pres = (uint8_t)(reg_x10 % 10ULL);
+    integer_part = reg_x16 / 16ULL;
+    fraction_x16 = reg_x16 % 16ULL;
+    if (integer_part == 0ULL) {
+        return ERRCODE_INVALID_PARAM;
+    }
+
+    *baud_reg = (uint16_t)(integer_part - 1ULL);
+    *pres = (uint8_t)(fraction_x16 & 0x0FU);
     return ERRCODE_SUCC;
 }
 
 /**
- * @brief Ê¹ÄÜ GENA ¶ÔÓ¦×Ó´®¿ÚÊ±ÖÓÎ»¡£
+ * @brief ä½¿èƒ½æŒ‡å®šé€šé“çš„å…¨å±€é€šé“ä½
  */
 static errcode_t mine_wk2114_enable_global_channel(uint8_t channel)
 {
@@ -808,10 +849,10 @@ static errcode_t mine_wk2114_enable_global_channel(uint8_t channel)
 }
 
 /**
- * @brief ´¥·¢Ö¸¶¨×Ó´®¿ÚµÄÈí¼ş¸´Î»¡£
+ * @brief é‡ç½®æŒ‡å®šé€šé“çš„å…¨å±€é€šé“ä½
  *
- * ¹Ø¼üÁ÷³Ì×¢ÊÍ£ºGRST ¶ÔÓ¦Î»Ğ´ 1 ºó»áÓÉÓ²¼ş×Ô¶¯ÇåÁã£¬
- * Òò´ËÖ»×öĞ´¶¯×÷²¢¶ÌÔİµÈ´ı¸´Î»Íê³É£¬²»×ö¶Á»ØÇ¿Ğ£Ñé¡£
+ * å…³é”®æµç¨‹æ³¨é‡Šï¼šGRST å¯¹åº”ä½å†™ 1 ä¼šè‡ªåŠ¨å¤ä½é€šé“ï¼Œ
+ * ä»…å†™å…¨å±€é€šé“ä½åç­‰å¾…å¤ä½ä½å³å¯
  */
 static errcode_t mine_wk2114_soft_reset_channel(uint8_t channel)
 {
@@ -831,7 +872,7 @@ static errcode_t mine_wk2114_soft_reset_channel(uint8_t channel)
 }
 
 /**
- * @brief Ê¹ÄÜÖ¸¶¨×Ó´®¿Ú¶ÔÓ¦µÄÈ«¾ÖÖĞ¶ÏÊ¹ÄÜÎ»¡£
+ * @brief ä½¿èƒ½æŒ‡å®šé€šé“çš„å…¨å±€ä¸­æ–­ä½
  */
 static errcode_t mine_wk2114_enable_global_channel_irq(uint8_t channel)
 {
@@ -853,7 +894,7 @@ static errcode_t mine_wk2114_enable_global_channel_irq(uint8_t channel)
 }
 
 /**
- * @brief ÅäÖÃ×Ó´®¿Ú¼Ä´æÆ÷²¢×ö¶Á»ØĞ£Ñé¡£
+ * @brief é…ç½®å­é€šé“çš„æ³¢ç‰¹ç‡
  */
 static errcode_t mine_wk2114_config_subuart(uint8_t channel, uint32_t baud_rate)
 {
@@ -867,25 +908,25 @@ static errcode_t mine_wk2114_config_subuart(uint8_t channel, uint32_t baud_rate)
         return ret;
     }
 
-    /* ¹Ø¼üÁ÷³Ì×¢ÊÍ£º¶ÔÆë¹Ù·½ startup£¬ÏÈ¿ª×Ó´®¿ÚÊ±ÖÓÎ»¡£ */
+    /* å…³é”®æµç¨‹æ³¨é‡Šï¼šé¦–å…ˆä½¿èƒ½å…¨å±€é€šé“ä½ */
     ret = mine_wk2114_enable_global_channel(channel);
     if (ret != ERRCODE_SUCC) {
         return ret;
     }
 
-    /* ¹Ø¼üÁ÷³Ì×¢ÊÍ£º¶ÔÆë¹Ù·½ startup£¬Ê±ÖÓÊ¹ÄÜºóÏÈÖ´ĞĞÒ»´Î×Ó´®¿ÚÈí¸´Î»¡£ */
+    /* å…³é”®æµç¨‹æ³¨é‡Šï¼šç„¶åæ‰§è¡Œä¸€æ¬¡é€šé“å¤ä½ */
     ret = mine_wk2114_soft_reset_channel(channel);
     if (ret != ERRCODE_SUCC) {
         return ret;
     }
 
-    /* ¹Ø¼üÁ÷³Ì×¢ÊÍ£º¶ÔÆë¹Ù·½ startup£¬´ò¿ª¶ÔÓ¦×Ó´®¿ÚµÄÈ«¾ÖÖĞ¶ÏÃÅ¿Ø¡£ */
+    /* å…³é”®æµç¨‹æ³¨é‡Šï¼šç„¶åä½¿èƒ½å…¨å±€ä¸­æ–­ä½ */
     ret = mine_wk2114_enable_global_channel_irq(channel);
     if (ret != ERRCODE_SUCC) {
         return ret;
     }
 
-    /* E: ¶ÔÆë¹Ù·½ termios£¬ÏÈÇĞ PAGE1 Åä²¨ÌØÂÊ²ÎÊı¡£ */
+    /* E: æœ€åé…ç½® termios çš„ PAGE1 currentItem */
     addr = mine_wk2114_make_sub_addr(channel, MINE_WK2114_SUBREG_SPAGE);
     ret = mine_wk2114_write_readback_verify(addr, 0x01U, "SPAGE(P1)");
     if (ret != ERRCODE_SUCC) {
@@ -910,7 +951,7 @@ static errcode_t mine_wk2114_config_subuart(uint8_t channel, uint32_t baud_rate)
         return ret;
     }
 
-    /* ¶ÔÆë¹Ù·½ startup£ºPAGE1 ÏÂÅäÖÃÊÕ·¢ FIFO ´¥µããĞÖµ¡£ */
+    /* æœ€åé…ç½® PAGE1 çš„ FIFO é˜ˆå€¼ */
     addr = mine_wk2114_make_sub_addr(channel, MINE_WK2114_SUBREG_RFTL);
     ret = mine_wk2114_write_readback_verify(addr, MINE_WK2114_RFTL_INIT_LEVEL, "RFTL");
     if (ret != ERRCODE_SUCC) {
@@ -923,7 +964,7 @@ static errcode_t mine_wk2114_config_subuart(uint8_t channel, uint32_t baud_rate)
         return ret;
     }
 
-    /* ÇĞ»Ø PAGE0£¬´ò¿ªÊÕ·¢Óë FIFO¡£ */
+    /* åˆ‡æ¢å› PAGE0 é…ç½® FIFO */
     addr = mine_wk2114_make_sub_addr(channel, MINE_WK2114_SUBREG_SPAGE);
     ret = mine_wk2114_write_readback_verify(addr, 0x00U, "SPAGE(P0)");
     if (ret != ERRCODE_SUCC) {
@@ -936,7 +977,7 @@ static errcode_t mine_wk2114_config_subuart(uint8_t channel, uint32_t baud_rate)
         return ret;
     }
 
-    /* ¶ÔÆë¹Ù·½ startup£ºÊ¹ÄÜ RFTRIG/RXOUT ÖĞ¶Ï£¬¹Ø±Õ TX ´¥µãÖĞ¶Ï¡£ */
+    /* æœ€åé…ç½® RFTRIG/RXOUT ä¸­æ–­ï¼Œå…³é—­ TX ä¸­æ–­ */
     addr = mine_wk2114_make_sub_addr(channel, MINE_WK2114_SUBREG_SIER);
     ret = mine_wk2114_write_readback_verify(addr, MINE_WK2114_SIER_INIT_MASK, "SIER");
     if (ret != ERRCODE_SUCC) {
@@ -954,7 +995,7 @@ static errcode_t mine_wk2114_config_subuart(uint8_t channel, uint32_t baud_rate)
         return ret;
     }
 
-    /* FCR ³õÊ¼»¯Íê³Éºó×öÒ»´Î¶Á»Ø£¬È·±£ FIFO Ê¹ÄÜÓë¸´Î»ÊÍ·ÅÉúĞ§¡£ */
+    /* FCR åˆå§‹åŒ–å®Œæˆåï¼Œè¯»å–ä¸€æ¬¡ä»¥ç¡®ä¿ FIFO ä½¿èƒ½æœ‰æ•ˆ */
     ret = mine_wk2114_verify_register_value(addr, MINE_WK2114_FCR_INIT_RELEASE, "FCR");
     if (ret != ERRCODE_SUCC) {
         return ret;
@@ -967,7 +1008,7 @@ static errcode_t mine_wk2114_config_subuart(uint8_t channel, uint32_t baud_rate)
 }
 
 /**
- * @brief FIFO ³¤¶È±àÂë¡£
+ * @brief FIFO é•¿åº¦è½¬ nibble
  */
 static uint8_t mine_wk2114_fifo_len_to_nibble(uint16_t len)
 {
@@ -981,7 +1022,7 @@ static uint8_t mine_wk2114_fifo_len_to_nibble(uint16_t len)
 }
 
 /**
- * @brief ·¢ËÍµ¥¸ö FIFO ·ÖÆ¬£¨×î¶à 16 ×Ö½Ú£©¡£
+ * @brief å‘é€ FIFO æ•°æ®å—ï¼Œæœ€å¤š 16 å­—èŠ‚
  */
 static errcode_t mine_wk2114_send_fifo_chunk(uint8_t channel, const uint8_t *data, uint16_t len)
 {
@@ -1005,7 +1046,7 @@ static errcode_t mine_wk2114_send_fifo_chunk(uint8_t channel, const uint8_t *dat
 }
 
 /**
- * @brief ³õÊ¼»¯ UART2 Ö÷¿ÚºÍ»Øµ÷¡£
+ * @brief åˆå§‹åŒ– UART2 é€šé“æ¥æ”¶
  */
 errcode_t mine_wk2114_uart2_ext_init(void)
 {
@@ -1053,7 +1094,7 @@ errcode_t mine_wk2114_uart2_ext_init(void)
     buf_cfg.rx_buffer = g_mine_wk2114_uart_rx_buffer;
     buf_cfg.rx_buffer_size = sizeof(g_mine_wk2114_uart_rx_buffer);
 
-    /* ¶ÔÆëÒÑµ÷Í¨µÄ slave ÅäÖÃ£ºÄ¬ÈÏÊ¹ÓÃ UART2 ¹Ì¶¨Òı½Å¡£ */
+    /* å¦‚æœé…ç½®ä¸º slave æ¨¡å¼ï¼Œåˆ™é»˜è®¤ä½¿ç”¨ UART2 é€šé“é…ç½® */
     pin_cfg.tx_pin = MINE_WK2114_HOST_UART_TX_PIN;
     pin_cfg.rx_pin = MINE_WK2114_HOST_UART_RX_PIN;
     pin_cfg.cts_pin = PIN_NONE;
@@ -1064,7 +1105,7 @@ errcode_t mine_wk2114_uart2_ext_init(void)
         return ret;
     }
 
-    /* ¹Ø¼üÁ÷³Ì×¢ÊÍ£º³õÊ¼»¯ UART2 Ç°ÏÈ²ÉÑùÔ­Ê¼ RX GPIO µçÆ½£¬ÌáÇ°Ê¶±ğÓ²¼şÓ²À­µÍ¡£ */
+    /* å…³é”®æµç¨‹æ³¨é‡Šï¼šåˆå§‹åŒ– UART2 å‰æ¢æµ‹åŸå§‹ RX GPIO é€»è¾‘ç”µå¹³ï¼Œä»¥ä¾¿è¯†åˆ«é€šé“æ˜¯å¦æ­£ç¡® */
     mine_wk2114_probe_host_rx_gpio_level("before-uart-init");
 
     if ((mode_candidates[1] != mode_candidates[0]) ||
@@ -1074,8 +1115,8 @@ errcode_t mine_wk2114_uart2_ext_init(void)
     }
 
     /*
-     * ¹Ø¼üÁ÷³Ì×¢ÊÍ£ºÓÅÏÈÊ¹ÓÃµ±Ç°ÅäÖÃÄ£Ê½£¬ÈôÁ´Â·¼ì²éÊ§°ÜÔò×Ô¶¯»ØÍËµ½±¸ÓÃÄ£Ê½£¬
-     * ÓÃÓÚÏÖ³¡¿ìËÙÅÅ³ı pinmux Ñ¡ÔñÓë°å¼¶Á¬Ïß²»Ò»ÖÂµÄÎÊÌâ¡£
+     * å…³é”®æµç¨‹æ³¨é‡Šï¼šé¦–å…ˆå°è¯•ä½¿ç”¨é»˜è®¤é…ç½®æ¨¡å¼ï¼Œå¦‚æœå¤±è´¥åˆ™è‡ªåŠ¨å›é€€åˆ°å…¶ä»–æ¨¡å¼
+     * å¦‚æœä¸Šè¿°å¤±è´¥ï¼Œåˆ™å…³é—­è‡ªåŠ¨å›é€€ï¼Œå°è¯•ä¸‹ä¸€ä¸ªé…ç½®
      */
     for (profile_idx = 0; profile_idx < profile_try_count; profile_idx++) {
         pin_cfg.tx_pin = tx_pin_candidates[profile_idx];
@@ -1090,7 +1131,7 @@ errcode_t mine_wk2114_uart2_ext_init(void)
             (unsigned int)(profile_idx + 1U),
             (unsigned int)profile_try_count);
 
-        /* ¹Ø¼üÁ÷³Ì×¢ÊÍ£ºÖ÷¿Ú RX ¼ÓÈõÉÏÀ­£¬±ÜÃâ¶Ô¶Ë¸ß×è½×¶Î±»ÎóÅĞÎª³ÖĞøµÍµçÆ½¡£ */
+        /* å…³é”®æµç¨‹æ³¨é‡Šï¼šé¦–å…ˆç¡®ä¿ RX å¼•è„šé…ç½®ä¸ºä¸Šæ‹‰ï¼Œé¿å…é”™è¯¯çš„ä½ç”µå¹³ */
         (void)uapi_pin_set_pull(pin_cfg.rx_pin, PIN_PULL_TYPE_UP);
         uapi_pin_set_mode(pin_cfg.tx_pin, mode);
         uapi_pin_set_mode(pin_cfg.rx_pin, mode);
@@ -1117,7 +1158,7 @@ errcode_t mine_wk2114_uart2_ext_init(void)
 #endif
 
 #if defined(CONFIG_UART_SUPPORT_RX)
-        /* ¶ÔÆë slave£º»Øµ÷´¥·¢Ìõ¼şÊ¹ÓÃ IDLE¡£ */
+        /* å¦‚æœ slave æ¥æ”¶å›è°ƒæ”¯æŒï¼Œåˆ™ä½¿ç”¨ IDLE */
         ret = uapi_uart_register_rx_callback(MINE_WK2114_HOST_UART_BUS,
             UART_RX_CONDITION_MASK_IDLE,
             1,
@@ -1150,7 +1191,7 @@ errcode_t mine_wk2114_uart2_ext_init(void)
 }
 
 /**
- * @brief ÅäÖÃ×Ó´®¿Ú²¨ÌØÂÊ¡£
+ * @brief è®¾ç½®å­é€šé“æ³¢ç‰¹ç‡
  */
 errcode_t mine_wk2114_uart2_ext_set_subuart_baud(uint8_t channel, uint32_t baud_rate)
 {
@@ -1165,12 +1206,16 @@ errcode_t mine_wk2114_uart2_ext_set_subuart_baud(uint8_t channel, uint32_t baud_
 }
 
 /**
- * @brief ×Ó´®¿Ú·¢ËÍ¡£
+ * @brief å­é€šé“å‘é€
  */
 errcode_t mine_wk2114_uart2_ext_send(uint8_t channel, const uint8_t *data, uint16_t len)
 {
     uint16_t offset = 0;
     uint16_t chunk;
+    uint16_t send_window;
+    uint16_t remain;
+    uint8_t tfcnt;
+    uint8_t fsr;
     errcode_t ret;
 
     if (!mine_wk2114_channel_valid(channel)) {
@@ -1183,7 +1228,7 @@ errcode_t mine_wk2114_uart2_ext_send(uint8_t channel, const uint8_t *data, uint1
         return ERRCODE_UART_NOT_INIT;
     }
 
-    /* Ê×´Î·¢ËÍ×Ô¶¯ÅäÖÃ×Ó´®¿Ú¡£ */
+    /* å¦‚æœå­é€šé“æœªé…ç½®ï¼Œåˆ™é‡æ–°é…ç½® */
     if (!g_mine_wk2114_subuart_ready[mine_wk2114_channel_index(channel)]) {
         ret = mine_wk2114_config_subuart(channel, g_mine_wk2114_subuart_baud[mine_wk2114_channel_index(channel)]);
         if (ret != ERRCODE_SUCC) {
@@ -1191,10 +1236,39 @@ errcode_t mine_wk2114_uart2_ext_send(uint8_t channel, const uint8_t *data, uint1
         }
     }
 
+    /* åº”ç”¨ç¬”è®° 5.2 å‘é€æµç¨‹ï¼šå…ˆè¯» FSR/TFCNT è®¡ç®— FIFO ä½™é‡ï¼Œå†æŒ‰ <=16 å­—èŠ‚åˆ†åŒ…å†™ FIFO */
     while (offset < len) {
-        chunk = (uint16_t)(len - offset);
+        ret = mine_wk2114_read_sub_fsr(channel, &fsr);
+        if (ret != ERRCODE_SUCC) {
+            mine_wk2114_log("[mine wk2114] sub%u read FSR failed\r\n", (unsigned int)channel);
+            return ret;
+        }
+
+        if ((fsr & MINE_WK2114_FSR_TFULL_BIT) != 0U) {
+            osal_msleep(1);
+            continue;
+        }
+
+        ret = mine_wk2114_read_sub_tfcnt(channel, &tfcnt);
+        if (ret != ERRCODE_SUCC) {
+            mine_wk2114_log("[mine wk2114] sub%u read TFCNT failed\r\n", (unsigned int)channel);
+            return ret;
+        }
+
+        if (tfcnt >= MINE_WK2114_SUBUART_FIFO_DEPTH) {
+            osal_msleep(1);
+            continue;
+        }
+
+        send_window = (uint16_t)(MINE_WK2114_SUBUART_FIFO_DEPTH - tfcnt);
+        remain = (uint16_t)(len - offset);
+        chunk = (send_window < remain) ? send_window : remain;
         if (chunk > MINE_WK2114_FIFO_CHUNK_MAX) {
             chunk = MINE_WK2114_FIFO_CHUNK_MAX;
+        }
+        if (chunk == 0U) {
+            osal_msleep(1);
+            continue;
         }
 
         ret = mine_wk2114_send_fifo_chunk(channel, &data[offset], chunk);
@@ -1210,7 +1284,7 @@ errcode_t mine_wk2114_uart2_ext_send(uint8_t channel, const uint8_t *data, uint1
 }
 
 /**
- * @brief Æô¶¯ÖØÊÔÁ÷³Ì£ºÏÈÖ÷¿Ú£¬ÔÙ×Ó´®¿Ú1¡£
+ * @brief è‡ªåŠ¨å¼•å¯¼ï¼Œå¦‚æœå¤±è´¥åˆ™é‡è¯•ï¼Œç›´åˆ°æˆåŠŸ
  */
 static errcode_t mine_wk2114_bootstrap_with_retry(void)
 {
@@ -1242,7 +1316,7 @@ static errcode_t mine_wk2114_bootstrap_with_retry(void)
 }
 
 /**
- * @brief ºóÌ¨ÈÎÎñ£º´¦Àí IRQ ÊÂ¼ş²¢Î¬³ÖÄ£¿éÔËĞĞ¡£
+ * @brief åå°ä»»åŠ¡ï¼Œå¤„ç† IRQ ä¸­æ–­å¹¶æ‰“å°çŠ¶æ€
  */
 static void *mine_wk2114_task(const char *arg)
 {
@@ -1265,7 +1339,7 @@ static void *mine_wk2114_task(const char *arg)
 }
 
 /**
- * @brief Ä£¿éÈë¿Ú£º´´½¨ºóÌ¨Ïß³Ì¡£
+ * @brief æ¨¡å—å¯åŠ¨æ—¶ï¼Œåˆ›å»ºåå°ä»»åŠ¡
  */
 static void mine_wk2114_entry(void)
 {

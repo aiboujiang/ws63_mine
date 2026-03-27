@@ -1,6 +1,6 @@
 /*
  * Copyright (c) HiSilicon (Shanghai) Technologies Co., Ltd.
- * ÃèÊö: Mine WK2114 UART2 À©Õ¹Ä£¿é¶ÔÍâ½Ó¿Ú¡£
+ * æè¿°: Mine WK2114 UART2 æ‰©å±•æ¨¡å—å…¬å…±æ¥å£ã€‚
  */
 
 #ifndef MINE_WK2114_UART2_EXT_H
@@ -17,38 +17,54 @@ extern "C" {
 #endif
 
 /**
- * @brief ³õÊ¼»¯ WK2114 À©Õ¹Ä£¿é¡£
+ * @brief åˆå§‹åŒ– WK2114 èŠ¯ç‰‡ã€‚
  *
- * ³õÊ¼»¯Á÷³Ì»ùÓÚÓ¦ÓÃ±Ê¼Ç£º
- * 1) ÉÏµçºóÏÈ×öÓ²¼ş¸´Î»£»
- * 2) ·¢ËÍ 0x55 Ëø¶¨Ö÷¿Ú²¨ÌØÂÊ£»
- * 3) ¶ÁÈ¡¹Ì¶¨¼Ä´æÆ÷ GENA(Ä¬ÈÏ 0xF0)È·ÈÏÁ´Â·£»
- * 4) Ö´ĞĞ GENA Ğ´¶Á»Ø£¬È·ÈÏ¶ÁĞ´¶¼Õı³£¡£
+ * åˆå§‹åŒ–åŒ…å«ä»¥ä¸‹æµç¨‹ï¼š
+ * 1) æ‹‰é«˜RST 10ms
+ * 2) æ‹‰ä½RST 10mså¤ä½
+ * 3) å†æ‹‰é«˜20mså®Œæˆå¤ä½
+ * 4) å¤ä½å®Œæˆåå‘é€0x55å®Œæˆæ³¢ç‰¹ç‡åŒ¹é…
  *
  * @return errcode_t
- * @retval ERRCODE_SUCC ³õÊ¼»¯³É¹¦¡£
- * @retval ÆäËû         ³õÊ¼»¯Ê§°Ü¡£
+ * @retval ERRCODE_SUCC åˆå§‹åŒ–æˆåŠŸ
+ * @retval å…¶ä»–         åˆå§‹åŒ–å¤±è´¥
+ */
+errcode_t mine_wk2114_init_chip(void);
+
+/**
+ * @brief åˆå§‹åŒ– WK2114 æ‰©å±•æ¨¡å—ã€‚
+ *
+ * åˆå§‹åŒ–åŒ…å«åº”ç”¨ç¬”è®°æµç¨‹ï¼š
+ * 1) ä¸Šç”µå¤ä½å’Œç¡¬ä»¶å¤ä½
+ * 2) å‘é€ 0x55 è‡ªé€‚åº”æ³¢ç‰¹ç‡
+ * 3) è¯»å–å›ºå®šå¯„å­˜å™¨ GENA(é»˜è®¤ 0xF0)ç¡®è®¤é“¾è·¯
+ * 4) æ‰§è¡Œ GENA å†™å›æ“ä½œï¼Œç¡®è®¤è¯»å†™æ­£å¸¸
+ *
+ * @return errcode_t
+ * @retval ERRCODE_SUCC åˆå§‹åŒ–æˆåŠŸ
+ * @retval å…¶ä»–         åˆå§‹åŒ–å¤±è´¥
  */
 errcode_t mine_wk2114_uart2_ext_init(void);
 
 /**
- * @brief ÅäÖÃ²¢Ê¹ÄÜÖ¸¶¨×Ó´®¿Ú²¨ÌØÂÊ¡£
+ * @brief è®¾ç½®æŒ‡å®šå­ä¸²å£æ³¢ç‰¹ç‡ã€‚
  *
- * »á°´Ó¦ÓÃ±Ê¼ÇÁ÷³ÌÅäÖÃ SPAGE/BAUD/PRES/SCR/FCR£¬
- * ²¢¶Ô¹Ø¼ü¼Ä´æÆ÷½øĞĞ¶Á»ØĞ£Ñé¡£
+ * åŒ…å«åº”ç”¨ç¬”è®°æµç¨‹ï¼š
+ * 1) è¯»å–å›ºå®šå¯„å­˜å™¨ SPAGE/BAUD/PRES/SCR/FCR
+ * 2) è¯»å–å…³é”®å¯„å­˜å™¨çš„å€¼è¿›è¡Œæ ¡éªŒã€‚
  *
- * @param channel ×Ó´®¿ÚºÅ£¬·¶Î§ 1~4¡£
- * @param baud_rate ×Ó´®¿Ú²¨ÌØÂÊ¡£
+ * @param channel å­ä¸²å£å·ï¼ŒèŒƒå›´ 1~4
+ * @param baud_rate å­ä¸²å£æ³¢ç‰¹ç‡
  * @return errcode_t
  */
 errcode_t mine_wk2114_uart2_ext_set_subuart_baud(uint8_t channel, uint32_t baud_rate);
 
 /**
- * @brief Í¨¹ı WK2114 ×Ó´®¿Ú·¢ËÍÊı¾İ¡£
+ * @brief é€šè¿‡ WK2114 ä¸²å£å‘é€æ•°æ®ã€‚
  *
- * @param channel ×Ó´®¿ÚºÅ£¬·¶Î§ 1~4¡£
- * @param data Êı¾İÖ¸Õë¡£
- * @param len Êı¾İ³¤¶È¡£
+ * @param channel å­ä¸²å£å·ï¼ŒèŒƒå›´ 1~4
+ * @param data æ•°æ®æŒ‡é’ˆã€‚
+ * @param len æ•°æ®é•¿åº¦
  * @return errcode_t
  */
 errcode_t mine_wk2114_uart2_ext_send(uint8_t channel, const uint8_t *data, uint16_t len);
