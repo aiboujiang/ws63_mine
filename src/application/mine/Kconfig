@@ -25,3 +25,10 @@ config MINE_SUPPORT_UART2_EXT_WK2114
         Build the Mine WK2114 UART2 extension skeleton module.
         This module provides a software framework for extending one UART2
         host port into four sub UART channels via WK2114.
+
+config MINE_SUPPORT_RGB_LED_DEMO
+    bool "Support Mine RGB LED Demo (GPIO4 DI)."
+    default n
+    help
+        Build single RGB LED demo under application/mine/rgb_led.
+        DI is fixed to GPIO4 for WS2812B-compatible one-wire timing.

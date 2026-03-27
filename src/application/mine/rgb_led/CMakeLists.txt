@@ -1,32 +1,19 @@
 #===============================================================================
-# @brief    CMake file for custom mine demos
+# @brief    CMake file for mine RGB LED demo
 #===============================================================================
 
-set(COMPONENT_NAME "mine")
+set(COMPONENT_NAME "mine_rgb_led")
 
 set(SOURCES
+    "src/mine_rgb_led_drv.c"
+    "src/mine_rgb_led_demo.c"
 )
 
 set(PUBLIC_HEADER
 )
 
-if(DEFINED CONFIG_MINE_SUPPORT_SLE_UART_HOST_DEMO)
-    add_subdirectory_if_exist(sle_uart_host)
-endif()
-
-if(DEFINED CONFIG_MINE_SUPPORT_SLE_UART_SLAVE_DEMO)
-    add_subdirectory_if_exist(sle_uart_slave)
-endif()
-
-if(DEFINED CONFIG_MINE_SUPPORT_UART2_EXT_WK2114)
-    add_subdirectory_if_exist(wk2114_uart2_ext)
-endif()
-
-if(DEFINED CONFIG_MINE_SUPPORT_RGB_LED_DEMO)
-    add_subdirectory_if_exist(rgb_led)
-endif()
-
 set(PRIVATE_HEADER
+    "inc"
 )
 
 set(PRIVATE_DEFINES
