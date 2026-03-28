@@ -307,25 +307,25 @@ void Wk_SetBaud(uint8_t port, enum WKBaud baud)
 {   
     uint8_t baud1, baud0, pres; 
 
-    /* 基于外部时钟 12MHz 计算: 
+    /* 基于外部时钟 11.0592MHz 计算: 
        整减1写入BAUD1,BAUD0，小数乘16写入PRES。
-       此处为业务中部分常用配置。
+       11.0592MHz 是串口通信的完美晶振，算出来的分频系数均为整数，没有小数误差。
     */
     switch(baud) { 
         case B9600:
             baud1 = 0x00;
-            baud0 = 0x4D; // 12M / (16*9600) = 78.125 -> (78-1)=77(0x4D)
-            pres = 0x02;  // 0.125 * 16 = 2
+            baud0 = 0x47; // 11.0592M / (16*9600) = 72 -> (72-1)=71(0x47)
+            pres = 0x00;  // 0小数部分
             break;
         case B115200:
             baud1 = 0x00;
-            baud0 = 0x05; // 12M / (16*115200) = 6.5104 -> (6-1)=5(0x05)
-            pres = 0x08;  // 0.5104 * 16 = 8.16 -> 8(0x08)
+            baud0 = 0x05; // 11.0592M / (16*115200) = 6 -> (6-1)=5(0x05)
+            pres = 0x00;  // 0小数部分
             break;
         default: 
             baud1 = 0x00;
-            baud0 = 0x4D; // 默认9600
-            pres = 0x02;
+            baud0 = 0x47; // 默认9600
+            pres = 0x00;
             break; 
     }
 
