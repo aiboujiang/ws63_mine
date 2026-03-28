@@ -12,23 +12,24 @@
 #include "soc_osal.h"
 #include "app_init.h"
 
-#define UART2_TEST_BAUDRATE               115200
+#define UART2_TEST_BAUDRATE               CONFIG_UART_BAUDRATE
 #define UART2_TEST_TASK_PRIO              24
 #define UART2_TEST_TASK_STACK_SIZE        0x1000
-#define UART2_TEST_SEND_INTERVAL_MS       100
+#define UART2_TEST_SEND_INTERVAL_MS       CONFIG_UART_TEST_SEND_INTERVAL_MS
 
 /*
  * UART2 默认引脚配置：
  * TX = GPIO8, RX = GPIO7, mode = 2。
  * 若你的板级复用不同，请按实际硬件修改这3个宏。
  */
-#define UART2_TEST_BUS                    UART_BUS_2
-#define UART2_TEST_TX_PIN                 8
-#define UART2_TEST_RX_PIN                 7
-#define UART2_TEST_PIN_MODE               2
+#define UART2_TEST_BUS                    CONFIG_UART_BUS_ID
+#define UART2_TEST_TX_PIN                 CONFIG_UART_TXD_PIN
+#define UART2_TEST_RX_PIN                 CONFIG_UART_RXD_PIN
+#define UART2_TEST_TX_PIN_MODE            CONFIG_UART_TXD_PIN_MODE
+#define UART2_TEST_RX_PIN_MODE            CONFIG_UART_RXD_PIN_MODE
 
 /* UART 发送固定测试字节：01010101b，便于示波器观测占空比和位宽。 */
-#define UART2_TEST_FIXED_BYTE             0x55
+#define UART2_TEST_FIXED_BYTE             CONFIG_UART_TEST_FIXED_BYTE
 
 /*
  * 即使只测试TX，驱动参数校验仍要求提供合法RX引脚与接收缓冲。
@@ -44,8 +45,8 @@ static void uart2_test_init_pinmux(void)
 #if defined(CONFIG_PINCTRL_SUPPORT_IE)
     (void)uapi_pin_set_ie(UART2_TEST_RX_PIN, PIN_IE_1);
 #endif /* CONFIG_PINCTRL_SUPPORT_IE */
-    (void)uapi_pin_set_mode(UART2_TEST_TX_PIN, UART2_TEST_PIN_MODE);
-    (void)uapi_pin_set_mode(UART2_TEST_RX_PIN, UART2_TEST_PIN_MODE);
+    (void)uapi_pin_set_mode(UART2_TEST_TX_PIN, UART2_TEST_TX_PIN_MODE);
+    (void)uapi_pin_set_mode(UART2_TEST_RX_PIN, UART2_TEST_RX_PIN_MODE);
 }
 
 /**
@@ -89,7 +90,7 @@ static errcode_t uart2_test_init(void)
 static void *uart2_test_task(const char *arg)
 {
     unused(arg);
-    uint8_t tx_data = UART2_TEST_FIXED_BYTE;
+    uint8_t tx_data = (uint8_t)UART2_TEST_FIXED_BYTE;
     uint32_t send_count = 0;
 
     uart2_test_init_pinmux();

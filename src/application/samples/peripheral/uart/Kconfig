@@ -4,33 +4,51 @@
 #===============================================================================
 config UART_BUS_ID
     int
-    prompt "Choose UART bus id."
+    prompt "Choose UART bus id for TX test."
     depends on SAMPLE_SUPPORT_UART
-    default 1
+    default 2
 
 config UART_TXD_PIN
     int
-    prompt "Choose UART TXD pin."
+    prompt "Choose UART TXD pin for TX test."
     depends on SAMPLE_SUPPORT_UART
-    default 17
+    default 8
 
 config UART_RXD_PIN
     int
-    prompt "Choose UART RXD pin."
+    prompt "Choose UART RXD pin for init check."
     depends on SAMPLE_SUPPORT_UART
-    default 18
+    default 7
 
 config UART_TXD_PIN_MODE
     int
     prompt "Choose UART TXD pin mode."
     depends on SAMPLE_SUPPORT_UART
-    default 25
+    default 2
 
 config UART_RXD_PIN_MODE
     int
     prompt "Choose UART RXD pin mode."
     depends on SAMPLE_SUPPORT_UART
-    default 24
+    default 2
+
+config UART_BAUDRATE
+    int
+    prompt "Config UART baudrate for TX test."
+    depends on SAMPLE_SUPPORT_UART
+    default 115200
+
+config UART_TEST_FIXED_BYTE
+    hex
+    prompt "Config fixed TX byte in HEX."
+    depends on SAMPLE_SUPPORT_UART
+    default 0x55
+
+config UART_TEST_SEND_INTERVAL_MS
+    int
+    prompt "Config TX interval(ms)."
+    depends on SAMPLE_SUPPORT_UART
+    default 100
 
 config UART_SUPPORT_INT_MODE
     bool
