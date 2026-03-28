@@ -38,8 +38,8 @@
 #define WK_MATCH_MAX_RETRY   3
 #define WK_MATCH_SEND_55_CNT 5
 #define WK_RESET_LOW_MS      10
-#define WK_RESET_READY_MS    50
-#define WK_MATCH_BYTE_GAP_MS 2
+#define WK_RESET_READY_MS    20
+#define WK_MATCH_BYTE_GAP_MS 5
 #define WK_MATCH_LOCK_MS     20
 
 #define MINE_UART_RX_BUFFER_SIZE 256
@@ -91,8 +91,9 @@ static uint32_t wk_baud_enum_to_value(enum WKBaud baud)
 static errcode_t wk_calc_baud_regs(uint32_t baud_val, uint8_t *baud1, uint8_t *baud0, uint8_t *pres)
 {
     uint64_t denom;
-    uint64_t reg_x10;
+    uint64_t reg_x100;
     uint32_t reg_int;
+    uint8_t reg_first_decimal;
     uint16_t baud_reg;
 
     if ((baud_val == 0U) || (baud1 == NULL) || (baud0 == NULL) || (pres == NULL)) {
@@ -101,22 +102,25 @@ static errcode_t wk_calc_baud_regs(uint32_t baud_val, uint8_t *baud1, uint8_t *b
 
     /*
      * Reg = Fosc / (16 * baud)
-     * 这里保留1位小数并四舍五入：
+     * 这里先保留2位小数并四舍五入（满足手册“Reg通常精确到小数点后两位”）：
      * - 整数部分减1写入BAUD1/BAUD0
      * - 小数第一位写入PRES
      */
     denom = (uint64_t)baud_val * 16U;
-    reg_x10 = ((uint64_t)WK_XTAL_FREQ_HZ * 10U + (denom / 2U)) / denom;
-    reg_int = (uint32_t)(reg_x10 / 10U);
+    reg_x100 = ((uint64_t)WK_XTAL_FREQ_HZ * 100U + (denom / 2U)) / denom;
+    reg_int = (uint32_t)(reg_x100 / 100U);
 
     if ((reg_int == 0U) || (reg_int > 0x10000U)) {
         return ERRCODE_FAIL;
     }
 
+    /* 取小数点后第一位作为PRES，和手册给出的12MHz/115200=>PRES=5规则一致。 */
+    reg_first_decimal = (uint8_t)((reg_x100 / 10U) % 10U);
+
     baud_reg = (uint16_t)(reg_int - 1U);
     *baud1 = (uint8_t)((baud_reg >> 8) & 0xFFU);
     *baud0 = (uint8_t)(baud_reg & 0xFFU);
-    *pres = (uint8_t)(reg_x10 % 10U);
+    *pres = reg_first_decimal;
     return ERRCODE_SUCC;
 }
 
@@ -312,7 +316,7 @@ void Wk_BaudAdaptive(void)
 
         // 先拉高后拉低再拉高，保证每轮自适应前都经过完整硬复位。
         uapi_gpio_set_val(WK_RST_PIN, GPIO_LEVEL_HIGH);
-        osal_msleep(2);
+        osal_msleep(10);
         uapi_gpio_set_val(WK_RST_PIN, GPIO_LEVEL_LOW);
         osal_msleep(WK_RESET_LOW_MS);
         uapi_gpio_set_val(WK_RST_PIN, GPIO_LEVEL_HIGH);
