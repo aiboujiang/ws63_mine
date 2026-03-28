@@ -25,8 +25,100 @@
 #define WK_IRQ_PIN           13
 #define WK_IRQ_PIN_MODE      0
 
+/*
+ * 晶振频率配置：
+ * 1) WS63板接12MHz晶振时使用12000000U（默认值）
+ * 2) 独立WK2114 demo板接11.0592MHz时改成11059200U
+ */
+#ifndef WK_XTAL_FREQ_HZ
+#define WK_XTAL_FREQ_HZ      12000000U
+#endif
+
+/* 主口自动匹配重试策略：复位后连续发送多个0x55，再读GENA判定是否锁定成功 */
+#define WK_MATCH_MAX_RETRY   3
+#define WK_MATCH_SEND_55_CNT 5
+#define WK_RESET_LOW_MS      10
+#define WK_RESET_READY_MS    50
+#define WK_MATCH_BYTE_GAP_MS 2
+#define WK_MATCH_LOCK_MS     20
+
 #define MINE_UART_RX_BUFFER_SIZE 256
 static uint8_t g_wk2114_uart_rx_buf[MINE_UART_RX_BUFFER_SIZE];
+static uint8_t g_wk_main_uart_matched = 0;
+static uint8_t g_wk_last_gena = 0xFF;
+
+/**
+ * @brief 将枚举波特率转换成数值
+ * @param baud 枚举波特率
+ * @return 波特率数值，返回0表示不支持
+ */
+static uint32_t wk_baud_enum_to_value(enum WKBaud baud)
+{
+    switch (baud) {
+        case B600:
+            return 600U;
+        case B1200:
+            return 1200U;
+        case B2400:
+            return 2400U;
+        case B4800:
+            return 4800U;
+        case B9600:
+            return 9600U;
+        case B19200:
+            return 19200U;
+        case B38400:
+            return 38400U;
+        case B57600:
+            return 57600U;
+        case B115200:
+            return 115200U;
+        case B500000:
+            return 500000U;
+        default:
+            return 0U;
+    }
+}
+
+/**
+ * @brief 按数据手册规则计算BAUD1/BAUD0/PRES
+ * @param baud_val 目标波特率数值
+ * @param baud1 高字节输出
+ * @param baud0 低字节输出
+ * @param pres 小数部分输出
+ * @return ERRCODE_SUCC表示计算成功
+ */
+static errcode_t wk_calc_baud_regs(uint32_t baud_val, uint8_t *baud1, uint8_t *baud0, uint8_t *pres)
+{
+    uint64_t denom;
+    uint64_t reg_x10;
+    uint32_t reg_int;
+    uint16_t baud_reg;
+
+    if ((baud_val == 0U) || (baud1 == NULL) || (baud0 == NULL) || (pres == NULL)) {
+        return ERRCODE_INVALID_PARAM;
+    }
+
+    /*
+     * Reg = Fosc / (16 * baud)
+     * 这里保留1位小数并四舍五入：
+     * - 整数部分减1写入BAUD1/BAUD0
+     * - 小数第一位写入PRES
+     */
+    denom = (uint64_t)baud_val * 16U;
+    reg_x10 = ((uint64_t)WK_XTAL_FREQ_HZ * 10U + (denom / 2U)) / denom;
+    reg_int = (uint32_t)(reg_x10 / 10U);
+
+    if ((reg_int == 0U) || (reg_int > 0x10000U)) {
+        return ERRCODE_FAIL;
+    }
+
+    baud_reg = (uint16_t)(reg_int - 1U);
+    *baud1 = (uint8_t)((baud_reg >> 8) & 0xFFU);
+    *baud0 = (uint8_t)(baud_reg & 0xFFU);
+    *pres = (uint8_t)(reg_x10 % 10U);
+    return ERRCODE_SUCC;
+}
 
 /**
  * @brief 初始化底层主串口(Hi3863的UART2)
@@ -208,27 +300,42 @@ void WkReadSFifo(uint8_t port, uint8_t *rec, uint8_t num)
  */
 void Wk_BaudAdaptive(void) 
 {   
-    osal_printk("[wk2114] Wk_BaudAdaptive start, pulling RST high 10ms...\r\n");
-    // 初始化拉高RST引脚10ms
-    uapi_gpio_set_val(WK_RST_PIN, GPIO_LEVEL_HIGH);
-    osal_msleep(10); 
-    
-    osal_printk("[wk2114] pulling RST low 10ms for reset...\r\n");
-    // 然后拉低RST引脚10ms，复位WK芯片
-    uapi_gpio_set_val(WK_RST_PIN, GPIO_LEVEL_LOW);
-    osal_msleep(10); 
-    
-    osal_printk("[wk2114] pulling RST high...\r\n");
-    // 再拉高RST引脚，完成复位，wk进入正常工作状态
-    uapi_gpio_set_val(WK_RST_PIN, GPIO_LEVEL_HIGH); 
-    // 延时20ms
-    osal_msleep(20);
+    uint8_t attempt;
+    uint8_t i;
 
-    osal_printk("[wk2114] sending 0x55 for baud match...\r\n");
-    // 发送0x55
-    uart_sendByte(0x55); 
-    // 并延迟100ms
-    osal_msleep(100); 
+    g_wk_main_uart_matched = 0;
+    g_wk_last_gena = 0xFF;
+
+    for (attempt = 0; attempt < WK_MATCH_MAX_RETRY; attempt++) {
+        osal_printk("[wk2114] Wk_BaudAdaptive try %u/%u\r\n", (unsigned int)(attempt + 1U),
+            (unsigned int)WK_MATCH_MAX_RETRY);
+
+        // 先拉高后拉低再拉高，保证每轮自适应前都经过完整硬复位。
+        uapi_gpio_set_val(WK_RST_PIN, GPIO_LEVEL_HIGH);
+        osal_msleep(2);
+        uapi_gpio_set_val(WK_RST_PIN, GPIO_LEVEL_LOW);
+        osal_msleep(WK_RESET_LOW_MS);
+        uapi_gpio_set_val(WK_RST_PIN, GPIO_LEVEL_HIGH);
+        osal_msleep(WK_RESET_READY_MS);
+
+        // 连续发送0x55提升锁定概率，适配不同板级时钟与线长差异。
+        for (i = 0; i < WK_MATCH_SEND_55_CNT; i++) {
+            uart_sendByte(0x55);
+            osal_msleep(WK_MATCH_BYTE_GAP_MS);
+        }
+
+        osal_msleep(WK_MATCH_LOCK_MS);
+        g_wk_last_gena = WkReadGReg(WK2XXX_GENA);
+        if (g_wk_last_gena != 0xFFU) {
+            g_wk_main_uart_matched = 1;
+            osal_printk("[wk2114] auto-baud lock success, GENA=0x%02x\r\n", g_wk_last_gena);
+            return;
+        }
+
+        osal_printk("[wk2114] auto-baud lock fail on try %u, GENA=0xFF\r\n", (unsigned int)(attempt + 1U));
+    }
+
+    osal_printk("[wk2114] auto-baud lock failed after retries\r\n");
 }
 
 /**
@@ -305,29 +412,20 @@ void Wk_DeInit(uint8_t port)
  */
 void Wk_SetBaud(uint8_t port, enum WKBaud baud) 
 {   
-    uint8_t baud1, baud0, pres; 
+    uint8_t baud1 = 0;
+    uint8_t baud0 = 0;
+    uint8_t pres = 0;
+    uint32_t baud_val;
 
-    /* 基于外部时钟 11.0592MHz 计算: 
-       整减1写入BAUD1,BAUD0，小数乘16写入PRES。
-       11.0592MHz 是串口通信的完美晶振，算出来的分频系数均为整数，没有小数误差。
-    */
-    switch(baud) { 
-        case B9600:
-            baud1 = 0x00;
-            baud0 = 0x47; // 11.0592M / (16*9600) = 72 -> (72-1)=71(0x47)
-            pres = 0x00;  // 0小数部分
-            break;
-        case B115200:
-            baud1 = 0x00;
-            baud0 = 0x05; // 11.0592M / (16*115200) = 6 -> (6-1)=5(0x05)
-            pres = 0x00;  // 0小数部分
-            break;
-        default: 
-            baud1 = 0x00;
-            baud0 = 0x47; // 默认9600
-            pres = 0x00;
-            break; 
+    baud_val = wk_baud_enum_to_value(baud);
+    if (wk_calc_baud_regs(baud_val, &baud1, &baud0, &pres) != ERRCODE_SUCC) {
+        // 计算失败时回退到9600，避免寄存器写入非法值导致链路进一步失效。
+        (void)wk_calc_baud_regs(9600U, &baud1, &baud0, &pres);
+        osal_printk("[wk2114] Wk_SetBaud invalid enum=%u, fallback 9600\r\n", (unsigned int)baud);
     }
+
+    osal_printk("[wk2114] Wk_SetBaud fosc=%u, baud=%u => BAUD1=0x%02x BAUD0=0x%02x PRES=0x%02x\r\n",
+        (unsigned int)WK_XTAL_FREQ_HZ, (unsigned int)baud_val, baud1, baud0, pres);
 
     WkWriteSReg(port, WK2XXX_SPAGE, 1); 
     WkWriteSReg(port, WK2XXX_BAUD1, baud1); 
@@ -352,7 +450,7 @@ static void wk_irq_callback(pin_t pin, uintptr_t param)
  */
 errcode_t mine_wk2114_uart2_ext_init(void)
 {
-    osal_printk("[wk2114] mine_wk2114_uart2_ext_init start.\r\n");
+    osal_printk("[wk2114] mine_wk2114_uart2_ext_init start, fosc=%uHz\r\n", (unsigned int)WK_XTAL_FREQ_HZ);
 
     // 配置IRQ GPIO13为输入，上拉由外部硬件保障，下降沿触发中断
     uapi_pin_set_mode(WK_IRQ_PIN, WK_IRQ_PIN_MODE);
@@ -365,10 +463,13 @@ errcode_t mine_wk2114_uart2_ext_init(void)
 
     // 2. 波特率自适应匹配
     Wk_BaudAdaptive();
+    if (g_wk_main_uart_matched == 0U) {
+        osal_printk("[wk2114] init abort: main uart auto-baud not matched\r\n");
+        return ERRCODE_FAIL;
+    }
 
     // 3. 验证通信是否正常
-    uint8_t gena = WkReadGReg(WK2XXX_GENA);
-    osal_printk("[wk2114] verify GENA=0x%x (expect non-zero on success or 0 if uninitialized).\r\n", gena);
+    osal_printk("[wk2114] verify GENA=0x%02x\r\n", g_wk_last_gena);
 
     // 4. 初始化子串口1 并设置波特率为115200
     Wk_Init(1);
