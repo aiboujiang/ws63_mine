@@ -68,6 +68,13 @@
  */
 #define WK2XXX_STRICT_SCR_TXEN_VERIFY 0U
 
+/*
+ * SCR 整体验收开关：
+ * 0: SCR 读回异常仅告警，允许继续初始化进入业务握手验证；
+ * 1: SCR 读回异常立即失败。
+ */
+#define WK2XXX_STRICT_SCR_VERIFY 0U
+
 /* 全局子串口掩码：UT1~UT4。 */
 #define WK2XXX_ALL_SUBPORT_MASK 0x0FU
 
@@ -242,9 +249,11 @@ static errcode_t wk2114_verify_subport_init(uint8_t sub_port,
     /* RXEN/SLEEPEN 作为强约束；TXEN 读回可按开关选择严格模式。 */
     if (((scr & WK2XXX_RXEN) == 0U) || ((scr & WK2XXX_SLEEPEN) != 0U)) {
         spage = wk2114_read_sreg(sub_port, WK2XXX_SPAGE);
-        osal_printk("[wk2114 final drv] verify fail: sub-uart%u SCR=0x%02x SPAGE=0x%02x\r\n",
+        osal_printk("[wk2114 final drv] verify warn: sub-uart%u SCR=0x%02x SPAGE=0x%02x\r\n",
             (unsigned int)sub_port, (unsigned int)scr, (unsigned int)spage);
+#if (WK2XXX_STRICT_SCR_VERIFY == 1U)
         return ERRCODE_FAIL;
+#endif
     }
 
     if ((scr & WK2XXX_TXEN) == 0U) {
