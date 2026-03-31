@@ -52,6 +52,10 @@ extern "C" {
 #define WS63_SUBPORT3_ENABLE    0U
 #define WS63_SUBPORT4_ENABLE    0U
 
+/* 设备端口映射 */
+#define ZW101_SUBPORT  1U
+#define LD2402_SUBPORT 2U
+
 #define WS63_SUBPORT1_BAUD      115200U
 #define WS63_SUBPORT2_BAUD      115200U
 #define WS63_SUBPORT3_BAUD      115200U

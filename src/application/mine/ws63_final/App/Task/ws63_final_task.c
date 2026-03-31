@@ -67,6 +67,21 @@ static errcode_t ws63_init_enabled_subports(void)
             return ret;
         }
 
+        /* 针对不同外设进行初始化和回调绑定 */
+        if (sub_port == ZW101_SUBPORT) {
+            if (zw101_init(sub_port) == ERRCODE_SUCC) {
+                g_ws63_rx_cb[sub_port] = zw101_process_data;
+            } else {
+                osal_printk("[wk2114 final task] ZW101 init fail\r\n");
+            }
+        } else if (sub_port == LD2402_SUBPORT) {
+            if (ld2402_init(sub_port) == ERRCODE_SUCC) {
+                g_ws63_rx_cb[sub_port] = ld2402_process_data;
+            } else {
+                osal_printk("[wk2114 final task] LD2402 init fail\r\n");
+            }
+        }
+
         if (g_ws63_rx_cb[sub_port] == NULL) {
             g_ws63_rx_cb[sub_port] = ws63_default_rx_callback;
         }
