@@ -82,6 +82,8 @@ errcode_t ld2402_init(uint8_t sub_port)
 void ld2402_process_data(uint8_t sub_port, const uint8_t *data, uint16_t len)
 {
     (void)sub_port;
+    /* 当前版本暂不解析原始负载，显式标记避免 -Werror=unused-parameter。 */
+    (void)data;
     if (len > 0) {
         osal_printk("LD2402 processing %u bytes.\r\n", (unsigned int)len);
         /* logic to parse ld2402 radar packet */

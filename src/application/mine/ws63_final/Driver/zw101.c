@@ -79,6 +79,8 @@ errcode_t zw101_init(uint8_t sub_port)
 void zw101_process_data(uint8_t sub_port, const uint8_t *data, uint16_t len)
 {
     (void)sub_port;
+    /* 当前版本先保留接口，未解析载荷时需显式消除未使用参数告警。 */
+    (void)data;
     if (len > 0) {
         osal_printk("ZW101 processing %u bytes.\r\n", (unsigned int)len);
         /* logic to parse zw101 fingerprint packet */

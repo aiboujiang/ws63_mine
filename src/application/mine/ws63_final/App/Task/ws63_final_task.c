@@ -138,7 +138,8 @@ errcode_t ws63_task_send(uint8_t sub_port, const uint8_t *data, uint16_t len)
  */
 void *ws63_task_entry(const char *arg)
 {
-    ws63_link_status_t status = {0};
+    /* 链路状态类型由驱动层定义，应用层直接复用统一结构。 */
+    wk2114_link_status_t status = {0};
 
     (void)arg;
     ws63_os_sleep_ms(WS63_BOOT_DELAY_MS);

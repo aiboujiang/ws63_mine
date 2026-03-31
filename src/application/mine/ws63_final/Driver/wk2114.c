@@ -48,7 +48,7 @@ static wk2114_link_status_t g_wk2114_link_status = {0U, 0xFFU};
  */
 static void wk2114_send_byte(uint8_t value)
 {
-    (void)wk2114_bsp_host_uart_write(&value, 1U, 1000U);
+    (void)ws63_bsp_host_uart_write(&value, 1U, 1000U);
 }
 
 /**
@@ -59,8 +59,8 @@ static uint8_t wk2114_recv_byte(void)
     uint8_t value = 0U;
     int32_t retry = 200;
 
-    while (wk2114_bsp_host_uart_read(&value, 1U, 10U) <= 0) {
-        wk2114_bsp_sleep_ms(1U);
+    while (ws63_bsp_host_uart_read(&value, 1U, 10U) <= 0) {
+        ws63_bsp_sleep_ms(1U);
         retry--;
         if (retry <= 0) {
             osal_printk("[wk2114 final drv] recv byte timeout\r\n");
@@ -151,20 +151,20 @@ static void wk2114_auto_baud(void)
     g_wk2114_link_status.last_gena = 0xFFU;
 
     for (attempt = 0U; attempt < WS63_MATCH_MAX_RETRY; attempt++) {
-        wk2114_bsp_reset_set(1U);
-        wk2114_bsp_sleep_ms(10U);
-        wk2114_bsp_reset_set(0U);
-        wk2114_bsp_sleep_ms(WS63_RESET_LOW_MS);
-        wk2114_bsp_reset_set(1U);
-        wk2114_bsp_sleep_ms(WS63_RESET_READY_MS);
+        ws63_bsp_reset_set(1U);
+        ws63_bsp_sleep_ms(10U);
+        ws63_bsp_reset_set(0U);
+        ws63_bsp_sleep_ms(WS63_RESET_LOW_MS);
+        ws63_bsp_reset_set(1U);
+        ws63_bsp_sleep_ms(WS63_RESET_READY_MS);
 
         /* 多次发送 0x55，提升不同线缆条件下的锁定成功率。 */
         for (send_idx = 0U; send_idx < WS63_MATCH_SEND55_COUNT; send_idx++) {
             wk2114_send_byte(0x55U);
-            wk2114_bsp_sleep_ms(WS63_MATCH_GAP_MS);
+            ws63_bsp_sleep_ms(WS63_MATCH_GAP_MS);
         }
 
-        wk2114_bsp_sleep_ms(WS63_MATCH_LOCK_MS);
+        ws63_bsp_sleep_ms(WS63_MATCH_LOCK_MS);
         g_wk2114_link_status.last_gena = wk2114_read_greg(WK2XXX_GENA);
         if (g_wk2114_link_status.last_gena != 0xFFU) {
             g_wk2114_link_status.matched = 1U;
@@ -187,14 +187,14 @@ errcode_t wk2114_init(void)
 {
     errcode_t ret;
 
-    wk2114_bsp_reset_init();
-    ret = wk2114_bsp_host_uart_init(g_wk2114_host_rx_buffer,
+    ws63_bsp_reset_init();
+    ret = ws63_bsp_host_uart_init(g_wk2114_host_rx_buffer,
         WS63_HOST_RX_BUFFER_SIZE);
     if (ret != ERRCODE_SUCC) {
         return ret;
     }
 
-    wk2114_bsp_irq_init();
+    ws63_bsp_irq_init();
     wk2114_auto_baud();
     if (g_wk2114_link_status.matched == 0U) {
         return ERRCODE_FAIL;
@@ -218,11 +218,11 @@ errcode_t wk2114_subport_init(uint8_t sub_port, uint32_t baud)
     uint8_t pres = 0U;
     uint8_t port_mask;
 
-    if (!wk2114_is_subport_valid(sub_port)) {
+    if (!ws63_is_subport_valid(sub_port)) {
         return ERRCODE_INVALID_PARAM;
     }
 
-    if (wk2114_calc_baud_regs(baud, &baud1, &baud0, &pres) != ERRCODE_SUCC) {
+    if (ws63_calc_baud_regs(baud, &baud1, &baud0, &pres) != ERRCODE_SUCC) {
         return ERRCODE_FAIL;
     }
 
@@ -269,7 +269,7 @@ errcode_t wk2114_subport_write(uint8_t sub_port, const uint8_t *data, uint16_t l
     uint16_t remain;
     uint8_t chunk;
 
-    if ((!wk2114_is_subport_valid(sub_port)) || (data == NULL) || (len == 0U)) {
+    if ((!ws63_is_subport_valid(sub_port)) || (data == NULL) || (len == 0U)) {
         return ERRCODE_INVALID_PARAM;
     }
 
@@ -291,7 +291,7 @@ uint8_t wk2114_subport_read(uint8_t sub_port, uint8_t *data, uint8_t max_len)
 {
     uint8_t rx_cnt;
 
-    if ((!wk2114_is_subport_valid(sub_port)) || (data == NULL) || (max_len == 0U)) {
+    if ((!ws63_is_subport_valid(sub_port)) || (data == NULL) || (max_len == 0U)) {
         return 0U;
     }
 

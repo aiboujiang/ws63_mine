@@ -5,6 +5,8 @@
 
 #include "ws63_final_osal.h"
 
+#include <stddef.h>
+
 #include "osal_addr.h"
 #include "osal_task.h"
 #include "systick.h"
@@ -22,7 +24,14 @@ errcode_t ws63_os_start_task(const char *name,
     }
 
     osal_kthread_lock();
-    task_handle = osal_kthread_create((osal_kthread_handler)entry, arg, name, stack_size);
+    /*
+     * arg 在对外接口中以 uintptr_t 透传，创建线程前统一转回 void *，
+     * 兼容 OSAL 接口签名并避免告警升级为错误。
+     */
+    task_handle = osal_kthread_create((osal_kthread_handler)entry,
+        (void *)(uintptr_t)arg,
+        name,
+        stack_size);
     if (task_handle == NULL) {
         osal_kthread_unlock();
         return ERRCODE_FAIL;

@@ -19,7 +19,7 @@ extern "C" {
 #endif
 
 /* 自动运行开关：0=仅编译不自启动，1=系统启动后自动创建任务。 */
-#define WS63_AUTO_RUN 0
+#define WS63_AUTO_RUN 1
 
 /* WK2114 主口（WS63 的 UART2）配置。 */
 #define WS63_HOST_UART_BUS      UART_BUS_2
@@ -52,7 +52,7 @@ extern "C" {
 #define WS63_SUBPORT3_ENABLE    0U
 #define WS63_SUBPORT4_ENABLE    0U
 
-/* 璁惧绔彛鏄犲皠 */
+/* 璁惧?囩??鍙ｆ槧灏? */
 #define ZW101_SUBPORT  1U
 #define LD2402_SUBPORT 2U
 
