@@ -10,6 +10,9 @@
 #include "osal_debug.h"
 #include "osal_task.h"
 #include "osal_addr.h"
+#include "systick.h"
+
+#include "LD2402/LD2402.h"
 
 /* ---------------- 硬件配置宏定义 ---------------- */
 #define WK_UART_BUS          UART_BUS_2
@@ -31,7 +34,7 @@
  * 2) 独立WK2114 demo板接11.0592MHz时改成11059200U
  */
 #ifndef WK_XTAL_FREQ_HZ
-#define WK_XTAL_FREQ_HZ      12000000U
+#define WK_XTAL_FREQ_HZ      11059200U
 #endif
 
 /* 主口自动匹配重试策略：复位后连续发送多个0x55，再读GENA判定是否锁定成功 */
@@ -42,10 +45,22 @@
 #define WK_MATCH_BYTE_GAP_MS 5
 #define WK_MATCH_LOCK_MS     20
 
+/* 子串口2挂载LD2402雷达，用于本地通信整合验证。 */
+#define WK_LD2402_SUB_PORT           2U
+#define WK_LD2402_RX_CHUNK_MAX       16U
+#define WK_LD2402_RX_POLL_MS         5U
+#define WK_LD2402_INIT_RETRY_MAX     3U
+#define WK_LD2402_INIT_RETRY_DELAYMS 200U
+#define WK_LD2402_VERSION_BUF_LEN    32U
+#define WK_LD2402_DATA_LOG_GAP_MS    1000U
+
 #define MINE_UART_RX_BUFFER_SIZE 256
 static uint8_t g_wk2114_uart_rx_buf[MINE_UART_RX_BUFFER_SIZE];
 static uint8_t g_wk_main_uart_matched = 0;
 static uint8_t g_wk_last_gena = 0xFF;
+
+/* WK2114 子串口2下的 LD2402 协议上下文。 */
+static LD2402_Handle_t g_wk_ld2402_handle;
 
 /**
  * @brief 将枚举波特率转换成数值
@@ -102,7 +117,7 @@ static errcode_t wk_calc_baud_regs(uint32_t baud_val, uint8_t *baud1, uint8_t *b
 
     /*
      * Reg = Fosc / (16 * baud)
-     * 这里先保留2位小数并四舍五入（满足手册“Reg通常精确到小数点后两位”）：
+     * 这里先保留2位小数并四舍五入
      * - 整数部分减1写入BAUD1/BAUD0
      * - 小数第一位写入PRES
      */
@@ -187,6 +202,152 @@ static uint8_t uart_recByte(void)
         }
     }
     return dat;
+}
+
+/**
+ * @brief 通过 WK2114 子串口 FIFO 发送一段数据。
+ *
+ * @param data 待发送缓冲区。
+ * @param len  待发送字节数。
+ * @return int 0 成功，-1 失败。
+ */
+static int wk_ld2402_uart_send_adapter(const uint8_t *data, uint16_t len)
+{
+    uint16_t offset = 0;
+    uint16_t remain;
+    uint8_t chunk;
+
+    if ((data == NULL) || (len == 0U)) {
+        return -1;
+    }
+
+    while (offset < len) {
+        /* WkWriteSFifo 单次最多写 16 字节，这里按块拆分。 */
+        remain = (uint16_t)(len - offset);
+        chunk = (remain > (uint16_t)WK_LD2402_RX_CHUNK_MAX) ?
+            (uint8_t)WK_LD2402_RX_CHUNK_MAX : (uint8_t)remain;
+        WkWriteSFifo(WK_LD2402_SUB_PORT, (uint8_t *)&data[offset], chunk);
+        offset = (uint16_t)(offset + chunk);
+    }
+
+    return 0;
+}
+
+/**
+ * @brief LD2402 获取毫秒计时适配。
+ *
+ * @return uint32_t 当前毫秒 tick。
+ */
+static uint32_t wk_ld2402_get_tick_ms_adapter(void)
+{
+    return (uint32_t)uapi_systick_get_ms();
+}
+
+/**
+ * @brief LD2402 延时适配。
+ *
+ * @param ms 延时毫秒数。
+ */
+static void wk_ld2402_delay_ms_adapter(uint32_t ms)
+{
+    (void)osal_msleep(ms);
+}
+
+/**
+ * @brief LD2402 数据回调。
+ *
+ * @param data 协议解析后的业务数据。
+ */
+static void wk_ld2402_data_callback(LD2402_DataFrame_t *data)
+{
+    static uint32_t last_log_ms = 0;
+    uint32_t now_ms;
+
+    if (data == NULL) {
+        return;
+    }
+
+    now_ms = (uint32_t)uapi_systick_get_ms();
+    if ((now_ms - last_log_ms) < WK_LD2402_DATA_LOG_GAP_MS) {
+        return;
+    }
+
+    last_log_ms = now_ms;
+    osal_printk("[wk2114][ld2402] status=%u dist=%ucm\r\n",
+        (unsigned int)data->status,
+        (unsigned int)data->distance_cm);
+}
+
+/**
+ * @brief 轮询读取 WK2114 子串口2 FIFO 并喂给 LD2402 解析器。
+ */
+static void wk_ld2402_poll_rx_once(void)
+{
+    uint8_t rx_cnt;
+    uint8_t chunk;
+    uint8_t rx_buf[WK_LD2402_RX_CHUNK_MAX];
+    uint8_t idx;
+
+    rx_cnt = WkReadSReg(WK_LD2402_SUB_PORT, WK2XXX_RFCNT);
+    if (rx_cnt == 0U) {
+        return;
+    }
+
+    while (rx_cnt > 0U) {
+        chunk = (uint8_t)(rx_cnt > WK_LD2402_RX_CHUNK_MAX ? WK_LD2402_RX_CHUNK_MAX : rx_cnt);
+        WkReadSFifo(WK_LD2402_SUB_PORT, rx_buf, chunk);
+        for (idx = 0; idx < chunk; idx++) {
+            LD2402_InputByte(&g_wk_ld2402_handle, rx_buf[idx]);
+        }
+        rx_cnt = (uint8_t)(rx_cnt - chunk);
+    }
+}
+
+/**
+ * @brief WK2114 子串口2 上的 LD2402 接口初始化与握手。
+ *
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+static errcode_t wk_ld2402_init_on_sub_uart2(void)
+{
+    LD2402_HAL_t hal = {0};
+    uint8_t attempt;
+    char version[WK_LD2402_VERSION_BUF_LEN] = {0};
+
+    /* 子串口2默认按 115200 与 LD2402 对接。 */
+    Wk_Init(WK_LD2402_SUB_PORT);
+    Wk_SetBaud(WK_LD2402_SUB_PORT, B115200);
+
+    hal.uart_send = wk_ld2402_uart_send_adapter;
+    hal.get_tick_ms = wk_ld2402_get_tick_ms_adapter;
+    hal.delay_ms = wk_ld2402_delay_ms_adapter;
+    hal.uart_rx_irq_ctrl = NULL;
+    LD2402_Init(&g_wk_ld2402_handle, &hal);
+    g_wk_ld2402_handle.on_data_received = wk_ld2402_data_callback;
+
+    for (attempt = 0; attempt < WK_LD2402_INIT_RETRY_MAX; attempt++) {
+        /*
+         * ACK 由后台轮询线程喂入协议栈，
+         * 这里可直接阻塞等待命令返回。
+         */
+        if (LD2402_GetVersion(&g_wk_ld2402_handle, version, sizeof(version)) == 0) {
+            osal_printk("[wk2114][ld2402] version=%s\r\n", version);
+            if (LD2402_SetEngineeringMode(&g_wk_ld2402_handle) == 0) {
+                osal_printk("[wk2114][ld2402] switch engineering mode ok\r\n");
+            } else {
+                osal_printk("[wk2114][ld2402] switch engineering mode fail\r\n");
+            }
+            return ERRCODE_SUCC;
+        }
+
+        osal_printk("[wk2114][ld2402] get version retry %u/%u\r\n",
+            (unsigned int)(attempt + 1U),
+            (unsigned int)WK_LD2402_INIT_RETRY_MAX);
+        osal_msleep(WK_LD2402_INIT_RETRY_DELAYMS);
+    }
+
+    osal_printk("[wk2114][ld2402] init failed: no ack\r\n");
+    return ERRCODE_FAIL;
 }
 
 /**
@@ -479,6 +640,10 @@ errcode_t mine_wk2114_uart2_ext_init(void)
     Wk_Init(1);
     Wk_SetBaud(1, B115200);
 
+    // 5. 初始化子串口2用于 LD2402，真正握手由任务线程在轮询启动后执行
+    Wk_Init(WK_LD2402_SUB_PORT);
+    Wk_SetBaud(WK_LD2402_SUB_PORT, B115200);
+
     osal_printk("[wk2114] initialisation complete.\r\n");
     return ERRCODE_SUCC;
 }
@@ -490,13 +655,26 @@ errcode_t mine_wk2114_uart2_ext_init(void)
  */
 static void *wk2114_task_func(const char *arg)
 {
+    errcode_t ret;
+
     (void)arg;
     // 延迟等待OS及外设全面就绪
     osal_msleep(1000);
-    mine_wk2114_uart2_ext_init();
+    ret = mine_wk2114_uart2_ext_init();
+    if (ret != ERRCODE_SUCC) {
+        osal_printk("[wk2114] init failed, task exit\r\n");
+        return NULL;
+    }
+
+    /* 主线程持续轮询子串口2，保证 LD2402 ACK/数据都能实时进状态机。 */
+    ret = wk_ld2402_init_on_sub_uart2();
+    if (ret != ERRCODE_SUCC) {
+        osal_printk("[wk2114] ld2402 link check failed\r\n");
+    }
 
     while (1) {
-        osal_msleep(1000);
+        wk_ld2402_poll_rx_once();
+        osal_msleep(WK_LD2402_RX_POLL_MS);
     }
     return NULL;
 }

@@ -6,6 +6,7 @@ set(COMPONENT_NAME "mine_wk2114_uart2_ext")
 
 set(SOURCES
     "src/mine_wk2114_uart2_ext.c"
+    "../common/LD2402/LD2402.c"
 )
 
 set(PUBLIC_HEADER
@@ -14,6 +15,7 @@ set(PUBLIC_HEADER
 set(PRIVATE_HEADER
     "inc"
     "${CMAKE_CURRENT_SOURCE_DIR}/../common/inc"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../common"
 )
 
 set(PRIVATE_DEFINES
