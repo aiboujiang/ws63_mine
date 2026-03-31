@@ -62,6 +62,12 @@
  */
 #define WK2XXX_STRICT_GREG_VERIFY 0U
 
+/*
+ * 部分板级上 SCR.TXEN 读回可能出现固定值，但收发链路仍可工作。
+ * 0: TXEN 读回异常仅告警；1: TXEN 读回异常直接失败。
+ */
+#define WK2XXX_STRICT_SCR_TXEN_VERIFY 0U
+
 /* 静态寄存器访问函数前置声明（供初始化校验逻辑复用）。 */
 static void wk2114_write_greg(uint8_t greg, uint8_t data);
 static uint8_t wk2114_read_greg(uint8_t greg);
@@ -174,12 +180,20 @@ static errcode_t wk2114_verify_subport_init(uint8_t sub_port,
 
     wk2114_write_sreg(sub_port, WK2XXX_SPAGE, 0U);
     scr = wk2114_read_sreg(sub_port, WK2XXX_SCR);
-    if (((scr & WK2XXX_TXEN) == 0U) || ((scr & WK2XXX_RXEN) == 0U) ||
-        ((scr & WK2XXX_SLEEPEN) != 0U)) {
+    /* RXEN/SLEEPEN 作为强约束；TXEN 读回可按开关选择严格模式。 */
+    if (((scr & WK2XXX_RXEN) == 0U) || ((scr & WK2XXX_SLEEPEN) != 0U)) {
         spage = wk2114_read_sreg(sub_port, WK2XXX_SPAGE);
         osal_printk("[wk2114 final drv] verify fail: sub-uart%u SCR=0x%02x SPAGE=0x%02x\r\n",
             (unsigned int)sub_port, (unsigned int)scr, (unsigned int)spage);
         return ERRCODE_FAIL;
+    }
+
+    if ((scr & WK2XXX_TXEN) == 0U) {
+        osal_printk("[wk2114 final drv] verify warn: sub-uart%u SCR.TXEN readback=0, SCR=0x%02x\r\n",
+            (unsigned int)sub_port, (unsigned int)scr);
+#if (WK2XXX_STRICT_SCR_TXEN_VERIFY == 1U)
+        return ERRCODE_FAIL;
+#endif
     }
 
     /*
