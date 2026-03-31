@@ -136,6 +136,7 @@ static errcode_t wk2114_verify_subport_init(uint8_t sub_port,
     uint8_t fsr;
     uint8_t lsr;
     uint8_t retry;
+    uint8_t spage;
 
     if (wk2114_wait_grst_ready(sub_port) != ERRCODE_SUCC) {
         return ERRCODE_FAIL;
@@ -153,12 +154,31 @@ static errcode_t wk2114_verify_subport_init(uint8_t sub_port,
 #endif
     }
 
-    /* SCR: TXEN/RXEN 使能且 SLEEPEN 关闭。 */
+    /*
+     * SCR 验证前先确保位于 PAGE0。
+     * 若 SCR 尚未生效，则重写期望位并短轮询，避免时序抖动导致误判。
+     */
+    for (retry = 0U; retry < WK2XXX_VERIFY_RETRY_MAX; retry++) {
+        wk2114_write_sreg(sub_port, WK2XXX_SPAGE, 0U);
+        scr = wk2114_read_sreg(sub_port, WK2XXX_SCR);
+        if (((scr & WK2XXX_TXEN) != 0U) && ((scr & WK2XXX_RXEN) != 0U) &&
+            ((scr & WK2XXX_SLEEPEN) == 0U)) {
+            break;
+        }
+
+        scr = (uint8_t)(scr | WK2XXX_TXEN | WK2XXX_RXEN);
+        scr = (uint8_t)(scr & (~WK2XXX_SLEEPEN));
+        wk2114_write_sreg(sub_port, WK2XXX_SCR, scr);
+        ws63_bsp_sleep_ms(1U);
+    }
+
+    wk2114_write_sreg(sub_port, WK2XXX_SPAGE, 0U);
     scr = wk2114_read_sreg(sub_port, WK2XXX_SCR);
     if (((scr & WK2XXX_TXEN) == 0U) || ((scr & WK2XXX_RXEN) == 0U) ||
         ((scr & WK2XXX_SLEEPEN) != 0U)) {
-        osal_printk("[wk2114 final drv] verify fail: sub-uart%u SCR=0x%02x\r\n",
-            (unsigned int)sub_port, (unsigned int)scr);
+        spage = wk2114_read_sreg(sub_port, WK2XXX_SPAGE);
+        osal_printk("[wk2114 final drv] verify fail: sub-uart%u SCR=0x%02x SPAGE=0x%02x\r\n",
+            (unsigned int)sub_port, (unsigned int)scr, (unsigned int)spage);
         return ERRCODE_FAIL;
     }
 
