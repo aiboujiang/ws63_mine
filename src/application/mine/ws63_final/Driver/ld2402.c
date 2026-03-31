@@ -10,6 +10,21 @@
 #include "wk2114.h"
 #include "ws63_final_osal.h"
 #include "osal_debug.h"
+#include <stdbool.h>
+#include <stddef.h>
+
+/* LD2402 命令/数据帧公共格式参数。 */
+#define LD2402_HEADER_LEN                 4U
+#define LD2402_LEN_FIELD_LEN              2U
+#define LD2402_TAIL_LEN                   4U
+#define LD2402_FRAME_FIXED_OVERHEAD       (LD2402_HEADER_LEN + LD2402_LEN_FIELD_LEN + LD2402_TAIL_LEN)
+#define LD2402_ACK_EXPECT_CMD_ENABLE      0x01FFU
+#define LD2402_ACK_EXPECT_STATUS_OK       0x0000U
+
+/* 初始化阶段的接收窗口参数：分段轮询，兼容“ACK 与数据帧交织/分段到达”的场景。 */
+#define LD2402_INIT_RETRY_MAX             3U
+#define LD2402_INIT_POLL_ROUND_MAX        8U
+#define LD2402_INIT_POLL_GAP_MS           20U
 
 // 使能配置命令: 帧头(4)+帧内长(2)+字(2)+值(2)+帧尾(4)
 static const uint8_t g_ld2402_cmd_enable[] = {
@@ -28,20 +43,103 @@ static const uint8_t g_ld2402_cmd_disable[] = {
     0x04, 0x03, 0x02, 0x01
 };
 
+/* 命令帧尾与数据帧尾。 */
+static const uint8_t g_ld2402_cmd_tail[LD2402_TAIL_LEN] = {0x04, 0x03, 0x02, 0x01};
+static const uint8_t g_ld2402_data_tail[LD2402_TAIL_LEN] = {0xF8, 0xF7, 0xF6, 0xF5};
+
+/**
+ * @brief 检查缓冲区中的某个完整 LD2402 帧。
+ *
+ * @param data 缓冲区。
+ * @param len 缓冲区有效长度。
+ * @param has_enable_ack_out 输出：是否命中“使能配置 ACK 成功”。
+ * @return true  发现至少一个完整帧（命令帧或数据帧）。
+ * @return false 未发现完整帧。
+ */
+static bool ld2402_find_valid_frame(const uint8_t *data, uint16_t len,
+    bool *has_enable_ack_out)
+{
+    uint16_t pos;
+
+    if ((data == NULL) || (len < LD2402_FRAME_FIXED_OVERHEAD) || (has_enable_ack_out == NULL)) {
+        return false;
+    }
+
+    *has_enable_ack_out = false;
+
+    for (pos = 0U; pos + LD2402_FRAME_FIXED_OVERHEAD <= len; pos++) {
+        bool is_cmd_header;
+        bool is_data_header;
+        uint16_t payload_len;
+        uint16_t frame_total_len;
+        uint16_t tail_pos;
+        const uint8_t *expect_tail;
+
+        is_cmd_header = (data[pos] == 0xFDU) && (data[pos + 1U] == 0xFCU) &&
+            (data[pos + 2U] == 0xFBU) && (data[pos + 3U] == 0xFAU);
+        is_data_header = (data[pos] == 0xF4U) && (data[pos + 1U] == 0xF3U) &&
+            (data[pos + 2U] == 0xF2U) && (data[pos + 3U] == 0xF1U);
+        if ((!is_cmd_header) && (!is_data_header)) {
+            continue;
+        }
+
+        payload_len = (uint16_t)((uint16_t)data[pos + 4U] |
+            ((uint16_t)data[pos + 5U] << 8));
+        frame_total_len = (uint16_t)(LD2402_FRAME_FIXED_OVERHEAD + payload_len);
+        if ((frame_total_len < LD2402_FRAME_FIXED_OVERHEAD) ||
+            ((uint32_t)pos + frame_total_len > (uint32_t)len)) {
+            continue;
+        }
+
+        tail_pos = (uint16_t)(pos + frame_total_len - LD2402_TAIL_LEN);
+        expect_tail = is_cmd_header ? g_ld2402_cmd_tail : g_ld2402_data_tail;
+        if ((data[tail_pos] != expect_tail[0]) ||
+            (data[tail_pos + 1U] != expect_tail[1]) ||
+            (data[tail_pos + 2U] != expect_tail[2]) ||
+            (data[tail_pos + 3U] != expect_tail[3])) {
+            continue;
+        }
+
+        /* 命中“使能配置 ACK + 成功状态”则直接标记。 */
+        if (is_cmd_header && (payload_len >= 4U)) {
+            uint16_t ack_cmd;
+            uint16_t ack_status;
+
+            ack_cmd = (uint16_t)((uint16_t)data[pos + 6U] |
+                ((uint16_t)data[pos + 7U] << 8));
+            ack_status = (uint16_t)((uint16_t)data[pos + 8U] |
+                ((uint16_t)data[pos + 9U] << 8));
+            if ((ack_cmd == LD2402_ACK_EXPECT_CMD_ENABLE) &&
+                (ack_status == LD2402_ACK_EXPECT_STATUS_OK)) {
+                *has_enable_ack_out = true;
+            }
+        }
+
+        return true;
+    }
+
+    return false;
+}
+
 /**
  * @brief 初始化 ld2402 模块并校验通信。
  * 通过发送"使能配置命令"并读取响应来测试握手。
  */
 errcode_t ld2402_init(uint8_t sub_port)
 {
-    uint8_t rx_buf[64] = {0};
+    uint8_t rx_buf[128] = {0};
+    uint16_t rx_total = 0U;
     uint8_t len = 0;
-    uint8_t retry = 3;
+    uint8_t retry = LD2402_INIT_RETRY_MAX;
     errcode_t ret = ERRCODE_FAIL;
 
     osal_printk("[ld2402] init on port %u\r\n", sub_port);
 
     while (retry-- > 0) {
+        uint8_t round;
+        bool has_valid_frame = false;
+        bool has_enable_ack = false;
+
         // 清空接收缓存
         while (wk2114_subport_read(sub_port, rx_buf, sizeof(rx_buf)) > 0) {
             ws63_os_sleep_ms(2);
@@ -49,22 +147,45 @@ errcode_t ld2402_init(uint8_t sub_port)
 
         // 发送使能配置
         wk2114_subport_write(sub_port, g_ld2402_cmd_enable, sizeof(g_ld2402_cmd_enable));
-        
-        // 等待响应延迟
-        ws63_os_sleep_ms(50);
-        
-        // 读取响应
-        len = wk2114_subport_read(sub_port, rx_buf, sizeof(rx_buf));
-        if (len >= 8 && rx_buf[0] == 0xFD && rx_buf[1] == 0xFC && rx_buf[2] == 0xFB && rx_buf[3] == 0xFA) {
-            osal_printk("[ld2402] Enable Config ACK received, communication OK.\r\n");
-            
+
+        /*
+         * 分段轮询接收窗口：
+         * 1) ACK 可能不是首字节对齐；
+         * 2) ACK 与数据上报可能交织到达。
+         */
+        rx_total = 0U;
+        for (round = 0U; round < LD2402_INIT_POLL_ROUND_MAX; round++) {
+            len = wk2114_subport_read(sub_port, &rx_buf[rx_total],
+                (uint8_t)(sizeof(rx_buf) - rx_total));
+            if (len > 0U) {
+                rx_total = (uint16_t)(rx_total + len);
+                has_valid_frame = ld2402_find_valid_frame(rx_buf, rx_total, &has_enable_ack);
+                if (has_valid_frame) {
+                    break;
+                }
+                if (rx_total >= sizeof(rx_buf)) {
+                    break;
+                }
+            }
+
+            ws63_os_sleep_ms(LD2402_INIT_POLL_GAP_MS);
+        }
+
+        if (has_valid_frame) {
+            if (has_enable_ack) {
+                osal_printk("[ld2402] Enable Config ACK received, communication OK.\r\n");
+            } else {
+                osal_printk("[ld2402] valid frame received, communication OK.\r\n");
+            }
+
             // 通信正常后发送结束配置，恢复工作模式
             wk2114_subport_write(sub_port, g_ld2402_cmd_disable, sizeof(g_ld2402_cmd_disable));
             ws63_os_sleep_ms(20);
-            
+
             ret = ERRCODE_SUCC;
             break;
         }
+
         osal_printk("[ld2402] init retry...\r\n");
         ws63_os_sleep_ms(100);
     }
