@@ -99,6 +99,12 @@
 /* 全局子串口掩码：UT1~UT4。 */
 #define WK2XXX_ALL_SUBPORT_MASK 0x0FU
 
+/* GENA 复位默认值特征（手册默认值 0xF0）。 */
+#define WK2XXX_GENA_RESET_DEFAULT 0xF0U
+#define WK2XXX_GENA_RESET_MASK    0xF0U
+#define WK2XXX_GENA_READ_RETRY    3U
+#define WK2XXX_GENA_READ_GAP_MS   2U
+
 /* 主口单字节接收超时重试上限，避免异常场景长时间阻塞。 */
 #define WK2XXX_RECV_BYTE_RETRY_MAX 20
 
@@ -495,6 +501,8 @@ static void wk2114_auto_baud(void)
 {
     uint8_t attempt;
     uint8_t send_idx;
+    uint8_t gena_retry;
+    uint8_t gena_value;
 
     g_wk2114_link_status.matched = 0U;
     g_wk2114_link_status.last_gena = 0xFFU;
@@ -514,8 +522,22 @@ static void wk2114_auto_baud(void)
         }
 
         ws63_bsp_sleep_ms(WS63_MATCH_LOCK_MS);
-        g_wk2114_link_status.last_gena = wk2114_read_greg(WK2XXX_GENA);
-        if (g_wk2114_link_status.last_gena != 0xFFU) {
+
+        /*
+         * 锁波后 GENA 默认应为 0xF0（高四位保留位为 1）。
+         * 做短重读，避免首包抖动导致误判为 0x00。
+         */
+        gena_value = 0x00U;
+        for (gena_retry = 0U; gena_retry < WK2XXX_GENA_READ_RETRY; gena_retry++) {
+            gena_value = wk2114_read_greg(WK2XXX_GENA);
+            if ((gena_value & WK2XXX_GENA_RESET_MASK) == WK2XXX_GENA_RESET_DEFAULT) {
+                break;
+            }
+            ws63_bsp_sleep_ms(WK2XXX_GENA_READ_GAP_MS);
+        }
+
+        g_wk2114_link_status.last_gena = gena_value;
+        if ((gena_value & WK2XXX_GENA_RESET_MASK) == WK2XXX_GENA_RESET_DEFAULT) {
             g_wk2114_link_status.matched = 1U;
             osal_printk("[wk2114 final drv] auto baud lock success, GENA=0x%02x\r\n",
                 g_wk2114_link_status.last_gena);
