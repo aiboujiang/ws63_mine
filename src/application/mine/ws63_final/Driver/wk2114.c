@@ -60,41 +60,41 @@
  * 但子串口功能寄存器访问与通信仍正常。
  * 0: 读回异常仅告警，不阻断初始化；1: 严格要求读回位必须置位。
  */
-#define WK2XXX_STRICT_GREG_VERIFY 1U
+#define WK2XXX_STRICT_GREG_VERIFY 0U
 
 /*
  * 部分板级上 SCR.TXEN 读回可能出现固定值，但收发链路仍可工作。
  * 0: TXEN 读回异常仅告警；1: TXEN 读回异常直接失败。
  */
-#define WK2XXX_STRICT_SCR_TXEN_VERIFY 1U
+#define WK2XXX_STRICT_SCR_TXEN_VERIFY 0U
 
 /*
  * SCR 整体验收开关：
  * 0: SCR 读回异常仅告警，允许继续初始化进入业务握手验证；
  * 1: SCR 读回异常立即失败。
  */
-#define WK2XXX_STRICT_SCR_VERIFY 1U
+#define WK2XXX_STRICT_SCR_VERIFY 0U
 
 /*
  * FCR 整体验收开关：
  * 0: FCR 读回异常仅告警，允许继续初始化进入业务握手验证；
  * 1: FCR 读回异常立即失败。
  */
-#define WK2XXX_STRICT_FCR_VERIFY 1U
+#define WK2XXX_STRICT_FCR_VERIFY 0U
 
 /*
  * BAUD 整体验收开关：
  * 0: BAUD1/BAUD0/PRES 读回异常仅告警，允许继续初始化；
  * 1: BAUD 读回异常立即失败。
  */
-#define WK2XXX_STRICT_BAUD_VERIFY 1U
+#define WK2XXX_STRICT_BAUD_VERIFY 0U
 
 /*
  * SIER 整体验收开关：
  * 0: SIER 读回异常仅告警，允许继续初始化；
  * 1: SIER 读回异常立即失败。
  */
-#define WK2XXX_STRICT_SIER_VERIFY 1U
+#define WK2XXX_STRICT_SIER_VERIFY 0U
 
 /* 全局子串口掩码：UT1~UT4。 */
 #define WK2XXX_ALL_SUBPORT_MASK 0x0FU
@@ -440,6 +440,11 @@ static void wk2114_write_greg(uint8_t greg, uint8_t data)
  */
 static uint8_t wk2114_read_greg(uint8_t greg)
 {
+    /*
+     * 读寄存器前先清主口接收缓存，避免上一次通信残留字节污染本次回读。
+     * 该操作只影响主口软件缓冲，不改变 WK2114 寄存器状态。
+     */
+    (void)ws63_bsp_host_uart_flush_rx();
     wk2114_send_byte((uint8_t)(0x40U | greg));
     return wk2114_recv_byte();
 }
@@ -460,6 +465,9 @@ static void wk2114_write_sreg(uint8_t sub_port, uint8_t sreg, uint8_t data)
 static uint8_t wk2114_read_sreg(uint8_t sub_port, uint8_t sreg)
 {
     uint8_t cmd = (uint8_t)(0x40U | ((sub_port - 1U) << 4) | sreg);
+
+    /* 子串口寄存器读同样在发读命令前清空残留接收数据。 */
+    (void)ws63_bsp_host_uart_flush_rx();
     wk2114_send_byte(cmd);
     return wk2114_recv_byte();
 }

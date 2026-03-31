@@ -90,6 +90,27 @@ int32_t ws63_bsp_host_uart_read(uint8_t *data, uint16_t len, uint32_t timeout_ms
 }
 
 /**
+ * @brief 清空主口 UART 接收缓冲区。
+ */
+errcode_t ws63_bsp_host_uart_flush_rx(void)
+{
+    uint8_t dummy[16] = {0};
+    uint8_t round;
+
+    /*
+     * 兼容实现：循环非阻塞读取直到无数据。
+     * 避免依赖某些构建配置下未导出的 uapi_uart_flush_rx_data 符号。
+     */
+    for (round = 0U; round < 32U; round++) {
+        if (uapi_uart_read(WS63_HOST_UART_BUS, dummy, sizeof(dummy), 0U) <= 0) {
+            break;
+        }
+    }
+
+    return ERRCODE_SUCC;
+}
+
+/**
  * @brief 复位引脚初始化。
  */
 void ws63_bsp_reset_init(void)

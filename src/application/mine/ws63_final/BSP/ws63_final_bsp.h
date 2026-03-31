@@ -50,6 +50,13 @@ int32_t ws63_bsp_host_uart_write(const uint8_t *data, uint16_t len, uint32_t tim
 int32_t ws63_bsp_host_uart_read(uint8_t *data, uint16_t len, uint32_t timeout_ms);
 
 /**
+ * @brief 清空主口 UART 接收缓冲区中的残留数据。
+ *
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_bsp_host_uart_flush_rx(void);
+
+/**
  * @brief 初始化 WK2114 复位引脚。
  */
 void ws63_bsp_reset_init(void);
