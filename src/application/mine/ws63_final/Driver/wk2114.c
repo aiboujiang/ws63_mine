@@ -455,6 +455,14 @@ errcode_t wk2114_subport_init(uint8_t sub_port, uint32_t baud)
     grst = wk2114_read_greg(WK2XXX_GRST);
     wk2114_write_greg(WK2XXX_GRST, (uint8_t)(grst | port_mask));
 
+    /*
+     * 软复位位（W1/R0）可能在 1 个以上时钟后才自动回清。
+     * 必须等待复位完成后再写 SIER/FCR/SCR/BAUD，避免配置被复位过程覆盖。
+     */
+    if (wk2114_wait_grst_ready(sub_port) != ERRCODE_SUCC) {
+        return ERRCODE_FAIL;
+    }
+
     gier = wk2114_read_greg(WK2XXX_GIER);
     wk2114_write_greg(WK2XXX_GIER, (uint8_t)(gier | port_mask));
 
