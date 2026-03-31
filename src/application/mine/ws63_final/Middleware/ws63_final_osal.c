@@ -12,8 +12,8 @@
 /**
  * @brief 创建并启动线程任务。
  */
-errcode_t mine_ws63_final_os_start_task(const char *name,
-    mine_ws63_final_task_entry_t entry, uintptr_t arg, uint16_t stack_size, uint8_t priority)
+errcode_t ws63_os_start_task(const char *name,
+    ws63_task_entry_t entry, uintptr_t arg, uint16_t stack_size, uint8_t priority)
 {
     osal_task *task_handle;
 
@@ -37,7 +37,7 @@ errcode_t mine_ws63_final_os_start_task(const char *name,
 /**
  * @brief 毫秒延时。
  */
-void mine_ws63_final_os_sleep_ms(uint32_t ms)
+void ws63_os_sleep_ms(uint32_t ms)
 {
     (void)osal_msleep(ms);
 }
@@ -45,7 +45,7 @@ void mine_ws63_final_os_sleep_ms(uint32_t ms)
 /**
  * @brief 获取系统毫秒计时。
  */
-uint32_t mine_ws63_final_os_tick_ms(void)
+uint32_t ws63_os_tick_ms(void)
 {
     return (uint32_t)uapi_systick_get_ms();
 }

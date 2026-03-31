@@ -22,9 +22,9 @@ ws63_final/
 
 ## 3. 对外接口
 
-1. `mine_ws63_final_start()`：启动最终版业务任务。
-2. `mine_ws63_final_task_register_rx_callback(sub_port, cb)`：注册子串口接收回调。
-3. `mine_ws63_final_task_send(sub_port, data, len)`：通过指定子串口发送数据。
+1. `ws63_start()`：启动最终版业务任务。
+2. `ws63_task_register_rx_callback(sub_port, cb)`：注册子串口接收回调。
+3. `ws63_task_send(sub_port, data, len)`：通过指定子串口发送数据。
 
 ## 4. 后续模块整合建议
 

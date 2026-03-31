@@ -7,7 +7,9 @@ set(COMPONENT_NAME "mine_ws63_final")
 set(SOURCES
     "Common/ws63_final_common.c"
     "BSP/ws63_final_bsp.c"
-    "Driver/ws63_final_driver.c"
+    "Driver/wk2114.c"
+    "Driver/ld2402.c"
+    "Driver/zw101.c"
     "Middleware/ws63_final_osal.c"
     "App/Task/ws63_final_task.c"
     "App/Main/ws63_final_main.c"

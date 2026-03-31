@@ -10,7 +10,7 @@
 /**
  * @brief 计算 WK2114 BAUD1/BAUD0/PRES。
  */
-errcode_t mine_ws63_final_calc_baud_regs(uint32_t baud,
+errcode_t ws63_calc_baud_regs(uint32_t baud,
     uint8_t *baud1_out, uint8_t *baud0_out, uint8_t *pres_out)
 {
     uint64_t denominator;
@@ -28,7 +28,7 @@ errcode_t mine_ws63_final_calc_baud_regs(uint32_t baud,
      * 这里先保留两位小数做四舍五入，再拆分整数/小数。
      */
     denominator = (uint64_t)baud * 16U;
-    reg_x100 = ((uint64_t)MINE_WS63_FINAL_XTAL_FREQ_HZ * 100U + (denominator / 2U)) / denominator;
+    reg_x100 = ((uint64_t)WS63_XTAL_FREQ_HZ * 100U + (denominator / 2U)) / denominator;
     reg_int = (uint32_t)(reg_x100 / 100U);
     if ((reg_int == 0U) || (reg_int > 0x10000U)) {
         return ERRCODE_FAIL;
@@ -46,7 +46,7 @@ errcode_t mine_ws63_final_calc_baud_regs(uint32_t baud,
 /**
  * @brief 判断子串口号是否在有效范围（1~4）。
  */
-uint8_t mine_ws63_final_is_subport_valid(uint8_t sub_port)
+uint8_t ws63_is_subport_valid(uint8_t sub_port)
 {
     return (sub_port >= 1U) && (sub_port <= 4U);
 }
@@ -54,17 +54,17 @@ uint8_t mine_ws63_final_is_subport_valid(uint8_t sub_port)
 /**
  * @brief 查询子串口是否启用。
  */
-uint8_t mine_ws63_final_is_subport_enabled(uint8_t sub_port)
+uint8_t ws63_is_subport_enabled(uint8_t sub_port)
 {
     switch (sub_port) {
         case 1U:
-            return MINE_WS63_FINAL_SUBPORT1_ENABLE;
+            return WS63_SUBPORT1_ENABLE;
         case 2U:
-            return MINE_WS63_FINAL_SUBPORT2_ENABLE;
+            return WS63_SUBPORT2_ENABLE;
         case 3U:
-            return MINE_WS63_FINAL_SUBPORT3_ENABLE;
+            return WS63_SUBPORT3_ENABLE;
         case 4U:
-            return MINE_WS63_FINAL_SUBPORT4_ENABLE;
+            return WS63_SUBPORT4_ENABLE;
         default:
             return 0U;
     }
@@ -73,17 +73,17 @@ uint8_t mine_ws63_final_is_subport_enabled(uint8_t sub_port)
 /**
  * @brief 读取子串口波特率配置。
  */
-uint32_t mine_ws63_final_get_subport_baud(uint8_t sub_port)
+uint32_t ws63_get_subport_baud(uint8_t sub_port)
 {
     switch (sub_port) {
         case 1U:
-            return MINE_WS63_FINAL_SUBPORT1_BAUD;
+            return WS63_SUBPORT1_BAUD;
         case 2U:
-            return MINE_WS63_FINAL_SUBPORT2_BAUD;
+            return WS63_SUBPORT2_BAUD;
         case 3U:
-            return MINE_WS63_FINAL_SUBPORT3_BAUD;
+            return WS63_SUBPORT3_BAUD;
         case 4U:
-            return MINE_WS63_FINAL_SUBPORT4_BAUD;
+            return WS63_SUBPORT4_BAUD;
         default:
             return 0U;
     }

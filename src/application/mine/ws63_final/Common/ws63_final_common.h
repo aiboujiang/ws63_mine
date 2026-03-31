@@ -7,8 +7,8 @@
  * 2) 不依赖任何硬件访问接口。
  */
 
-#ifndef MINE_WS63_FINAL_COMMON_H
-#define MINE_WS63_FINAL_COMMON_H
+#ifndef WS63_COMMON_H
+#define WS63_COMMON_H
 
 #include <stdint.h>
 
@@ -29,7 +29,7 @@ extern "C" {
  * @param pres_out  PRES 输出。
  * @return errcode_t ERRCODE_SUCC 成功，其他失败。
  */
-errcode_t mine_ws63_final_calc_baud_regs(uint32_t baud,
+errcode_t ws63_calc_baud_regs(uint32_t baud,
     uint8_t *baud1_out, uint8_t *baud0_out, uint8_t *pres_out);
 
 /**
@@ -38,7 +38,7 @@ errcode_t mine_ws63_final_calc_baud_regs(uint32_t baud,
  * @param sub_port 子串口号。
  * @return uint8_t 1=有效，0=无效。
  */
-uint8_t mine_ws63_final_is_subport_valid(uint8_t sub_port);
+uint8_t ws63_is_subport_valid(uint8_t sub_port);
 
 /**
  * @brief 查询子串口是否在配置中启用。
@@ -46,7 +46,7 @@ uint8_t mine_ws63_final_is_subport_valid(uint8_t sub_port);
  * @param sub_port 子串口号。
  * @return uint8_t 1=启用，0=禁用。
  */
-uint8_t mine_ws63_final_is_subport_enabled(uint8_t sub_port);
+uint8_t ws63_is_subport_enabled(uint8_t sub_port);
 
 /**
  * @brief 读取子串口配置波特率。
@@ -54,7 +54,7 @@ uint8_t mine_ws63_final_is_subport_enabled(uint8_t sub_port);
  * @param sub_port 子串口号。
  * @return uint32_t 波特率，0 表示未配置。
  */
-uint32_t mine_ws63_final_get_subport_baud(uint8_t sub_port);
+uint32_t ws63_get_subport_baud(uint8_t sub_port);
 
 #ifdef __cplusplus
 #if __cplusplus

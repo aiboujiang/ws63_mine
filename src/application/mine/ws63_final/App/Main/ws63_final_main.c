@@ -20,15 +20,15 @@
 /**
  * @brief 启动 WK2114 最终版业务任务。
  */
-errcode_t mine_ws63_final_start(void)
+errcode_t ws63_start(void)
 {
     errcode_t ret;
 
-    ret = mine_ws63_final_os_start_task("ws63_final_task",
-        mine_ws63_final_task_entry,
+    ret = ws63_os_start_task("ws63_final_task",
+        ws63_task_entry,
         0,
-        MINE_WS63_FINAL_TASK_STACK_SIZE,
-        MINE_WS63_FINAL_TASK_PRIORITY);
+        WS63_TASK_STACK_SIZE,
+        WS63_TASK_PRIORITY);
     if (ret != ERRCODE_SUCC) {
         osal_printk("[wk2114 final main] start task fail\r\n");
         return ret;
@@ -38,13 +38,13 @@ errcode_t mine_ws63_final_start(void)
     return ERRCODE_SUCC;
 }
 
-#if (MINE_WS63_FINAL_AUTO_RUN == 1)
+#if (WS63_AUTO_RUN == 1)
 /**
  * @brief 系统启动自动入口。
  */
-static void mine_ws63_final_app_entry(void)
+static void ws63_app_entry(void)
 {
-    (void)mine_ws63_final_start();
+    (void)ws63_start();
 }
-app_run(mine_ws63_final_app_entry);
+app_run(ws63_app_entry);
 #endif

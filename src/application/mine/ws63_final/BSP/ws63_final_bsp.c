@@ -20,7 +20,7 @@
  * 当前阶段仅保留中断链路，实际业务在 Driver/App 层走轮询，
  * 便于后续按模块接入统一事件分发。
  */
-static void mine_ws63_final_irq_stub(pin_t pin, uintptr_t param)
+static void ws63_irq_stub(pin_t pin, uintptr_t param)
 {
     (void)pin;
     (void)param;
@@ -29,7 +29,7 @@ static void mine_ws63_final_irq_stub(pin_t pin, uintptr_t param)
 /**
  * @brief 初始化主口 UART。
  */
-errcode_t mine_ws63_final_bsp_host_uart_init(uint8_t *rx_buffer, uint16_t rx_buffer_len)
+errcode_t ws63_bsp_host_uart_init(uint8_t *rx_buffer, uint16_t rx_buffer_len)
 {
     uart_attr_t attr = {
         .baud_rate = 115200,
@@ -38,8 +38,8 @@ errcode_t mine_ws63_final_bsp_host_uart_init(uint8_t *rx_buffer, uint16_t rx_buf
         .parity = UART_PARITY_NONE
     };
     uart_pin_config_t pin_cfg = {
-        .tx_pin = MINE_WS63_FINAL_HOST_UART_TX_PIN,
-        .rx_pin = MINE_WS63_FINAL_HOST_UART_RX_PIN,
+        .tx_pin = WS63_HOST_UART_TX_PIN,
+        .rx_pin = WS63_HOST_UART_RX_PIN,
         .cts_pin = PIN_NONE,
         .rts_pin = PIN_NONE
     };
@@ -49,14 +49,14 @@ errcode_t mine_ws63_final_bsp_host_uart_init(uint8_t *rx_buffer, uint16_t rx_buf
         return ERRCODE_INVALID_PARAM;
     }
 
-    uapi_pin_set_mode(MINE_WS63_FINAL_HOST_UART_TX_PIN, MINE_WS63_FINAL_HOST_UART_PIN_MODE);
-    uapi_pin_set_mode(MINE_WS63_FINAL_HOST_UART_RX_PIN, MINE_WS63_FINAL_HOST_UART_PIN_MODE);
+    uapi_pin_set_mode(WS63_HOST_UART_TX_PIN, WS63_HOST_UART_PIN_MODE);
+    uapi_pin_set_mode(WS63_HOST_UART_RX_PIN, WS63_HOST_UART_PIN_MODE);
 
     rx_cfg.rx_buffer = rx_buffer;
     rx_cfg.rx_buffer_size = rx_buffer_len;
 
-    (void)uapi_uart_deinit(MINE_WS63_FINAL_HOST_UART_BUS);
-    if (uapi_uart_init(MINE_WS63_FINAL_HOST_UART_BUS, &pin_cfg, &attr, NULL, &rx_cfg) != ERRCODE_SUCC) {
+    (void)uapi_uart_deinit(WS63_HOST_UART_BUS);
+    if (uapi_uart_init(WS63_HOST_UART_BUS, &pin_cfg, &attr, NULL, &rx_cfg) != ERRCODE_SUCC) {
         osal_printk("[wk2114 final bsp] host uart init fail\r\n");
         return ERRCODE_FAIL;
     }
@@ -68,62 +68,62 @@ errcode_t mine_ws63_final_bsp_host_uart_init(uint8_t *rx_buffer, uint16_t rx_buf
 /**
  * @brief 主口 UART 发送适配。
  */
-int32_t mine_ws63_final_bsp_host_uart_write(const uint8_t *data, uint16_t len, uint32_t timeout_ms)
+int32_t ws63_bsp_host_uart_write(const uint8_t *data, uint16_t len, uint32_t timeout_ms)
 {
     if ((data == NULL) || (len == 0U)) {
         return -1;
     }
 
-    return uapi_uart_write(MINE_WS63_FINAL_HOST_UART_BUS, data, len, timeout_ms);
+    return uapi_uart_write(WS63_HOST_UART_BUS, data, len, timeout_ms);
 }
 
 /**
  * @brief 主口 UART 读取适配。
  */
-int32_t mine_ws63_final_bsp_host_uart_read(uint8_t *data, uint16_t len, uint32_t timeout_ms)
+int32_t ws63_bsp_host_uart_read(uint8_t *data, uint16_t len, uint32_t timeout_ms)
 {
     if ((data == NULL) || (len == 0U)) {
         return -1;
     }
 
-    return uapi_uart_read(MINE_WS63_FINAL_HOST_UART_BUS, data, len, timeout_ms);
+    return uapi_uart_read(WS63_HOST_UART_BUS, data, len, timeout_ms);
 }
 
 /**
  * @brief 复位引脚初始化。
  */
-void mine_ws63_final_bsp_reset_init(void)
+void ws63_bsp_reset_init(void)
 {
-    uapi_pin_set_mode(MINE_WS63_FINAL_RST_PIN, MINE_WS63_FINAL_RST_PIN_MODE);
-    uapi_gpio_set_dir(MINE_WS63_FINAL_RST_PIN, GPIO_DIRECTION_OUTPUT);
-    uapi_gpio_set_val(MINE_WS63_FINAL_RST_PIN, GPIO_LEVEL_HIGH);
+    uapi_pin_set_mode(WS63_RST_PIN, WS63_RST_PIN_MODE);
+    uapi_gpio_set_dir(WS63_RST_PIN, GPIO_DIRECTION_OUTPUT);
+    uapi_gpio_set_val(WS63_RST_PIN, GPIO_LEVEL_HIGH);
 }
 
 /**
  * @brief 设置复位引脚电平。
  */
-void mine_ws63_final_bsp_reset_set(uint8_t level_high)
+void ws63_bsp_reset_set(uint8_t level_high)
 {
-    uapi_gpio_set_val(MINE_WS63_FINAL_RST_PIN,
+    uapi_gpio_set_val(WS63_RST_PIN,
         level_high ? GPIO_LEVEL_HIGH : GPIO_LEVEL_LOW);
 }
 
 /**
  * @brief 初始化 IRQ 引脚。
  */
-void mine_ws63_final_bsp_irq_init(void)
+void ws63_bsp_irq_init(void)
 {
-    uapi_pin_set_mode(MINE_WS63_FINAL_IRQ_PIN, MINE_WS63_FINAL_IRQ_PIN_MODE);
-    uapi_gpio_set_dir(MINE_WS63_FINAL_IRQ_PIN, GPIO_DIRECTION_INPUT);
-    uapi_gpio_register_isr_func(MINE_WS63_FINAL_IRQ_PIN,
-        GPIO_INTERRUPT_FALLING_EDGE, mine_ws63_final_irq_stub);
-    uapi_gpio_enable_interrupt(MINE_WS63_FINAL_IRQ_PIN);
+    uapi_pin_set_mode(WS63_IRQ_PIN, WS63_IRQ_PIN_MODE);
+    uapi_gpio_set_dir(WS63_IRQ_PIN, GPIO_DIRECTION_INPUT);
+    uapi_gpio_register_isr_func(WS63_IRQ_PIN,
+        GPIO_INTERRUPT_FALLING_EDGE, ws63_irq_stub);
+    uapi_gpio_enable_interrupt(WS63_IRQ_PIN);
 }
 
 /**
  * @brief 毫秒延时适配。
  */
-void mine_ws63_final_bsp_sleep_ms(uint32_t ms)
+void ws63_bsp_sleep_ms(uint32_t ms)
 {
     (void)osal_msleep(ms);
 }
@@ -131,7 +131,7 @@ void mine_ws63_final_bsp_sleep_ms(uint32_t ms)
 /**
  * @brief 获取系统毫秒计时。
  */
-uint32_t mine_ws63_final_bsp_get_tick_ms(void)
+uint32_t ws63_bsp_get_tick_ms(void)
 {
     return (uint32_t)uapi_systick_get_ms();
 }

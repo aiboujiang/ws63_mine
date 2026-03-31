@@ -3,8 +3,8 @@
  * @brief WK2114 最终版应用主入口接口。
  */
 
-#ifndef MINE_WS63_FINAL_MAIN_H
-#define MINE_WS63_FINAL_MAIN_H
+#ifndef WS63_MAIN_H
+#define WS63_MAIN_H
 
 #include "errcode.h"
 
@@ -19,7 +19,7 @@ extern "C" {
  *
  * @return errcode_t ERRCODE_SUCC 成功，其他失败。
  */
-errcode_t mine_ws63_final_start(void);
+errcode_t ws63_start(void);
 
 #ifdef __cplusplus
 #if __cplusplus
