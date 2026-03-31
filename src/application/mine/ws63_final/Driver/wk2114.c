@@ -60,44 +60,47 @@
  * 但子串口功能寄存器访问与通信仍正常。
  * 0: 读回异常仅告警，不阻断初始化；1: 严格要求读回位必须置位。
  */
-#define WK2XXX_STRICT_GREG_VERIFY 0U
+#define WK2XXX_STRICT_GREG_VERIFY 1U
 
 /*
  * 部分板级上 SCR.TXEN 读回可能出现固定值，但收发链路仍可工作。
  * 0: TXEN 读回异常仅告警；1: TXEN 读回异常直接失败。
  */
-#define WK2XXX_STRICT_SCR_TXEN_VERIFY 0U
+#define WK2XXX_STRICT_SCR_TXEN_VERIFY 1U
 
 /*
  * SCR 整体验收开关：
  * 0: SCR 读回异常仅告警，允许继续初始化进入业务握手验证；
  * 1: SCR 读回异常立即失败。
  */
-#define WK2XXX_STRICT_SCR_VERIFY 0U
+#define WK2XXX_STRICT_SCR_VERIFY 1U
 
 /*
  * FCR 整体验收开关：
  * 0: FCR 读回异常仅告警，允许继续初始化进入业务握手验证；
  * 1: FCR 读回异常立即失败。
  */
-#define WK2XXX_STRICT_FCR_VERIFY 0U
+#define WK2XXX_STRICT_FCR_VERIFY 1U
 
 /*
  * BAUD 整体验收开关：
  * 0: BAUD1/BAUD0/PRES 读回异常仅告警，允许继续初始化；
  * 1: BAUD 读回异常立即失败。
  */
-#define WK2XXX_STRICT_BAUD_VERIFY 0U
+#define WK2XXX_STRICT_BAUD_VERIFY 1U
 
 /*
  * SIER 整体验收开关：
  * 0: SIER 读回异常仅告警，允许继续初始化；
  * 1: SIER 读回异常立即失败。
  */
-#define WK2XXX_STRICT_SIER_VERIFY 0U
+#define WK2XXX_STRICT_SIER_VERIFY 1U
 
 /* 全局子串口掩码：UT1~UT4。 */
 #define WK2XXX_ALL_SUBPORT_MASK 0x0FU
+
+/* 主口单字节接收超时重试上限，避免异常场景长时间阻塞。 */
+#define WK2XXX_RECV_BYTE_RETRY_MAX 20
 
 /* 静态寄存器访问函数前置声明（供初始化校验逻辑复用）。 */
 static void wk2114_write_greg(uint8_t greg, uint8_t data);
@@ -403,7 +406,7 @@ static void wk2114_send_byte(uint8_t value)
 static uint8_t wk2114_recv_byte(void)
 {
     uint8_t value = 0U;
-    int32_t retry = 200;
+    int32_t retry = WK2XXX_RECV_BYTE_RETRY_MAX;
 
     while (ws63_bsp_host_uart_read(&value, 1U, 10U) <= 0) {
         ws63_bsp_sleep_ms(1U);
@@ -685,6 +688,15 @@ uint8_t wk2114_subport_read(uint8_t sub_port, uint8_t *data, uint8_t max_len)
 
     if (rx_cnt > max_len) {
         rx_cnt = max_len;
+    }
+
+    /*
+     * WK2114 单次 FIFO 命令最多读 16 字节。
+     * RFCNT 在异常链路下可能读回偏大，必须再次按协议上限截断，
+     * 否则会导致命令字段越界并引发长时间阻塞。
+     */
+    if (rx_cnt > WS63_FIFO_CHUNK_MAX) {
+        rx_cnt = WS63_FIFO_CHUNK_MAX;
     }
 
     wk2114_read_fifo_chunk(sub_port, data, rx_cnt);
