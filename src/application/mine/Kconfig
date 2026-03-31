@@ -26,6 +26,14 @@ config MINE_SUPPORT_UART2_EXT_WK2114
         This module provides a software framework for extending one UART2
         host port into four sub UART channels via WK2114.
 
+config MINE_SUPPORT_WS63_FINAL_LAYERED
+    bool "Support Mine WS63 final layered framework (WS63 master)."
+    default y
+    help
+        Build the final layered framework under application/mine/ws63_final.
+        In this framework, WS63 is the main controller and WK2114 is treated
+        as an external expansion chip in Driver layer.
+
 config MINE_SUPPORT_RGB_LED_DEMO
     bool "Support Mine RGB LED Demo (GPIO4 DI)."
     default n

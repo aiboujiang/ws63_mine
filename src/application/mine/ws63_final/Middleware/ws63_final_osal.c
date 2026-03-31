@@ -1,0 +1,51 @@
+/**
+ * @file ws63_final_osal.c
+ * @brief WK2114 最终版中间件层 OSAL 抽象实现。
+ */
+
+#include "ws63_final_osal.h"
+
+#include "osal_addr.h"
+#include "osal_task.h"
+#include "systick.h"
+
+/**
+ * @brief 创建并启动线程任务。
+ */
+errcode_t mine_ws63_final_os_start_task(const char *name,
+    mine_ws63_final_task_entry_t entry, uintptr_t arg, uint16_t stack_size, uint8_t priority)
+{
+    osal_task *task_handle;
+
+    if ((name == NULL) || (entry == NULL) || (stack_size == 0U)) {
+        return ERRCODE_INVALID_PARAM;
+    }
+
+    osal_kthread_lock();
+    task_handle = osal_kthread_create((osal_kthread_handler)entry, arg, name, stack_size);
+    if (task_handle == NULL) {
+        osal_kthread_unlock();
+        return ERRCODE_FAIL;
+    }
+
+    osal_kthread_set_priority(task_handle, (int32_t)priority);
+    osal_kfree(task_handle);
+    osal_kthread_unlock();
+    return ERRCODE_SUCC;
+}
+
+/**
+ * @brief 毫秒延时。
+ */
+void mine_ws63_final_os_sleep_ms(uint32_t ms)
+{
+    (void)osal_msleep(ms);
+}
+
+/**
+ * @brief 获取系统毫秒计时。
+ */
+uint32_t mine_ws63_final_os_tick_ms(void)
+{
+    return (uint32_t)uapi_systick_get_ms();
+}

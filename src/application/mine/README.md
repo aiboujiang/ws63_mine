@@ -201,6 +201,36 @@ LD SAVE3F
    - 统计信息：RX/TX 最近长度与累计次数。
    - 通道信息：当前子串口号与波特率（例如 `CH:U1 B:115200`）。
 
+## 9.1 WK2114 最终版分层框架（可选）
+
+1. 目录：`application/mine/ws63_final`
+2. 主从定位：
+   - 主控是 `WS63`。
+   - `WK2114` 是外设扩展芯片，作为 Driver 层管理对象。
+3. 使能开关：
+   - `Application -> Mine -> Support Mine WS63 final layered framework (WS63 master).`
+4. 分层目录结构：
+
+```text
+ws63_final/
+├── Config/
+├── Common/
+├── BSP/
+├── Driver/
+├── Middleware/
+├── App/Task/
+└── App/Main/
+```
+
+5. 依赖规则：
+   - 上层只能调用下层，下层绝不调用上层。
+   - 硬件访问只允许在 `BSP`（WS63 的 GPIO/UART/IRQ 访问）。
+   - `Driver` 只做 WK2114 寄存器/FIFO 封装与统一收发接口。
+   - `App` 只做业务编排与模块回调，不允许直接操作硬件。
+6. 模块对接方式（后续整合各业务模块时使用）：
+   - 使用 `mine_ws63_final_task_register_rx_callback()` 注册子串口接收处理。
+   - 使用 `mine_ws63_final_task_send()` 向指定子串口发送业务数据。
+
 ## 10. RGB LED 单灯模块（可选）
 
 1. 目录：`application/mine/rgb_led`
@@ -258,6 +288,16 @@ LD SAVE3F
 3. 变更记录使用时间倒序，便于追溯。
 
 ## 14. 变更记录
+
+### 2026-03-31
+
+1. 新增 `application/mine/ws63_final` 最终版分层框架（`Config/Common/BSP/Driver/Middleware/App`）。
+2. 明确架构定位：`WS63` 为主控，`WK2114` 为外设扩展芯片。
+3. 新增编译开关：`Support Mine WS63 final layered framework (WS63 master).`
+4. 应用层新增统一对接接口：
+   - `mine_ws63_final_task_register_rx_callback()`
+   - `mine_ws63_final_task_send()`
+5. 编译验证：在 `src` 目录执行 `python3 build.py ws63-liteos-app`，结果通过（见任务执行记录）。
 
 ### 2026-03-27
 

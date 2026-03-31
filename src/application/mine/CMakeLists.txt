@@ -22,6 +22,10 @@ if(DEFINED CONFIG_MINE_SUPPORT_UART2_EXT_WK2114)
     add_subdirectory_if_exist(wk2114_uart2_ext)
 endif()
 
+if(DEFINED CONFIG_MINE_SUPPORT_WS63_FINAL_LAYERED)
+    add_subdirectory_if_exist(ws63_final)
+endif()
+
 if(DEFINED CONFIG_MINE_SUPPORT_RGB_LED_DEMO)
     add_subdirectory_if_exist(rgb_led)
 endif()
