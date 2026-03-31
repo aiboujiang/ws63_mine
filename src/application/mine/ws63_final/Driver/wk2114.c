@@ -19,9 +19,13 @@
 /* 子串口寄存器（Page0）。 */
 #define WK2XXX_SPAGE 0x03U
 #define WK2XXX_SCR   0x04U
+#define WK2XXX_LCR   0x05U
 #define WK2XXX_FCR   0x06U
 #define WK2XXX_SIER  0x07U
+#define WK2XXX_TFCNT 0x09U
 #define WK2XXX_RFCNT 0x0AU
+#define WK2XXX_FSR   0x0BU
+#define WK2XXX_LSR   0x0CU
 
 /* 子串口寄存器（Page1）。 */
 #define WK2XXX_BAUD1 0x04U
@@ -31,10 +35,212 @@
 #define WK2XXX_TFTL  0x08U
 
 /* 关键位定义。 */
-#define WK2XXX_TXEN       (1U << 0)
-#define WK2XXX_RXEN       (1U << 1)
+#define WK2XXX_RXEN       (1U << 0)
+#define WK2XXX_TXEN       (1U << 1)
+#define WK2XXX_SLEEPEN    (1U << 2)
 #define WK2XXX_RFTRIG_IEN (1U << 0)
-#define WK2XXX_RXOUT_IEN  (1U << 1)
+#define WK2XXX_RXOVT_IEN  (1U << 1)
+
+#define WK2XXX_FCR_RFRST  (1U << 0)
+#define WK2XXX_FCR_TFRST  (1U << 1)
+#define WK2XXX_FCR_RFEN   (1U << 2)
+#define WK2XXX_FCR_TFEN   (1U << 3)
+
+#define WK2XXX_FSR_ERR_MASK 0xF0U
+#define WK2XXX_LSR_ERR_MASK 0x0FU
+
+/* 子串口默认配置（对应 LCR 位定义：无校验、1 停止位、非红外）。 */
+#define WK2XXX_LCR_DEFAULT 0x00U
+
+/* 初始化验证轮询次数：用于等待 W1/R0 位自动回清。 */
+#define WK2XXX_VERIFY_RETRY_MAX 4U
+
+/* 静态寄存器访问函数前置声明（供初始化校验逻辑复用）。 */
+static void wk2114_write_greg(uint8_t greg, uint8_t data);
+static uint8_t wk2114_read_greg(uint8_t greg);
+static void wk2114_write_sreg(uint8_t sub_port, uint8_t sreg, uint8_t data);
+static uint8_t wk2114_read_sreg(uint8_t sub_port, uint8_t sreg);
+
+/**
+ * @brief 计算子串口对应位掩码。
+ */
+static uint8_t wk2114_subport_mask(uint8_t sub_port)
+{
+    return (uint8_t)(1U << (sub_port - 1U));
+}
+
+/**
+ * @brief 计算 GRST 中子串口休眠状态位掩码。
+ */
+static uint8_t wk2114_subport_sleep_mask(uint8_t sub_port)
+{
+    return (uint8_t)(1U << (sub_port + 3U));
+}
+
+/**
+ * @brief 等待 GRST 的 UTxRST 自动回 0，并校验 UTxSLEEP=0。
+ *
+ * 规格书说明：UTxRST 属于 W1/R0 位，写 1 后硬件会自动清 0。
+ */
+static errcode_t wk2114_wait_grst_ready(uint8_t sub_port)
+{
+    uint8_t retry;
+    uint8_t grst;
+    uint8_t rst_mask;
+    uint8_t sleep_mask;
+
+    rst_mask = wk2114_subport_mask(sub_port);
+    sleep_mask = wk2114_subport_sleep_mask(sub_port);
+
+    for (retry = 0U; retry < WK2XXX_VERIFY_RETRY_MAX; retry++) {
+        grst = wk2114_read_greg(WK2XXX_GRST);
+        if (((grst & rst_mask) == 0U) && ((grst & sleep_mask) == 0U)) {
+            return ERRCODE_SUCC;
+        }
+        ws63_bsp_sleep_ms(1U);
+    }
+
+    osal_printk("[wk2114 final drv] verify fail: sub-uart%u GRST=0x%02x\r\n",
+        (unsigned int)sub_port, (unsigned int)wk2114_read_greg(WK2XXX_GRST));
+    return ERRCODE_FAIL;
+}
+
+/**
+ * @brief 校验子串口初始化关键寄存器。
+ *
+ * 按规格书逐项验收：复位、使能、FIFO、波特率、格式、中断与错误标志。
+ */
+static errcode_t wk2114_verify_subport_init(uint8_t sub_port,
+    uint8_t baud1_expect, uint8_t baud0_expect, uint8_t pres_expect,
+    uint8_t sier_expect)
+{
+    uint8_t port_mask;
+    uint8_t gena;
+    uint8_t gier;
+    uint8_t scr;
+    uint8_t fcr;
+    uint8_t tfcnt;
+    uint8_t rfcnt;
+    uint8_t lcr;
+    uint8_t baud1_now;
+    uint8_t baud0_now;
+    uint8_t pres_now;
+    uint8_t sier_now;
+    uint8_t fsr;
+    uint8_t lsr;
+    uint8_t retry;
+
+    if (wk2114_wait_grst_ready(sub_port) != ERRCODE_SUCC) {
+        return ERRCODE_FAIL;
+    }
+
+    port_mask = wk2114_subport_mask(sub_port);
+
+    /* GENA: 子串口时钟必须使能。 */
+    gena = wk2114_read_greg(WK2XXX_GENA);
+    if ((gena & port_mask) == 0U) {
+        osal_printk("[wk2114 final drv] verify fail: sub-uart%u GENA=0x%02x\r\n",
+            (unsigned int)sub_port, (unsigned int)gena);
+        return ERRCODE_FAIL;
+    }
+
+    /* SCR: TXEN/RXEN 使能且 SLEEPEN 关闭。 */
+    scr = wk2114_read_sreg(sub_port, WK2XXX_SCR);
+    if (((scr & WK2XXX_TXEN) == 0U) || ((scr & WK2XXX_RXEN) == 0U) ||
+        ((scr & WK2XXX_SLEEPEN) != 0U)) {
+        osal_printk("[wk2114 final drv] verify fail: sub-uart%u SCR=0x%02x\r\n",
+            (unsigned int)sub_port, (unsigned int)scr);
+        return ERRCODE_FAIL;
+    }
+
+    /*
+     * FCR: FIFO 使能位保持 1，复位位需自动回 0。
+     * 若 FIFO 计数非 0，先补一次清 FIFO，再次确认为空。
+     */
+    for (retry = 0U; retry < WK2XXX_VERIFY_RETRY_MAX; retry++) {
+        fcr = wk2114_read_sreg(sub_port, WK2XXX_FCR);
+        if (((fcr & (WK2XXX_FCR_TFEN | WK2XXX_FCR_RFEN)) !=
+            (WK2XXX_FCR_TFEN | WK2XXX_FCR_RFEN)) ||
+            ((fcr & (WK2XXX_FCR_TFRST | WK2XXX_FCR_RFRST)) != 0U)) {
+            ws63_bsp_sleep_ms(1U);
+            continue;
+        }
+
+        tfcnt = wk2114_read_sreg(sub_port, WK2XXX_TFCNT);
+        rfcnt = wk2114_read_sreg(sub_port, WK2XXX_RFCNT);
+        if ((tfcnt == 0U) && (rfcnt == 0U)) {
+            break;
+        }
+
+        wk2114_write_sreg(sub_port, WK2XXX_FCR, 0xFFU);
+        ws63_bsp_sleep_ms(1U);
+    }
+
+    fcr = wk2114_read_sreg(sub_port, WK2XXX_FCR);
+    tfcnt = wk2114_read_sreg(sub_port, WK2XXX_TFCNT);
+    rfcnt = wk2114_read_sreg(sub_port, WK2XXX_RFCNT);
+    if (((fcr & (WK2XXX_FCR_TFEN | WK2XXX_FCR_RFEN)) !=
+        (WK2XXX_FCR_TFEN | WK2XXX_FCR_RFEN)) ||
+        ((fcr & (WK2XXX_FCR_TFRST | WK2XXX_FCR_RFRST)) != 0U) ||
+        (tfcnt != 0U) || (rfcnt != 0U)) {
+        osal_printk("[wk2114 final drv] verify fail: sub-uart%u FCR=0x%02x TFCNT=%u RFCNT=%u\r\n",
+            (unsigned int)sub_port, (unsigned int)fcr,
+            (unsigned int)tfcnt, (unsigned int)rfcnt);
+        return ERRCODE_FAIL;
+    }
+
+    /* BAUD1/BAUD0/PRES: PAGE1 读回值必须和写入值一致。 */
+    wk2114_write_sreg(sub_port, WK2XXX_SPAGE, 1U);
+    baud1_now = wk2114_read_sreg(sub_port, WK2XXX_BAUD1);
+    baud0_now = wk2114_read_sreg(sub_port, WK2XXX_BAUD0);
+    pres_now = wk2114_read_sreg(sub_port, WK2XXX_PRES);
+    wk2114_write_sreg(sub_port, WK2XXX_SPAGE, 0U);
+    if ((baud1_now != baud1_expect) || (baud0_now != baud0_expect) ||
+        (pres_now != pres_expect)) {
+        osal_printk("[wk2114 final drv] verify fail: sub-uart%u BAUD=%02x%02x PRES=%02x exp=%02x%02x/%02x\r\n",
+            (unsigned int)sub_port,
+            (unsigned int)baud1_now, (unsigned int)baud0_now, (unsigned int)pres_now,
+            (unsigned int)baud1_expect, (unsigned int)baud0_expect, (unsigned int)pres_expect);
+        return ERRCODE_FAIL;
+    }
+
+    /* LCR: 当前方案使用默认配置（普通 UART、无校验、1 停止位）。 */
+    lcr = wk2114_read_sreg(sub_port, WK2XXX_LCR);
+    if ((lcr & 0x3FU) != WK2XXX_LCR_DEFAULT) {
+        osal_printk("[wk2114 final drv] verify fail: sub-uart%u LCR=0x%02x\r\n",
+            (unsigned int)sub_port, (unsigned int)lcr);
+        return ERRCODE_FAIL;
+    }
+
+    /* GIER/SIER: 全局与子串口中断使能位必须与配置一致。 */
+    gier = wk2114_read_greg(WK2XXX_GIER);
+    if ((gier & port_mask) == 0U) {
+        osal_printk("[wk2114 final drv] verify fail: sub-uart%u GIER=0x%02x\r\n",
+            (unsigned int)sub_port, (unsigned int)gier);
+        return ERRCODE_FAIL;
+    }
+
+    sier_now = wk2114_read_sreg(sub_port, WK2XXX_SIER);
+    if (sier_now != sier_expect) {
+        osal_printk("[wk2114 final drv] verify fail: sub-uart%u SIER=0x%02x exp=0x%02x\r\n",
+            (unsigned int)sub_port, (unsigned int)sier_now, (unsigned int)sier_expect);
+        return ERRCODE_FAIL;
+    }
+
+    /* FSR/LSR: 溢出、帧错、校验错、Line-Break 均应为 0。 */
+    fsr = wk2114_read_sreg(sub_port, WK2XXX_FSR);
+    lsr = wk2114_read_sreg(sub_port, WK2XXX_LSR);
+    if (((fsr & WK2XXX_FSR_ERR_MASK) != 0U) ||
+        ((lsr & WK2XXX_LSR_ERR_MASK) != 0U)) {
+        osal_printk("[wk2114 final drv] verify fail: sub-uart%u FSR=0x%02x LSR=0x%02x\r\n",
+            (unsigned int)sub_port, (unsigned int)fsr, (unsigned int)lsr);
+        return ERRCODE_FAIL;
+    }
+
+    osal_printk("[wk2114 final drv] sub-uart%u verify ok\r\n",
+        (unsigned int)sub_port);
+    return ERRCODE_SUCC;
+}
 
 /* 主口接收缓存。 */
 #define WS63_HOST_RX_BUFFER_SIZE 256U
@@ -217,6 +423,7 @@ errcode_t wk2114_subport_init(uint8_t sub_port, uint32_t baud)
     uint8_t baud0 = 0U;
     uint8_t pres = 0U;
     uint8_t port_mask;
+    uint8_t fcr;
 
     if (!ws63_is_subport_valid(sub_port)) {
         return ERRCODE_INVALID_PARAM;
@@ -226,7 +433,7 @@ errcode_t wk2114_subport_init(uint8_t sub_port, uint32_t baud)
         return ERRCODE_FAIL;
     }
 
-    port_mask = (uint8_t)(1U << (sub_port - 1U));
+    port_mask = wk2114_subport_mask(sub_port);
 
     gena = wk2114_read_greg(WK2XXX_GENA);
     wk2114_write_greg(WK2XXX_GENA, (uint8_t)(gena | port_mask));
@@ -238,10 +445,17 @@ errcode_t wk2114_subport_init(uint8_t sub_port, uint32_t baud)
     wk2114_write_greg(WK2XXX_GIER, (uint8_t)(gier | port_mask));
 
     sier = wk2114_read_sreg(sub_port, WK2XXX_SIER);
-    sier = (uint8_t)(sier | WK2XXX_RFTRIG_IEN | WK2XXX_RXOUT_IEN);
+    sier = (uint8_t)(sier | WK2XXX_RFTRIG_IEN | WK2XXX_RXOVT_IEN);
     wk2114_write_sreg(sub_port, WK2XXX_SIER, sier);
 
-    wk2114_write_sreg(sub_port, WK2XXX_FCR, 0xFFU);
+    /*
+     * FCR 初始化：
+     * 1) 使能 TX/RX FIFO；
+     * 2) 触发一次收发 FIFO 复位（W1/R0，硬件自动回清）。
+     */
+    fcr = (uint8_t)(WK2XXX_FCR_TFEN | WK2XXX_FCR_RFEN |
+        WK2XXX_FCR_TFRST | WK2XXX_FCR_RFRST | 0xF0U);
+    wk2114_write_sreg(sub_port, WK2XXX_FCR, fcr);
 
     wk2114_write_sreg(sub_port, WK2XXX_SPAGE, 1U);
     wk2114_write_sreg(sub_port, WK2XXX_BAUD1, baud1);
@@ -253,7 +467,12 @@ errcode_t wk2114_subport_init(uint8_t sub_port, uint32_t baud)
 
     scr = wk2114_read_sreg(sub_port, WK2XXX_SCR);
     scr = (uint8_t)(scr | WK2XXX_TXEN | WK2XXX_RXEN);
+    scr = (uint8_t)(scr & (~WK2XXX_SLEEPEN));
     wk2114_write_sreg(sub_port, WK2XXX_SCR, scr);
+
+    if (wk2114_verify_subport_init(sub_port, baud1, baud0, pres, sier) != ERRCODE_SUCC) {
+        return ERRCODE_FAIL;
+    }
 
     osal_printk("[wk2114 final drv] sub-uart%u init ok, baud=%u\r\n",
         (unsigned int)sub_port, (unsigned int)baud);
