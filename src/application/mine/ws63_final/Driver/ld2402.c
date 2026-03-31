@@ -25,6 +25,8 @@
 #define LD2402_INIT_RETRY_MAX             3U
 #define LD2402_INIT_POLL_ROUND_MAX        8U
 #define LD2402_INIT_POLL_GAP_MS           20U
+/* 清空接收缓存时的最大轮询次数，防止 RFCNT 读回异常导致死循环。 */
+#define LD2402_DRAIN_MAX_ROUND            32U
 
 // 使能配置命令: 帧头(4)+帧内长(2)+字(2)+值(2)+帧尾(4)
 static const uint8_t g_ld2402_cmd_enable[] = {
@@ -137,12 +139,20 @@ errcode_t ld2402_init(uint8_t sub_port)
 
     while (retry-- > 0) {
         uint8_t round;
+        uint8_t drain_round;
         bool has_valid_frame = false;
         bool has_enable_ack = false;
 
-        // 清空接收缓存
-        while (wk2114_subport_read(sub_port, rx_buf, sizeof(rx_buf)) > 0) {
+        // 清空接收缓存（带上限，避免读回异常时卡死）
+        for (drain_round = 0U; drain_round < LD2402_DRAIN_MAX_ROUND; drain_round++) {
+            if (wk2114_subport_read(sub_port, rx_buf, sizeof(rx_buf)) == 0U) {
+                break;
+            }
             ws63_os_sleep_ms(2);
+        }
+
+        if (drain_round >= LD2402_DRAIN_MAX_ROUND) {
+            osal_printk("[ld2402] drain rx hit limit, continue init.\r\n");
         }
 
         // 发送使能配置

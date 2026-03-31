@@ -11,6 +11,9 @@
 #include "ws63_final_osal.h"
 #include "osal_debug.h"
 
+/* 清空接收缓存时的最大轮询次数，防止 RFCNT 读回异常导致死循环。 */
+#define ZW101_DRAIN_MAX_ROUND 32U
+
 // 握手指令: 包头(2)+地址(4)+标识(1)+长(2)+指令(1)+校验(2)
 // EF 01 FF FF FF FF 01 00 03 35 00 39
 static const uint8_t g_zw101_cmd_handshake[] = {
@@ -36,9 +39,18 @@ errcode_t zw101_init(uint8_t sub_port)
     osal_printk("[zw101] init on port %u\r\n", sub_port);
 
     while (retry-- > 0) {
+        uint8_t drain_round;
+
         // 清空接收缓存
-        while (wk2114_subport_read(sub_port, rx_buf, sizeof(rx_buf)) > 0) {
+        for (drain_round = 0U; drain_round < ZW101_DRAIN_MAX_ROUND; drain_round++) {
+            if (wk2114_subport_read(sub_port, rx_buf, sizeof(rx_buf)) == 0U) {
+                break;
+            }
             ws63_os_sleep_ms(2);
+        }
+
+        if (drain_round >= ZW101_DRAIN_MAX_ROUND) {
+            osal_printk("[zw101] drain rx hit limit, continue init.\r\n");
         }
 
         // 发送握手指令
