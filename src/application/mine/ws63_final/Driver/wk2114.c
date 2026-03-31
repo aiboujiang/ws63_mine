@@ -55,6 +55,13 @@
 /* 初始化验证轮询次数：用于等待 W1/R0 位自动回清。 */
 #define WK2XXX_VERIFY_RETRY_MAX 4U
 
+/*
+ * 某些板级/芯片版本下，GENA/GIER 读回可能固定为 0x00，
+ * 但子串口功能寄存器访问与通信仍正常。
+ * 0: 读回异常仅告警，不阻断初始化；1: 严格要求读回位必须置位。
+ */
+#define WK2XXX_STRICT_GREG_VERIFY 0U
+
 /* 静态寄存器访问函数前置声明（供初始化校验逻辑复用）。 */
 static void wk2114_write_greg(uint8_t greg, uint8_t data);
 static uint8_t wk2114_read_greg(uint8_t greg);
@@ -139,9 +146,11 @@ static errcode_t wk2114_verify_subport_init(uint8_t sub_port,
     /* GENA: 子串口时钟必须使能。 */
     gena = wk2114_read_greg(WK2XXX_GENA);
     if ((gena & port_mask) == 0U) {
-        osal_printk("[wk2114 final drv] verify fail: sub-uart%u GENA=0x%02x\r\n",
+        osal_printk("[wk2114 final drv] verify warn: sub-uart%u GENA readback=0x%02x\r\n",
             (unsigned int)sub_port, (unsigned int)gena);
+#if (WK2XXX_STRICT_GREG_VERIFY == 1U)
         return ERRCODE_FAIL;
+#endif
     }
 
     /* SCR: TXEN/RXEN 使能且 SLEEPEN 关闭。 */
@@ -215,9 +224,11 @@ static errcode_t wk2114_verify_subport_init(uint8_t sub_port,
     /* GIER/SIER: 全局与子串口中断使能位必须与配置一致。 */
     gier = wk2114_read_greg(WK2XXX_GIER);
     if ((gier & port_mask) == 0U) {
-        osal_printk("[wk2114 final drv] verify fail: sub-uart%u GIER=0x%02x\r\n",
+        osal_printk("[wk2114 final drv] verify warn: sub-uart%u GIER readback=0x%02x\r\n",
             (unsigned int)sub_port, (unsigned int)gier);
+#if (WK2XXX_STRICT_GREG_VERIFY == 1U)
         return ERRCODE_FAIL;
+#endif
     }
 
     sier_now = wk2114_read_sreg(sub_port, WK2XXX_SIER);
