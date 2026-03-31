@@ -148,6 +148,7 @@ void *ws63_task_entry(const char *arg)
         osal_printk("[wk2114 final task] driver init fail\r\n");
         return NULL;
     }
+    ws63_os_sleep_ms(10U);
 
     wk2114_get_link_status(&status);
     osal_printk("[wk2114 final task] link matched=%u gena=0x%02x\r\n",

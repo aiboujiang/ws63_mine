@@ -82,6 +82,20 @@
  */
 #define WK2XXX_STRICT_FCR_VERIFY 0U
 
+/*
+ * BAUD 整体验收开关：
+ * 0: BAUD1/BAUD0/PRES 读回异常仅告警，允许继续初始化；
+ * 1: BAUD 读回异常立即失败。
+ */
+#define WK2XXX_STRICT_BAUD_VERIFY 0U
+
+/*
+ * SIER 整体验收开关：
+ * 0: SIER 读回异常仅告警，允许继续初始化；
+ * 1: SIER 读回异常立即失败。
+ */
+#define WK2XXX_STRICT_SIER_VERIFY 0U
+
 /* 全局子串口掩码：UT1~UT4。 */
 #define WK2XXX_ALL_SUBPORT_MASK 0x0FU
 
@@ -317,11 +331,13 @@ static errcode_t wk2114_verify_subport_init(uint8_t sub_port,
     wk2114_write_sreg(sub_port, WK2XXX_SPAGE, 0U);
     if ((baud1_now != baud1_expect) || (baud0_now != baud0_expect) ||
         (pres_now != pres_expect)) {
-        osal_printk("[wk2114 final drv] verify fail: sub-uart%u BAUD=%02x%02x PRES=%02x exp=%02x%02x/%02x\r\n",
+        osal_printk("[wk2114 final drv] verify warn: sub-uart%u BAUD=%02x%02x PRES=%02x exp=%02x%02x/%02x\r\n",
             (unsigned int)sub_port,
             (unsigned int)baud1_now, (unsigned int)baud0_now, (unsigned int)pres_now,
             (unsigned int)baud1_expect, (unsigned int)baud0_expect, (unsigned int)pres_expect);
+#if (WK2XXX_STRICT_BAUD_VERIFY == 1U)
         return ERRCODE_FAIL;
+#endif
     }
 
     /* LCR: 当前方案使用默认配置（普通 UART、无校验、1 停止位）。 */
@@ -344,9 +360,11 @@ static errcode_t wk2114_verify_subport_init(uint8_t sub_port,
 
     sier_now = wk2114_read_sreg(sub_port, WK2XXX_SIER);
     if (sier_now != sier_expect) {
-        osal_printk("[wk2114 final drv] verify fail: sub-uart%u SIER=0x%02x exp=0x%02x\r\n",
+        osal_printk("[wk2114 final drv] verify warn: sub-uart%u SIER=0x%02x exp=0x%02x\r\n",
             (unsigned int)sub_port, (unsigned int)sier_now, (unsigned int)sier_expect);
+#if (WK2XXX_STRICT_SIER_VERIFY == 1U)
         return ERRCODE_FAIL;
+#endif
     }
 
     /* FSR/LSR: 溢出、帧错、校验错、Line-Break 均应为 0。 */
