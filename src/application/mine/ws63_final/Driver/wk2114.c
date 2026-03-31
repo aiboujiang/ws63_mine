@@ -68,11 +68,17 @@
  */
 #define WK2XXX_STRICT_SCR_TXEN_VERIFY 0U
 
+/* 全局子串口掩码：UT1~UT4。 */
+#define WK2XXX_ALL_SUBPORT_MASK 0x0FU
+
 /* 静态寄存器访问函数前置声明（供初始化校验逻辑复用）。 */
 static void wk2114_write_greg(uint8_t greg, uint8_t data);
 static uint8_t wk2114_read_greg(uint8_t greg);
 static void wk2114_write_sreg(uint8_t sub_port, uint8_t sreg, uint8_t data);
 static uint8_t wk2114_read_sreg(uint8_t sub_port, uint8_t sreg);
+
+/* 子串口全局准备状态：确保“全局软复位+全局时钟使能”仅执行一次。 */
+static uint8_t g_wk2114_global_prepared = 0U;
 
 /**
  * @brief 计算子串口对应位掩码。
@@ -116,6 +122,59 @@ static errcode_t wk2114_wait_grst_ready(uint8_t sub_port)
     osal_printk("[wk2114 final drv] verify fail: sub-uart%u GRST=0x%02x\r\n",
         (unsigned int)sub_port, (unsigned int)wk2114_read_greg(WK2XXX_GRST));
     return ERRCODE_FAIL;
+}
+
+/**
+ * @brief 子串口配置前执行全局准备流程。
+ *
+ * 流程：
+ * 1) 全局软复位（GRST 低 4 位写 1，等待自动回 0）；
+ * 2) 开启全局时钟（GENA 低 4 位置 1）；
+ * 3) 读回校验 GENA 是否写入成功。
+ */
+static errcode_t wk2114_prepare_global_before_subport(void)
+{
+    uint8_t grst;
+    uint8_t gena;
+    uint8_t retry;
+
+    /* 1) 全局软复位：对子串口 1~4 统一触发软复位。 */
+    grst = wk2114_read_greg(WK2XXX_GRST);
+    wk2114_write_greg(WK2XXX_GRST, (uint8_t)(grst | WK2XXX_ALL_SUBPORT_MASK));
+
+    for (retry = 0U; retry < WK2XXX_VERIFY_RETRY_MAX; retry++) {
+        grst = wk2114_read_greg(WK2XXX_GRST);
+        if ((grst & WK2XXX_ALL_SUBPORT_MASK) == 0U) {
+            break;
+        }
+        ws63_bsp_sleep_ms(1U);
+    }
+
+    if ((grst & WK2XXX_ALL_SUBPORT_MASK) != 0U) {
+        osal_printk("[wk2114 final drv] global reset fail, GRST=0x%02x\r\n",
+            (unsigned int)grst);
+        return ERRCODE_FAIL;
+    }
+
+    /* 2) 开启全局时钟：使能 UT1~UT4 时钟门控位。 */
+    gena = wk2114_read_greg(WK2XXX_GENA);
+    wk2114_write_greg(WK2XXX_GENA, (uint8_t)(gena | WK2XXX_ALL_SUBPORT_MASK));
+
+    /* 3) 读回校验 GENA 写入结果。 */
+    gena = wk2114_read_greg(WK2XXX_GENA);
+    if ((gena & WK2XXX_ALL_SUBPORT_MASK) != WK2XXX_ALL_SUBPORT_MASK) {
+        osal_printk("[wk2114 final drv] global clock verify warn, GENA=0x%02x\r\n",
+            (unsigned int)gena);
+#if (WK2XXX_STRICT_GREG_VERIFY == 1U)
+        return ERRCODE_FAIL;
+#endif
+    } else {
+        osal_printk("[wk2114 final drv] global clock verify ok, GENA=0x%02x\r\n",
+            (unsigned int)gena);
+    }
+
+    g_wk2114_global_prepared = 1U;
+    return ERRCODE_SUCC;
 }
 
 /**
@@ -451,6 +510,9 @@ errcode_t wk2114_init(void)
         return ERRCODE_FAIL;
     }
 
+    /* 每次主口重新初始化后，要求重新执行一次子串口全局准备流程。 */
+    g_wk2114_global_prepared = 0U;
+
     return ERRCODE_SUCC;
 }
 
@@ -475,6 +537,13 @@ errcode_t wk2114_subport_init(uint8_t sub_port, uint32_t baud)
 
     if (ws63_calc_baud_regs(baud, &baud1, &baud0, &pres) != ERRCODE_SUCC) {
         return ERRCODE_FAIL;
+    }
+
+    /* 子串口配置前先完成全局软复位、全局时钟使能与 GENA 读回校验。 */
+    if (g_wk2114_global_prepared == 0U) {
+        if (wk2114_prepare_global_before_subport() != ERRCODE_SUCC) {
+            return ERRCODE_FAIL;
+        }
     }
 
     port_mask = wk2114_subport_mask(sub_port);
