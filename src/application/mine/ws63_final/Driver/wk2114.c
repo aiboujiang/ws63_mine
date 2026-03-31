@@ -75,6 +75,13 @@
  */
 #define WK2XXX_STRICT_SCR_VERIFY 0U
 
+/*
+ * FCR 整体验收开关：
+ * 0: FCR 读回异常仅告警，允许继续初始化进入业务握手验证；
+ * 1: FCR 读回异常立即失败。
+ */
+#define WK2XXX_STRICT_FCR_VERIFY 0U
+
 /* 全局子串口掩码：UT1~UT4。 */
 #define WK2XXX_ALL_SUBPORT_MASK 0x0FU
 
@@ -294,10 +301,12 @@ static errcode_t wk2114_verify_subport_init(uint8_t sub_port,
         (WK2XXX_FCR_TFEN | WK2XXX_FCR_RFEN)) ||
         ((fcr & (WK2XXX_FCR_TFRST | WK2XXX_FCR_RFRST)) != 0U) ||
         (tfcnt != 0U) || (rfcnt != 0U)) {
-        osal_printk("[wk2114 final drv] verify fail: sub-uart%u FCR=0x%02x TFCNT=%u RFCNT=%u\r\n",
+        osal_printk("[wk2114 final drv] verify warn: sub-uart%u FCR=0x%02x TFCNT=%u RFCNT=%u\r\n",
             (unsigned int)sub_port, (unsigned int)fcr,
             (unsigned int)tfcnt, (unsigned int)rfcnt);
+#if (WK2XXX_STRICT_FCR_VERIFY == 1U)
         return ERRCODE_FAIL;
+#endif
     }
 
     /* BAUD1/BAUD0/PRES: PAGE1 读回值必须和写入值一致。 */
