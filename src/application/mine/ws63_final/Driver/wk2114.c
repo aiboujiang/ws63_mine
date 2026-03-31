@@ -434,7 +434,6 @@ errcode_t wk2114_subport_init(uint8_t sub_port, uint32_t baud)
     uint8_t baud0 = 0U;
     uint8_t pres = 0U;
     uint8_t port_mask;
-    uint8_t fcr;
 
     if (!ws63_is_subport_valid(sub_port)) {
         return ERRCODE_INVALID_PARAM;
@@ -446,6 +445,10 @@ errcode_t wk2114_subport_init(uint8_t sub_port, uint32_t baud)
 
     port_mask = wk2114_subport_mask(sub_port);
 
+    /*
+     * 第一步：按应用笔记 Wk_Init 顺序完成子串口基础初始化。
+     * 顺序依次为 GENA -> GRST -> GIER -> SIER -> FCR -> RFTL/TFTL -> SCR。
+     */
     gena = wk2114_read_greg(WK2XXX_GENA);
     wk2114_write_greg(WK2XXX_GENA, (uint8_t)(gena | port_mask));
 
@@ -459,27 +462,30 @@ errcode_t wk2114_subport_init(uint8_t sub_port, uint32_t baud)
     sier = (uint8_t)(sier | WK2XXX_RFTRIG_IEN | WK2XXX_RXOVT_IEN);
     wk2114_write_sreg(sub_port, WK2XXX_SIER, sier);
 
-    /*
-     * FCR 初始化：
-     * 1) 使能 TX/RX FIFO；
-     * 2) 触发一次收发 FIFO 复位（W1/R0，硬件自动回清）。
-     */
-    fcr = (uint8_t)(WK2XXX_FCR_TFEN | WK2XXX_FCR_RFEN |
-        WK2XXX_FCR_TFRST | WK2XXX_FCR_RFRST | 0xF0U);
-    wk2114_write_sreg(sub_port, WK2XXX_FCR, fcr);
+    /* 按应用笔记示例直接写 0xFF：使能 FIFO、触发清 FIFO，并设置固定触点。 */
+    wk2114_write_sreg(sub_port, WK2XXX_FCR, 0xFFU);
 
     wk2114_write_sreg(sub_port, WK2XXX_SPAGE, 1U);
-    wk2114_write_sreg(sub_port, WK2XXX_BAUD1, baud1);
-    wk2114_write_sreg(sub_port, WK2XXX_BAUD0, baud0);
-    wk2114_write_sreg(sub_port, WK2XXX_PRES, pres);
+    /* 应用笔记中 RFTL/TFTL 在 Wk_Init 阶段配置。 */
     wk2114_write_sreg(sub_port, WK2XXX_RFTL, WS63_RX_TRIGGER_LEVEL);
     wk2114_write_sreg(sub_port, WK2XXX_TFTL, WS63_TX_TRIGGER_LEVEL);
     wk2114_write_sreg(sub_port, WK2XXX_SPAGE, 0U);
 
+    /* 使能子串口收发，显式关闭休眠位。 */
     scr = wk2114_read_sreg(sub_port, WK2XXX_SCR);
     scr = (uint8_t)(scr | WK2XXX_TXEN | WK2XXX_RXEN);
     scr = (uint8_t)(scr & (~WK2XXX_SLEEPEN));
     wk2114_write_sreg(sub_port, WK2XXX_SCR, scr);
+
+    /*
+     * 第二步：按应用笔记 Wk_SetBaud 流程写波特率寄存器。
+     * 先切 PAGE1 写 BAUD1/BAUD0/PRES，再切回 PAGE0。
+     */
+    wk2114_write_sreg(sub_port, WK2XXX_SPAGE, 1U);
+    wk2114_write_sreg(sub_port, WK2XXX_BAUD1, baud1);
+    wk2114_write_sreg(sub_port, WK2XXX_BAUD0, baud0);
+    wk2114_write_sreg(sub_port, WK2XXX_PRES, pres);
+    wk2114_write_sreg(sub_port, WK2XXX_SPAGE, 0U);
 
     if (wk2114_verify_subport_init(sub_port, baud1, baud0, pres, sier) != ERRCODE_SUCC) {
         return ERRCODE_FAIL;
