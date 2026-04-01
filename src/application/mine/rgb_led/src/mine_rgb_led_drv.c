@@ -5,13 +5,16 @@
 
 #include "mine_rgb_led.h"
 
-#include "gpio.h"
+#include <stdbool.h>
+
 #include "pinctrl.h"
+#include "pwm.h"
 #include "soc_osal.h"
 #include "tcxo.h"
-#include "interrupt/osal_interrupt.h"
-#include "common_def.h"
-#include "platform_core.h"
+
+/* WS2812B 的 DIN 改为 PWM 复用输出。 */
+#define MINE_RGB_LED_PIN               GPIO_04
+#define MINE_RGB_LED_PIN_MODE_PWM      PIN_MODE_1
 
 /*
  * 根据 mine/lib/RGB_LED.pdf 的“数据传输定义”与注释门限选取时序：
@@ -19,9 +22,6 @@
  * 2) 注释门限：高电平 200~410ns 识别为“0”，640~1000ns 识别为“1”。
  * 这里取 T0H=300ns、T1H=700ns，可同时满足两组约束并留出抖动余量。
  */
-#define MINE_RGB_LED_PIN               GPIO_04
-#define MINE_RGB_LED_PIN_MODE_GPIO     0
-
 #define MINE_RGB_T0H_NS                300U
 #define MINE_RGB_T0L_NS                900U
 #define MINE_RGB_T1H_NS                700U
@@ -30,102 +30,94 @@
 /* PDF 注释给出 reset 最小 100us，这里取 120us 留出裕量。 */
 #define MINE_RGB_RESET_US              120U
 
-/* GPIO4 位于 channel0/group0/pin4，对应 data_set/data_clr 的 bit4。 */
-#define MINE_RGB_GPIO_DATA_SET_ADDR    (GPIO_CHANNEL_0_BASE_ADDR + 0x30U)
-#define MINE_RGB_GPIO_DATA_CLR_ADDR    (GPIO_CHANNEL_0_BASE_ADDR + 0x34U)
-#define MINE_RGB_GPIO4_MASK            (1U << 4U)
+/* PWM 时钟来自 PWM 驱动，当前 WS63 端口固定为 40MHz。 */
+#define MINE_PWM_CLOCK_HZ              40000000U
+
+/* 选用 PWM4 + Group7 作为 WS2812 专用输出通道。 */
+#define MINE_WS2812_PWM_CHANNEL        4U
+#define MINE_WS2812_PWM_GROUP          7U
+
+/* 单 bit 发送等待超时，防止异常情况下死循环阻塞任务。 */
+#define MINE_WS2812_BIT_TIMEOUT_US     200U
 
 /* 兼容 STM32 示例中的占空比编码：0 码=30，1 码=60（ARR=90）。 */
 #define MINE_WS2812_DUTY_0             30U
 #define MINE_WS2812_DUTY_1             60U
 #define MINE_WS2812_DUTY_THRESHOLD     45U
 
-/* 校准周期窗口，窗口越长越稳但初始化耗时越大。 */
-#define MINE_RGB_CALIBRATION_US        4000U
-
-static uint32_t g_cycles_per_us = 0;
 uint16_t WS2812_Value[24U * Led_Num] = {0};
+static volatile bool g_mine_ws2812_bit_done = false;
+static bool g_mine_ws2812_inited = false;
 
 /**
- * @brief GPIO4 直接拉高（寄存器快路径）。
- */
-static inline void mine_rgb_gpio_high(void)
-{
-    uapi_reg_write32(MINE_RGB_GPIO_DATA_SET_ADDR, MINE_RGB_GPIO4_MASK);
-}
-
-/**
- * @brief GPIO4 直接拉低（寄存器快路径）。
- */
-static inline void mine_rgb_gpio_low(void)
-{
-    uapi_reg_write32(MINE_RGB_GPIO_DATA_CLR_ADDR, MINE_RGB_GPIO4_MASK);
-}
-
-/**
- * @brief 读取当前CPU cycle计数。
+ * @brief WS2812 PWM 中断回调：标记单 bit 发送完成。
  *
- * @return 当前cycle计数(32位)。
+ * @param channel 触发中断的 PWM 通道。
+ * @return ERRCODE_SUCC。
  */
-static inline uint32_t mine_rgb_read_cycle32(void)
+static errcode_t mine_ws2812_pwm_callback(uint8_t channel)
 {
-    uint32_t value;
-    __asm__ __volatile__("csrr %0, cycle" : "=r"(value));
-    return value;
-}
-
-/**
- * @brief 忙等指定cycle数，用于生成子微秒脉宽。
- *
- * @param wait_cycles 需要等待的cycle数量。
- */
-static inline void mine_rgb_wait_cycles(uint32_t wait_cycles)
-{
-    uint32_t start = mine_rgb_read_cycle32();
-    while ((uint32_t)(mine_rgb_read_cycle32() - start) < wait_cycles) {
-        /* busy wait */
+    if (channel == MINE_WS2812_PWM_CHANNEL) {
+        g_mine_ws2812_bit_done = true;
     }
+    return ERRCODE_SUCC;
 }
 
 /**
- * @brief 纳秒转换为cycle数。
+ * @brief 纳秒转换为 PWM 时钟计数（40MHz）。
  *
- * @param ns 时间，单位ns。
- * @return 对应的cycle数，至少返回1，避免脉冲被编译器优化掉。
+ * @param ns 时间，单位 ns。
+ * @return 对应计数值，至少为 1。
  */
-static inline uint32_t mine_rgb_ns_to_cycles(uint32_t ns)
+static inline uint32_t mine_ws2812_ns_to_ticks(uint32_t ns)
 {
-    uint64_t cycles = ((uint64_t)g_cycles_per_us * (uint64_t)ns + 999ULL) / 1000ULL;
-    return (cycles == 0U) ? 1U : (uint32_t)cycles;
+    uint64_t ticks = ((uint64_t)ns * (uint64_t)MINE_PWM_CLOCK_HZ + 999999999ULL) / 1000000000ULL;
+    return (ticks == 0U) ? 1U : (uint32_t)ticks;
 }
 
 /**
- * @brief 发送单个bit到灯珠DI。
+ * @brief 通过 PWM 发送单个 WS2812 bit。
  *
- * @param bit_val bit值，0或1。
+ * @param bit_val bit 值（0 或 1）。
+ * @return ERRCODE_SUCC 成功。
+ * @return Other        失败。
  */
-static inline void mine_rgb_send_bit(uint8_t bit_val)
+static errcode_t mine_ws2812_send_bit(uint8_t bit_val)
 {
-    const uint32_t high_cycles = bit_val ? mine_rgb_ns_to_cycles(MINE_RGB_T1H_NS) : mine_rgb_ns_to_cycles(MINE_RGB_T0H_NS);
-    const uint32_t low_cycles = bit_val ? mine_rgb_ns_to_cycles(MINE_RGB_T1L_NS) : mine_rgb_ns_to_cycles(MINE_RGB_T0L_NS);
+    errcode_t ret;
+    uint32_t high_ticks;
+    uint32_t low_ticks;
+    uint64_t start_us;
+    pwm_config_t cfg;
 
-    mine_rgb_gpio_high();
-    mine_rgb_wait_cycles(high_cycles);
-    mine_rgb_gpio_low();
-    mine_rgb_wait_cycles(low_cycles);
-}
+    high_ticks = mine_ws2812_ns_to_ticks(bit_val ? MINE_RGB_T1H_NS : MINE_RGB_T0H_NS);
+    low_ticks = mine_ws2812_ns_to_ticks(bit_val ? MINE_RGB_T1L_NS : MINE_RGB_T0L_NS);
 
-/**
- * @brief 按MSB first发送1个字节。
- *
- * @param value 待发送字节。
- */
-static inline void mine_rgb_send_byte(uint8_t value)
-{
-    for (uint8_t bit = 0; bit < 8U; bit++) {
-        mine_rgb_send_bit((uint8_t)((value & 0x80U) != 0U));
-        value <<= 1U;
+    cfg.low_time = low_ticks;
+    cfg.high_time = high_ticks;
+    cfg.offset_time = 0U;
+    cfg.cycles = 1U;
+    cfg.repeat = false;
+
+    g_mine_ws2812_bit_done = false;
+    ret = uapi_pwm_open(MINE_WS2812_PWM_CHANNEL, &cfg);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
     }
+
+    ret = uapi_pwm_start_group(MINE_WS2812_PWM_GROUP);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+
+    start_us = uapi_tcxo_get_us();
+    while (!g_mine_ws2812_bit_done) {
+        if ((uapi_tcxo_get_us() - start_us) > MINE_WS2812_BIT_TIMEOUT_US) {
+            return ERRCODE_FAIL;
+        }
+    }
+
+    return ERRCODE_SUCC;
 }
 
 /**
@@ -146,7 +138,6 @@ static inline uint8_t mine_ws2812_duty_to_bit(uint16_t duty)
  */
 static void mine_ws2812_send_buffer_bits(uint32_t bit_count)
 {
-    uint32_t irq_state;
     uint32_t i;
     const uint32_t max_bits = 24U * Led_Num;
 
@@ -154,19 +145,20 @@ static void mine_ws2812_send_buffer_bits(uint32_t bit_count)
         bit_count = max_bits;
     }
 
-    if (g_cycles_per_us == 0U) {
+    if (!g_mine_ws2812_inited) {
         return;
     }
 
     /*
-     * 发送整帧期间关闭中断，满足手册中“帧内中断不超过 35us”的约束，
-     * 避免高优先级任务抢占导致帧中断被灯珠判定为 RESET。
+     * 逐 bit 由 PWM 硬件输出高低电平时长。
+     * 若某一 bit 发送失败则终止该帧，避免输出错误帧污染后续显示。
      */
-    irq_state = osal_irq_lock();
     for (i = 0U; i < bit_count; i++) {
-        mine_rgb_send_bit(mine_ws2812_duty_to_bit(WS2812_Value[i]));
+        if (mine_ws2812_send_bit(mine_ws2812_duty_to_bit(WS2812_Value[i])) != ERRCODE_SUCC) {
+            osal_printk("[mine_rgb_led] send bit fail at %u\r\n", (unsigned int)i);
+            break;
+        }
     }
-    osal_irq_restore(irq_state);
 }
 
 /**
@@ -187,52 +179,36 @@ static void mine_ws2812_encode_byte(uint8_t value, uint16_t *dst)
 
 errcode_t mine_rgb_led_init(void)
 {
-    uint64_t us_start;
-    uint64_t us_end;
-    uint32_t cycle_start;
-    uint32_t cycle_end;
-    uint64_t delta_us;
-    uint32_t delta_cycle;
+    uint8_t channel_id = MINE_WS2812_PWM_CHANNEL;
 
-    /* 1) GPIO4切为普通GPIO输出，默认拉低，防止上电误点亮。 */
-    uapi_pin_set_mode((uint8_t)MINE_RGB_LED_PIN, MINE_RGB_LED_PIN_MODE_GPIO);
-    if (uapi_gpio_set_dir(MINE_RGB_LED_PIN, GPIO_DIRECTION_OUTPUT) != ERRCODE_SUCC) {
-        osal_printk("[mine_rgb_led] gpio4 set output failed\r\n");
+    /* 1) 将 GPIO4 复用为 PWM 输出。 */
+    uapi_pin_set_mode((uint8_t)MINE_RGB_LED_PIN, MINE_RGB_LED_PIN_MODE_PWM);
+
+    /* 2) 初始化 PWM 并绑定中断回调。 */
+    if (uapi_pwm_init() != ERRCODE_SUCC) {
+        osal_printk("[mine_rgb_led] pwm init failed\r\n");
         return ERRCODE_FAIL;
     }
-    mine_rgb_gpio_low();
-
-    /*
-     * 2) 通过TCXO微秒计时窗口校准 cycles/us。
-     *    这样在不同频点下都能用cycle等待产生稳定子微秒脉冲。
-     */
-    us_start = uapi_tcxo_get_us();
-    cycle_start = mine_rgb_read_cycle32();
-    uapi_tcxo_delay_us(MINE_RGB_CALIBRATION_US);
-    us_end = uapi_tcxo_get_us();
-    cycle_end = mine_rgb_read_cycle32();
-
-    delta_us = us_end - us_start;
-    delta_cycle = (uint32_t)(cycle_end - cycle_start);
-    if (delta_us == 0U || delta_cycle == 0U) {
-        osal_printk("[mine_rgb_led] calib invalid, us=%llu cycle=%u\r\n",
-                    (unsigned long long)delta_us,
-                    (unsigned int)delta_cycle);
+    (void)uapi_pwm_unregister_interrupt(MINE_WS2812_PWM_CHANNEL);
+    if (uapi_pwm_register_interrupt(MINE_WS2812_PWM_CHANNEL, mine_ws2812_pwm_callback) != ERRCODE_SUCC) {
+        osal_printk("[mine_rgb_led] pwm register irq failed\r\n");
         return ERRCODE_FAIL;
     }
 
-    g_cycles_per_us = (uint32_t)((uint64_t)delta_cycle / delta_us);
-    if (g_cycles_per_us == 0U) {
-        osal_printk("[mine_rgb_led] calib fail, cycles_per_us=0 (us=%llu cycle=%u)\r\n",
-                    (unsigned long long)delta_us,
-                    (unsigned int)delta_cycle);
+    /* 3) 配置独立 PWM 分组，后续按 bit 启动 group 输出。 */
+    (void)uapi_pwm_clear_group(MINE_WS2812_PWM_GROUP);
+    if (uapi_pwm_set_group(MINE_WS2812_PWM_GROUP, &channel_id, 1U) != ERRCODE_SUCC) {
+        osal_printk("[mine_rgb_led] pwm set group failed\r\n");
         return ERRCODE_FAIL;
     }
 
-    osal_printk("[mine_rgb_led] calib ok, cycles_per_us=%u\r\n", (unsigned int)g_cycles_per_us);
+    g_mine_ws2812_inited = true;
 
-    /* 3) 上电后先送一次复位码，确保像素从干净状态开始。 */
+    /* 4) 上电后先送一次复位码，确保像素从干净状态开始。 */
     uapi_tcxo_delay_us(MINE_RGB_RESET_US);
+    osal_printk("[mine_rgb_led] pwm init ok, ch=%u group=%u\r\n",
+                (unsigned int)MINE_WS2812_PWM_CHANNEL,
+                (unsigned int)MINE_WS2812_PWM_GROUP);
     return ERRCODE_SUCC;
 }
 
@@ -250,8 +226,10 @@ void mine_rgb_led_off(void)
 
 void WS2812_rest(void)
 {
-    /* 复位码要求低电平保持不小于 100us。 */
-    mine_rgb_gpio_low();
+    /* 关闭 group 后 PWM 输出保持低电平，再等待复位时间。 */
+    if (g_mine_ws2812_inited) {
+        (void)uapi_pwm_stop_group(MINE_WS2812_PWM_GROUP);
+    }
     uapi_tcxo_delay_us(MINE_RGB_RESET_US);
 }
 
@@ -284,6 +262,10 @@ void WS2812_Show(uint8_t Num)
 {
     uint32_t led_count;
 
+    if (!g_mine_ws2812_inited) {
+        return;
+    }
+
     led_count = (uint32_t)Num + 1U;
     if (led_count > Led_Num) {
         led_count = Led_Num;
@@ -297,7 +279,7 @@ void WS2812_Show(uint8_t Num)
 
 void WS2812_Init(void)
 {
-    if (g_cycles_per_us == 0U) {
+    if (!g_mine_ws2812_inited) {
         if (mine_rgb_led_init() != ERRCODE_SUCC) {
             osal_printk("[mine_rgb_led] WS2812_Init failed\r\n");
             return;
