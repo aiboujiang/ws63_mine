@@ -34,6 +34,9 @@ static void *mine_rgb_led_task(const char *arg)
         osal_msleep(MINE_RGB_LED_INIT_RETRY_MS);
     }
 
+    /* 兼容 STM32 风格初始化流程：先全灯清零并发送复位帧。 */
+    WS2812_Init();
+
     osal_printk("[mine_rgb_led] init ok, DI=GPIO4\r\n");
 
     while (1) {
