@@ -14,20 +14,21 @@
 #include "platform_core.h"
 
 /*
- * 根据 WS2812B 常用时序取中间保守值：
- * T0H/T0L 约 0.35us/0.90us，T1H/T1L 约 0.70us/0.60us。
- * 这样可以提高不同批次灯珠对时序抖动的容忍度。
+ * 根据 mine/lib/RGB_LED.pdf 的“数据传输定义”与注释门限选取时序：
+ * 1) 表格范围：Tin0h(0.20~0.35us)、Tin1h(0.55~1.2us)、T0L(0.55~1.2us)、T1L(0.2~0.35us)；
+ * 2) 注释门限：高电平 200~410ns 识别为“0”，640~1000ns 识别为“1”。
+ * 这里取 T0H=300ns、T1H=700ns，可同时满足两组约束并留出抖动余量。
  */
 #define MINE_RGB_LED_PIN               GPIO_04
 #define MINE_RGB_LED_PIN_MODE_GPIO     0
 
-#define MINE_RGB_T0H_NS                350U
+#define MINE_RGB_T0H_NS                300U
 #define MINE_RGB_T0L_NS                900U
 #define MINE_RGB_T1H_NS                700U
-#define MINE_RGB_T1L_NS                600U
+#define MINE_RGB_T1L_NS                300U
 
-/* 帧间复位拉低时间加大到 300us，兼容性更稳。 */
-#define MINE_RGB_RESET_US              300U
+/* PDF 注释给出 reset 最小 100us，这里取 120us 留出裕量。 */
+#define MINE_RGB_RESET_US              120U
 
 /* GPIO4 位于 channel0/group0/pin4，对应 data_set/data_clr 的 bit4。 */
 #define MINE_RGB_GPIO_DATA_SET_ADDR    (GPIO_CHANNEL_0_BASE_ADDR + 0x30U)
@@ -182,7 +183,8 @@ void mine_rgb_led_set_rgb(uint8_t r, uint8_t g, uint8_t b)
 
     /*
      * WS2812B为GRB顺序且对时序敏感。
-     * 发送期间关闭中断，避免被抢占打断导致该帧被误判为RESET。
+        * PDF 注释要求：一帧传输中断时间不要超过 35us，否则可能被误判为 RESET。
+        * 因此发送 24bit 期间关闭中断，避免被抢占打断。
      */
     irq_state = osal_irq_lock();
     mine_rgb_send_byte(g);
