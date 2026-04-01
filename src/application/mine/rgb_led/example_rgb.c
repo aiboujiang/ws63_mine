@@ -273,7 +273,6 @@ static errcode_t mine_rgb_pwm_init(void)
 
     (void)uapi_pin_set_mode(MINE_RGB_PWM_PIN, MINE_RGB_PWM_PIN_MODE);
 
-    uapi_pwm_deinit();
     ret = uapi_pwm_init();
     if (ret != ERRCODE_SUCC) {
         osal_printk("[mine_rgb_led] pwm init failed, ret=%d\r\n", (int)ret);
@@ -343,12 +342,12 @@ static void *mine_rgb_pwm_task(const char *arg)
     osal_printk("[mine_rgb_led] pwm backend: v150(single channel mode)\r\n");
 #endif
 
+    /* 先延时再初始化 PWM，避免在系统射频/校准窗口提前触碰 PWM 外设。 */
+    mine_rgb_task_delay_ms(MINE_RGB_START_DELAY_MS);
+
     if (mine_rgb_pwm_init() != ERRCODE_SUCC) {
         return NULL;
     }
-
-    /* 启动后延时，避开系统射频/校准高风险窗口。 */
-    mine_rgb_task_delay_ms(MINE_RGB_START_DELAY_MS);
 
     while (1) {
         (void)uapi_watchdog_kick();
