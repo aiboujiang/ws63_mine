@@ -7,6 +7,7 @@
 
 #include "gpio.h"
 #include "pinctrl.h"
+#include "soc_osal.h"
 #include "tcxo.h"
 #include "interrupt/osal_interrupt.h"
 
@@ -108,6 +109,7 @@ errcode_t mine_rgb_led_init(void)
     /* 1) GPIO4切为普通GPIO输出，默认拉低，防止上电误点亮。 */
     uapi_pin_set_mode((uint8_t)MINE_RGB_LED_PIN, MINE_RGB_LED_PIN_MODE_GPIO);
     if (uapi_gpio_set_dir(MINE_RGB_LED_PIN, GPIO_DIRECTION_OUTPUT) != ERRCODE_SUCC) {
+        osal_printk("[mine_rgb_led] gpio4 set output failed\r\n");
         return ERRCODE_FAIL;
     }
     (void)uapi_gpio_set_val(MINE_RGB_LED_PIN, GPIO_LEVEL_LOW);
@@ -125,13 +127,21 @@ errcode_t mine_rgb_led_init(void)
     delta_us = us_end - us_start;
     delta_cycle = (uint32_t)(cycle_end - cycle_start);
     if (delta_us == 0U || delta_cycle == 0U) {
+        osal_printk("[mine_rgb_led] calib invalid, us=%llu cycle=%u\r\n",
+                    (unsigned long long)delta_us,
+                    (unsigned int)delta_cycle);
         return ERRCODE_FAIL;
     }
 
     g_cycles_per_us = (uint32_t)((uint64_t)delta_cycle / delta_us);
     if (g_cycles_per_us == 0U) {
+        osal_printk("[mine_rgb_led] calib fail, cycles_per_us=0 (us=%llu cycle=%u)\r\n",
+                    (unsigned long long)delta_us,
+                    (unsigned int)delta_cycle);
         return ERRCODE_FAIL;
     }
+
+    osal_printk("[mine_rgb_led] calib ok, cycles_per_us=%u\r\n", (unsigned int)g_cycles_per_us);
 
     /* 3) 上电后先送一次复位码，确保像素从干净状态开始。 */
     uapi_tcxo_delay_us(MINE_RGB_RESET_US);
