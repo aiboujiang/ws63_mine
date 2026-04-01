@@ -10,26 +10,50 @@
 #include "soc_osal.h"
 #include "tcxo.h"
 #include "interrupt/osal_interrupt.h"
+#include "common_def.h"
+#include "platform_core.h"
 
 /*
- * 根据《RGB_LED.pdf》中的典型值配置时序：
- * Tin0h/Tin1h/T0L/T1L 典型约为 0.295us/0.595us/0.595us/0.295us。
+ * 根据 WS2812B 常用时序取中间保守值：
+ * T0H/T0L 约 0.35us/0.90us，T1H/T1L 约 0.70us/0.60us。
+ * 这样可以提高不同批次灯珠对时序抖动的容忍度。
  */
 #define MINE_RGB_LED_PIN               GPIO_04
 #define MINE_RGB_LED_PIN_MODE_GPIO     0
 
-#define MINE_RGB_T0H_NS                295U
-#define MINE_RGB_T0L_NS                595U
-#define MINE_RGB_T1H_NS                595U
-#define MINE_RGB_T1L_NS                295U
+#define MINE_RGB_T0H_NS                350U
+#define MINE_RGB_T0L_NS                900U
+#define MINE_RGB_T1H_NS                700U
+#define MINE_RGB_T1L_NS                600U
 
-/* 数据手册给出 RESET 低电平典型 80us/建议最小 100us，取更保守值。 */
-#define MINE_RGB_RESET_US              120U
+/* 帧间复位拉低时间加大到 300us，兼容性更稳。 */
+#define MINE_RGB_RESET_US              300U
+
+/* GPIO4 位于 channel0/group0/pin4，对应 data_set/data_clr 的 bit4。 */
+#define MINE_RGB_GPIO_DATA_SET_ADDR    (GPIO_CHANNEL_0_BASE_ADDR + 0x30U)
+#define MINE_RGB_GPIO_DATA_CLR_ADDR    (GPIO_CHANNEL_0_BASE_ADDR + 0x34U)
+#define MINE_RGB_GPIO4_MASK            (1U << 4U)
 
 /* 校准周期窗口，窗口越长越稳但初始化耗时越大。 */
 #define MINE_RGB_CALIBRATION_US        4000U
 
 static uint32_t g_cycles_per_us = 0;
+
+/**
+ * @brief GPIO4 直接拉高（寄存器快路径）。
+ */
+static inline void mine_rgb_gpio_high(void)
+{
+    uapi_reg_write32(MINE_RGB_GPIO_DATA_SET_ADDR, MINE_RGB_GPIO4_MASK);
+}
+
+/**
+ * @brief GPIO4 直接拉低（寄存器快路径）。
+ */
+static inline void mine_rgb_gpio_low(void)
+{
+    uapi_reg_write32(MINE_RGB_GPIO_DATA_CLR_ADDR, MINE_RGB_GPIO4_MASK);
+}
 
 /**
  * @brief 读取当前CPU cycle计数。
@@ -78,9 +102,9 @@ static inline void mine_rgb_send_bit(uint8_t bit_val)
     const uint32_t high_cycles = bit_val ? mine_rgb_ns_to_cycles(MINE_RGB_T1H_NS) : mine_rgb_ns_to_cycles(MINE_RGB_T0H_NS);
     const uint32_t low_cycles = bit_val ? mine_rgb_ns_to_cycles(MINE_RGB_T1L_NS) : mine_rgb_ns_to_cycles(MINE_RGB_T0L_NS);
 
-    uapi_gpio_set_val(MINE_RGB_LED_PIN, GPIO_LEVEL_HIGH);
+    mine_rgb_gpio_high();
     mine_rgb_wait_cycles(high_cycles);
-    uapi_gpio_set_val(MINE_RGB_LED_PIN, GPIO_LEVEL_LOW);
+    mine_rgb_gpio_low();
     mine_rgb_wait_cycles(low_cycles);
 }
 
@@ -112,7 +136,7 @@ errcode_t mine_rgb_led_init(void)
         osal_printk("[mine_rgb_led] gpio4 set output failed\r\n");
         return ERRCODE_FAIL;
     }
-    (void)uapi_gpio_set_val(MINE_RGB_LED_PIN, GPIO_LEVEL_LOW);
+    mine_rgb_gpio_low();
 
     /*
      * 2) 通过TCXO微秒计时窗口校准 cycles/us。
