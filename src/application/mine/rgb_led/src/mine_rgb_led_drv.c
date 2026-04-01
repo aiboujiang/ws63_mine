@@ -183,8 +183,8 @@ void mine_rgb_led_set_rgb(uint8_t r, uint8_t g, uint8_t b)
 
     /*
      * WS2812B为GRB顺序且对时序敏感。
-        * PDF 注释要求：一帧传输中断时间不要超过 35us，否则可能被误判为 RESET。
-        * 因此发送 24bit 期间关闭中断，避免被抢占打断。
+     * PDF 注释要求：一帧传输中断时间不要超过 35us，否则可能被误判为 RESET。
+     * 因此发送 24bit 期间关闭中断，避免被抢占打断。
      */
     irq_state = osal_irq_lock();
     mine_rgb_send_byte(g);
