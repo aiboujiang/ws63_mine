@@ -27,6 +27,7 @@
 #define MINE_RGB_STEP_HOLD_MS         500U
 #define MINE_RGB_GAP_MS               10U
 #define MINE_RGB_SEND_TIMEOUT_US      3000U
+#define MINE_RGB_START_DELAY_MS       30000U
 
 #define MINE_WS2812_BITS_PER_LED      24U
 #define MINE_WS2812_RESET_SLOTS       84U
@@ -48,6 +49,7 @@ static pwm_config_t g_ws2812_frame[MINE_WS2812_FRAME_SLOTS];
 static volatile uint16_t g_ws2812_next_idx = 0;
 static volatile uint16_t g_ws2812_frame_len = 0;
 static volatile bool g_ws2812_frame_done = false;
+static bool g_ws2812_session_ready = false;
 static uint32_t g_ws2812_total_ticks = 0;
 static uint32_t g_ws2812_t0h_ticks = 0;
 static uint32_t g_ws2812_t1h_ticks = 0;
@@ -133,10 +135,8 @@ static errcode_t mine_rgb_ws2812_cb(uint8_t channel)
                                       MINE_RGB_PWM_CHANNEL,
                                       &g_ws2812_frame[g_ws2812_next_idx]);
         g_ws2812_next_idx++;
-        if (g_ws2812_next_idx >= g_ws2812_frame_len) {
-            g_ws2812_frame_done = true;
-        }
     } else {
+        /* 仅在最后一个配置周期实际完成后才置完成，避免提前停止导致尾码不完整。 */
         g_ws2812_frame_done = true;
     }
     return ERRCODE_SUCC;
@@ -207,37 +207,26 @@ static errcode_t mine_rgb_ws2812_send_color(uint8_t r, uint8_t g, uint8_t b)
 {
     errcode_t ret;
 
+    if (!g_ws2812_session_ready) {
+        return ERRCODE_PWM_NOT_INIT;
+    }
+
     mine_rgb_ws2812_build_frame(r, g, b);
-
-    ret = uapi_pwm_open(MINE_RGB_PWM_CHANNEL, &g_ws2812_frame[0]);
-    if (ret != ERRCODE_SUCC) {
-        osal_printk("[mine_rgb_led] ws open failed, ret=%d\r\n", (int)ret);
-        return ret;
-    }
-
-    ret = uapi_pwm_register_interrupt(MINE_RGB_PWM_CHANNEL, mine_rgb_ws2812_cb);
-    if (ret != ERRCODE_SUCC) {
-        osal_printk("[mine_rgb_led] ws irq reg failed, ret=%d\r\n", (int)ret);
-        (void)uapi_pwm_close(MINE_RGB_PWM_CHANNEL);
-        return ret;
-    }
 
     g_ws2812_frame_len = MINE_WS2812_FRAME_SLOTS;
     g_ws2812_next_idx = 1U;
     g_ws2812_frame_done = false;
 
-    ret = uapi_pwm_config_preload(MINE_RGB_PWM_GROUP, MINE_RGB_PWM_CHANNEL, &g_ws2812_frame[1]);
+    /* 先预装首个周期，回调里再按序补齐后续周期。 */
+    ret = uapi_pwm_config_preload(MINE_RGB_PWM_GROUP, MINE_RGB_PWM_CHANNEL, &g_ws2812_frame[0]);
     if (ret != ERRCODE_SUCC) {
-        osal_printk("[mine_rgb_led] ws preload[1] failed, ret=%d\r\n", (int)ret);
-        (void)uapi_pwm_close(MINE_RGB_PWM_CHANNEL);
+        osal_printk("[mine_rgb_led] ws preload[0] failed, ret=%d\r\n", (int)ret);
         return ret;
     }
-    g_ws2812_next_idx = 2U;
 
     ret = mine_rgb_start_output();
     if (ret != ERRCODE_SUCC) {
         osal_printk("[mine_rgb_led] ws start failed, ret=%d\r\n", (int)ret);
-        (void)uapi_pwm_close(MINE_RGB_PWM_CHANNEL);
         return ret;
     }
 
@@ -255,7 +244,6 @@ static errcode_t mine_rgb_ws2812_send_color(uint8_t r, uint8_t g, uint8_t b)
 
     uapi_tcxo_delay_us(2);
     mine_rgb_stop_output();
-    (void)uapi_pwm_close(MINE_RGB_PWM_CHANNEL);
 
     return (wait_us > MINE_RGB_SEND_TIMEOUT_US) ? ERRCODE_FAIL : ERRCODE_SUCC;
 }
@@ -278,8 +266,17 @@ static errcode_t mine_rgb_pwm_init(void)
     }
 
 #if defined(CONFIG_PWM_USING_V151)
+    pwm_config_t idle_cfg = {
+        .low_time = 1,
+        .high_time = 1,
+        .offset_time = 0,
+        .cycles = 1,
+        .repeat = false
+    };
+
     {
         uint8_t channel_set = MINE_RGB_PWM_CHANNEL;
+
         (void)uapi_pwm_clear_group(MINE_RGB_PWM_GROUP);
         ret = uapi_pwm_set_group(MINE_RGB_PWM_GROUP, &channel_set, 1);
         if (ret != ERRCODE_SUCC) {
@@ -293,6 +290,26 @@ static errcode_t mine_rgb_pwm_init(void)
         osal_printk("[mine_rgb_led] ws tick calc failed, ret=%d\r\n", (int)ret);
         return ret;
     }
+
+    if (g_ws2812_total_ticks > 2U) {
+        idle_cfg.low_time = g_ws2812_total_ticks - 1U;
+        idle_cfg.high_time = 1U;
+    }
+
+    ret = uapi_pwm_open(MINE_RGB_PWM_CHANNEL, &idle_cfg);
+    if (ret != ERRCODE_SUCC) {
+        osal_printk("[mine_rgb_led] ws init open failed, ret=%d\r\n", (int)ret);
+        return ret;
+    }
+
+    ret = uapi_pwm_register_interrupt(MINE_RGB_PWM_CHANNEL, mine_rgb_ws2812_cb);
+    if (ret != ERRCODE_SUCC) {
+        osal_printk("[mine_rgb_led] ws init irq reg failed, ret=%d\r\n", (int)ret);
+        (void)uapi_pwm_close(MINE_RGB_PWM_CHANNEL);
+        return ret;
+    }
+
+    g_ws2812_session_ready = true;
 #endif
 
     return ERRCODE_SUCC;
@@ -314,6 +331,9 @@ static void *mine_rgb_pwm_task(const char *arg)
     if (mine_rgb_pwm_init() != ERRCODE_SUCC) {
         return NULL;
     }
+
+    /* 启动后延时，避开系统射频/校准高风险窗口。 */
+    uapi_tcxo_delay_ms(MINE_RGB_START_DELAY_MS);
 
     while (1) {
         (void)uapi_watchdog_kick();
