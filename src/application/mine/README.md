@@ -239,14 +239,14 @@ ws63_final/
 3. 硬件连接：
    - 仅支持单颗灯珠，`DI -> GPIO4`，`DO` 悬空。
 4. 时序来源：
-   - 依据 `application/mine/RGB_LED.pdf` 抽取的 `WS2812B` 兼容时序实现。
+   - 依据 `application/mine/lib/RGB_LED.pdf` 抽取的 `WS2812B` 兼容时序实现。
    - 按 `GRB` 顺序发送 24bit，帧尾发送复位低电平。
 5. 示例行为：
    - 启动后循环显示：红 -> 绿 -> 蓝 -> 白 -> 灭灯（每步 500ms）。
 6. 关键实现：
-   - 使用 `GPIO4` bit-bang 单线协议。
-   - 通过 `TCXO` 微秒窗口校准 `cycles/us`，并结合 `cycle` 计数生成子微秒脉宽。
-   - 发送 24bit 期间关闭中断，避免被抢占导致帧中断被误判为 RESET。
+   - 使用 `GPIO4` 复用 `PWM4` 输出单线波形。
+   - 通过 `PWM + DMA` 实现帧准备和发送：DMA 负责帧缓冲搬运，PWM 负责时序输出。
+   - 按手册时序窗口生成 `0/1` 码高低电平占空比，并在帧尾追加复位低电平窗口。
 
 ## 11. 快速联调步骤
 
@@ -288,6 +288,18 @@ ws63_final/
 3. 变更记录使用时间倒序，便于追溯。
 
 ## 14. 变更记录
+
+### 2026-04-01
+
+1. 新增 `application/mine/rgb_led`：`WS2812` 单灯 `PWM4 + DMA` 示例。
+2. 固定连接方式：`GPIO4` 复用模式 `1` 输出 `PWM4`，灯珠 `DI -> GPIO4`。
+3. 发送顺序遵循 `GRB`（高位先发），帧尾附加低电平复位时间。
+4. 文档来源统一到 `application/mine/lib/RGB_LED.pdf`。
+5. 编译验证：在 `src` 目录执行 `python3 build.py -c ws63-liteos-app`，结果见本次任务执行记录。
+6. 运行稳定性修复：`rgb_led` 任务增加启动延迟（默认 30000ms），避开 `cali_offline_cali_entry` 射频校准窗口，降低与 `wifi_frw` 校准链路冲突风险。
+7. 发送链路优化：PWM 通道改为一次初始化复用，运行期仅执行 preload + start/stop，避免每帧 open/close + IRQ free 引入抖动。
+8. 适配 `application/mine/rgb_led/example_rgb.c`（外部板卡已验证 demo）到 WS63 API：修正 PWM 分组接口用法、补充错误码日志、保持 GPIO4(PWM4) 两种占空比循环输出行为。
+9. 在 `PWM V151` 下新增 WS2812 颜色循环显示：红 -> 绿 -> 蓝 -> 白 -> 灭；`PWM V150` 保留原始占空比波形循环作为兼容回退。
 
 ### 2026-03-31
 

@@ -1,19 +1,17 @@
 #===============================================================================
-# @brief    CMake file for mine RGB LED demo
+# @brief    CMake file for mine rgb_led demo
 #===============================================================================
 
 set(COMPONENT_NAME "mine_rgb_led")
 
 set(SOURCES
-    "src/mine_rgb_led_drv.c"
-    "src/mine_rgb_led_demo.c"
+    "example_rgb.c"
 )
 
 set(PUBLIC_HEADER
 )
 
 set(PRIVATE_HEADER
-    "inc"
 )
 
 set(PRIVATE_DEFINES
