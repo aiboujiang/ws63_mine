@@ -80,6 +80,21 @@ static void mine_rgb_stop_output(void)
 }
 
 /**
+ * @brief 任务态延时：分片休眠并喂狗，避免长忙等触发看门狗复位。
+ */
+static void mine_rgb_task_delay_ms(uint32_t delay_ms)
+{
+    const uint32_t slice_ms = 20U;
+
+    while (delay_ms > 0U) {
+        uint32_t curr_ms = (delay_ms > slice_ms) ? slice_ms : delay_ms;
+        (void)uapi_watchdog_kick();
+        (void)osal_msleep(curr_ms);
+        delay_ms -= curr_ms;
+    }
+}
+
+/**
  * @brief 将输出脚切到 GPIO 低电平，形成两段 PWM 之间的间隙。
  */
 #if !defined(CONFIG_PWM_USING_V151)
@@ -89,7 +104,7 @@ static void mine_rgb_force_low_gap(uint32_t hold_ms)
     (void)uapi_pin_set_mode(MINE_RGB_PWM_PIN, PIN_MODE_0);
     (void)uapi_gpio_set_dir(MINE_RGB_PWM_PIN, GPIO_DIRECTION_OUTPUT);
     (void)uapi_gpio_set_val(MINE_RGB_PWM_PIN, GPIO_LEVEL_LOW);
-    uapi_tcxo_delay_ms(hold_ms);
+    mine_rgb_task_delay_ms(hold_ms);
     (void)uapi_pin_set_mode(MINE_RGB_PWM_PIN, MINE_RGB_PWM_PIN_MODE);
 }
 
@@ -333,7 +348,7 @@ static void *mine_rgb_pwm_task(const char *arg)
     }
 
     /* 启动后延时，避开系统射频/校准高风险窗口。 */
-    uapi_tcxo_delay_ms(MINE_RGB_START_DELAY_MS);
+    mine_rgb_task_delay_ms(MINE_RGB_START_DELAY_MS);
 
     while (1) {
         (void)uapi_watchdog_kick();
@@ -353,7 +368,7 @@ static void *mine_rgb_pwm_task(const char *arg)
             } else {
                 osal_printk("[mine_rgb_led] color step=%u failed\r\n", (unsigned int)i);
             }
-            uapi_tcxo_delay_ms(MINE_RGB_STEP_HOLD_MS);
+            mine_rgb_task_delay_ms(MINE_RGB_STEP_HOLD_MS);
         }
 #else
         if (mine_rgb_start_pattern(MINE_RGB_PATTERN_A_HIGH, MINE_RGB_PATTERN_A_LOW) == ERRCODE_SUCC) {
@@ -361,7 +376,7 @@ static void *mine_rgb_pwm_task(const char *arg)
                         (unsigned int)MINE_RGB_PATTERN_A_HIGH,
                         (unsigned int)MINE_RGB_PATTERN_A_LOW);
         }
-        uapi_tcxo_delay_ms(MINE_RGB_STEP_HOLD_MS);
+        mine_rgb_task_delay_ms(MINE_RGB_STEP_HOLD_MS);
 
         mine_rgb_force_low_gap(MINE_RGB_GAP_MS);
 
@@ -370,7 +385,7 @@ static void *mine_rgb_pwm_task(const char *arg)
                         (unsigned int)MINE_RGB_PATTERN_B_HIGH,
                         (unsigned int)MINE_RGB_PATTERN_B_LOW);
         }
-        uapi_tcxo_delay_ms(MINE_RGB_STEP_HOLD_MS);
+        mine_rgb_task_delay_ms(MINE_RGB_STEP_HOLD_MS);
 
         mine_rgb_force_low_gap(MINE_RGB_GAP_MS);
 #endif
