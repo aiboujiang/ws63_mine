@@ -23,6 +23,12 @@
 #define WS2812_GPIO_PIN                  GPIO_04
 #define WS2812_GPIO_MODE                 PIN_MODE_2
 
+/*
+ * 启动保护窗口：避开 RF 校准阶段（cali_offline_cali_entry）与 RGB 软时序并发。
+ * 该值来自 application/mine/README.md 的稳定性建议默认值。
+ */
+#define WS2812_STARTUP_GUARD_MS          30000U
+
 #define WS2812_T0H_NS                    400U
 #define WS2812_T0L_NS                    850U
 #define WS2812_T1H_NS                    800U
@@ -43,6 +49,11 @@ static uint32_t g_t0h_count = 16U;
 static uint32_t g_t0l_count = 34U;
 static uint32_t g_t1h_count = 32U;
 static uint32_t g_t1l_count = 18U;
+static uint32_t g_gpio_edge_overhead_count = 6U;
+static uint32_t g_t0h_delay_count = 10U;
+static uint32_t g_t0l_delay_count = 28U;
+static uint32_t g_t1h_delay_count = 26U;
+static uint32_t g_t1l_delay_count = 12U;
 
 static const ws2812_color_t g_color_table[] = {
     {255U,   0U,   0U, "RED"},
@@ -84,6 +95,51 @@ static uint32_t ws2812_ns_to_count(uint32_t time_ns)
 }
 
 /**
+ * @brief 根据 GPIO 翻转调用开销回扣延时计数，避免脉宽整体被拉长。
+ *
+ * @param target_count 目标脉宽对应的计数。
+ * @return uint32_t 实际用于 delay_count 的计数，最小返回 1。
+ */
+static uint32_t ws2812_compensate_delay_count(uint32_t target_count)
+{
+    if (target_count > g_gpio_edge_overhead_count) {
+        return target_count - g_gpio_edge_overhead_count;
+    }
+    return 1U;
+}
+
+/**
+ * @brief 测量 GPIO 翻转 API 的平均开销，供软时序补偿使用。
+ */
+static void ws2812_calibrate_gpio_overhead(void)
+{
+    const uint32_t sample_round = 16U;
+    uint64_t total_call_count = 0U;
+    unsigned int irq_status;
+    uint32_t i;
+
+    irq_status = osal_irq_lock();
+    for (i = 0U; i < sample_round; i++) {
+        uint64_t t0 = uapi_systick_get_count();
+        (void)uapi_gpio_set_val(WS2812_GPIO_PIN, GPIO_LEVEL_HIGH);
+        uint64_t t1 = uapi_systick_get_count();
+        (void)uapi_gpio_set_val(WS2812_GPIO_PIN, GPIO_LEVEL_LOW);
+        uint64_t t2 = uapi_systick_get_count();
+
+        total_call_count += (t1 - t0);
+        total_call_count += (t2 - t1);
+    }
+    osal_irq_restore(irq_status);
+
+    if (total_call_count > 0U) {
+        uint32_t avg = (uint32_t)(total_call_count / (uint64_t)(sample_round * 2U));
+        if (avg > 0U) {
+            g_gpio_edge_overhead_count = avg;
+        }
+    }
+}
+
+/**
  * @brief 运行期测量 Systick 每微秒计数，避免硬编码时钟误差。
  */
 static void ws2812_calibrate_systick_count(void)
@@ -117,12 +173,25 @@ static void ws2812_calibrate_systick_count(void)
     g_t1h_count = ws2812_ns_to_count(WS2812_T1H_NS);
     g_t1l_count = ws2812_ns_to_count(WS2812_T1L_NS);
 
-    osal_printk("[mine_rgb_led] systick/us=%u, T0H=%u T0L=%u T1H=%u T1L=%u\r\n",
+    ws2812_calibrate_gpio_overhead();
+    g_t0h_delay_count = ws2812_compensate_delay_count(g_t0h_count);
+    g_t0l_delay_count = ws2812_compensate_delay_count(g_t0l_count);
+    g_t1h_delay_count = ws2812_compensate_delay_count(g_t1h_count);
+    g_t1l_delay_count = ws2812_compensate_delay_count(g_t1l_count);
+
+    osal_printk("[mine_rgb_led] systick/us=%u, gpio_ovh=%u\r\n",
                 (unsigned int)g_systick_count_per_us,
+                (unsigned int)g_gpio_edge_overhead_count);
+    osal_printk("[mine_rgb_led] target T0H/T0L/T1H/T1L=%u/%u/%u/%u\r\n",
                 (unsigned int)g_t0h_count,
                 (unsigned int)g_t0l_count,
                 (unsigned int)g_t1h_count,
                 (unsigned int)g_t1l_count);
+    osal_printk("[mine_rgb_led] delay  T0H/T0L/T1H/T1L=%u/%u/%u/%u\r\n",
+                (unsigned int)g_t0h_delay_count,
+                (unsigned int)g_t0l_delay_count,
+                (unsigned int)g_t1h_delay_count,
+                (unsigned int)g_t1l_delay_count);
 }
 
 /**
@@ -134,14 +203,14 @@ static void ws2812_write_bit(uint8_t bit_val)
 {
     if (bit_val == 0U) {
         (void)uapi_gpio_set_val(WS2812_GPIO_PIN, GPIO_LEVEL_HIGH);
-        (void)uapi_systick_delay_count(g_t0h_count);
+        (void)uapi_systick_delay_count(g_t0h_delay_count);
         (void)uapi_gpio_set_val(WS2812_GPIO_PIN, GPIO_LEVEL_LOW);
-        (void)uapi_systick_delay_count(g_t0l_count);
+        (void)uapi_systick_delay_count(g_t0l_delay_count);
     } else {
         (void)uapi_gpio_set_val(WS2812_GPIO_PIN, GPIO_LEVEL_HIGH);
-        (void)uapi_systick_delay_count(g_t1h_count);
+        (void)uapi_systick_delay_count(g_t1h_delay_count);
         (void)uapi_gpio_set_val(WS2812_GPIO_PIN, GPIO_LEVEL_LOW);
-        (void)uapi_systick_delay_count(g_t1l_count);
+        (void)uapi_systick_delay_count(g_t1l_delay_count);
     }
 }
 
@@ -213,6 +282,11 @@ static void *ws2812_task(const char *arg)
     if (ws2812_gpio_init() != ERRCODE_SUCC) {
         return NULL;
     }
+
+    /* 先等待射频校准窗口结束，避免校准链路与 bit-bang 并发触发看门狗复位。 */
+    osal_printk("[mine_rgb_led] wait %u ms for RF cali guard\r\n",
+                (unsigned int)WS2812_STARTUP_GUARD_MS);
+    ws2812_task_delay_ms(WS2812_STARTUP_GUARD_MS);
 
     while (1) {
         const ws2812_color_t *color = &g_color_table[color_index];
