@@ -37,6 +37,7 @@
 #define WS2812_RESET_US                  120U
 
 #define WS2812_COLOR_HOLD_MS             1000U
+#define WS2812_BRIGHTNESS_PERCENT        30U
 
 typedef struct {
     uint8_t r;
@@ -60,6 +61,21 @@ static const ws2812_color_t g_color_table[] = {
     {  0U, 255U, 255U, "CYAN"},
     {255U, 255U, 255U, "WHITE"}
 };
+
+/**
+ * @brief 按百分比缩放颜色分量，用于统一亮度控制。
+ *
+ * @param value 原始颜色分量。
+ * @return uint8_t 缩放后的颜色分量。
+ */
+static uint8_t ws2812_apply_brightness(uint8_t value)
+{
+    uint32_t scaled = ((uint32_t)value * WS2812_BRIGHTNESS_PERCENT + 50U) / 100U;
+    if (scaled > 255U) {
+        scaled = 255U;
+    }
+    return (uint8_t)scaled;
+}
 
 /**
  * @brief 启动阶段的引脚保护配置：关闭上下拉并保持输入态。
@@ -243,14 +259,17 @@ static void *ws2812_task(const char *arg)
 
     while (1) {
         const ws2812_color_t *color = &g_color_table[color_index];
+        uint8_t r_out = ws2812_apply_brightness(color->r);
+        uint8_t g_out = ws2812_apply_brightness(color->g);
+        uint8_t b_out = ws2812_apply_brightness(color->b);
 
         (void)uapi_watchdog_kick();
-        ws2812_send_color(color->r, color->g, color->b);
-        osal_printk("[mine_rgb_led] color=%s R=%u G=%u B=%u\r\n",
+        ws2812_send_color(r_out, g_out, b_out);
+        osal_printk("[mine_rgb_led] color=%s R=%u G=%u B=%u (30%%)\r\n",
                     color->name,
-                    (unsigned int)color->r,
-                    (unsigned int)color->g,
-                    (unsigned int)color->b);
+                    (unsigned int)r_out,
+                    (unsigned int)g_out,
+                    (unsigned int)b_out);
 
         ws2812_task_delay_ms(WS2812_COLOR_HOLD_MS);
         color_index = (color_index + 1U) % (uint32_t)(sizeof(g_color_table) / sizeof(g_color_table[0]));
