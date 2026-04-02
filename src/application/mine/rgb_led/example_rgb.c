@@ -17,7 +17,6 @@
 #include "pwm.h"
 #include "dma.h"
 #include "tcxo.h"
-#include "systick.h"
 #include "soc_osal.h"
 #include "app_init.h"
 #include "gpio.h"
@@ -92,7 +91,7 @@ static uint32_t g_t0h_count = 0U;
 static uint32_t g_t0l_count = 0U;
 static uint32_t g_t1h_count = 0U;
 static uint32_t g_t1l_count = 0U;
-static uint32_t g_systick_count_per_1000us = 0U;
+static uint32_t g_tcxo_count_per_1000us = 0U;
 
 /**
  * @brief 将纳秒时间转换为 PWM 计数值。
@@ -153,24 +152,24 @@ static void ws2812_calibrate_timing(void)
     g_bit_cfg[1].repeat = false;
 
     /*
-     * 使用实测的 systick 计数做纳秒换算，避免依赖固定频率假设。
-     * 1000us 标定能在精度和耗时之间取得平衡。
+     * 使用实测的 TCXO 高速计数做纳秒换算。
+     * systick 在 WS63 端口是 32kHz，无法承载 WS2812 亚微秒时序。
      */
     {
-        uint64_t start_count = uapi_systick_get_count();
+        uint64_t start_count = uapi_tcxo_get_count();
         uint64_t end_count;
-        uapi_systick_delay_us(1000U);
-        end_count = uapi_systick_get_count();
+        uapi_tcxo_delay_us(1000U);
+        end_count = uapi_tcxo_get_count();
         if (end_count > start_count) {
-            g_systick_count_per_1000us = (uint32_t)(end_count - start_count);
+            g_tcxo_count_per_1000us = (uint32_t)(end_count - start_count);
         }
-        if (g_systick_count_per_1000us == 0U) {
-            g_systick_count_per_1000us = 32000U;
+        if (g_tcxo_count_per_1000us == 0U) {
+            g_tcxo_count_per_1000us = 40000U;
         }
-        g_t0h_count = (uint32_t)(((uint64_t)WS2812_T0H_NS * g_systick_count_per_1000us + 999999ULL) / 1000000ULL);
-        g_t0l_count = (uint32_t)(((uint64_t)WS2812_T0L_NS * g_systick_count_per_1000us + 999999ULL) / 1000000ULL);
-        g_t1h_count = (uint32_t)(((uint64_t)WS2812_T1H_NS * g_systick_count_per_1000us + 999999ULL) / 1000000ULL);
-        g_t1l_count = (uint32_t)(((uint64_t)WS2812_T1L_NS * g_systick_count_per_1000us + 999999ULL) / 1000000ULL);
+        g_t0h_count = (uint32_t)(((uint64_t)WS2812_T0H_NS * g_tcxo_count_per_1000us + 999999ULL) / 1000000ULL);
+        g_t0l_count = (uint32_t)(((uint64_t)WS2812_T0L_NS * g_tcxo_count_per_1000us + 999999ULL) / 1000000ULL);
+        g_t1h_count = (uint32_t)(((uint64_t)WS2812_T1H_NS * g_tcxo_count_per_1000us + 999999ULL) / 1000000ULL);
+        g_t1l_count = (uint32_t)(((uint64_t)WS2812_T1L_NS * g_tcxo_count_per_1000us + 999999ULL) / 1000000ULL);
         if (g_t0h_count == 0U) { g_t0h_count = 1U; }
         if (g_t0l_count == 0U) { g_t0l_count = 1U; }
         if (g_t1h_count == 0U) { g_t1h_count = 1U; }
@@ -183,7 +182,7 @@ static void ws2812_calibrate_timing(void)
         (unsigned int)t0l,
         (unsigned int)t1h,
         (unsigned int)t1l);
-    osal_printk("[mine_rgb_led] systick count T0H/T0L/T1H/T1L=%u/%u/%u/%u\r\n",
+    osal_printk("[mine_rgb_led] tcxo count T0H/T0L/T1H/T1L=%u/%u/%u/%u\r\n",
         (unsigned int)g_t0h_count,
         (unsigned int)g_t0l_count,
         (unsigned int)g_t1h_count,
@@ -200,7 +199,7 @@ static void ws2812_hold_reset_low(void)
     (void)uapi_pin_set_mode(WS2812_PWM_PIN, GPIO_FUNC);
     (void)uapi_gpio_set_dir(WS2812_PWM_PIN, GPIO_DIRECTION_OUTPUT);
     (void)uapi_gpio_set_val(WS2812_PWM_PIN, GPIO_LEVEL_LOW);
-    uapi_systick_delay_us(WS2812_RESET_US);
+    uapi_tcxo_delay_us(WS2812_RESET_US);
 }
 
 /**
@@ -339,6 +338,18 @@ static void ws2812_step_breath(void)
 }
 
 /**
+ * @brief 按 TCXO tick 进行忙等延时。
+ *
+ * @param ticks 需要延时的 tick 数。
+ */
+static void ws2812_tcxo_delay_ticks(uint32_t ticks)
+{
+    uint64_t target = uapi_tcxo_get_count() + (uint64_t)ticks;
+    while (uapi_tcxo_get_count() < target) {
+    }
+}
+
+/**
  * @brief 发送单个 WS2812 码元。
  *
  * @param one true 表示发送 1 码，false 表示发送 0 码。
@@ -347,16 +358,16 @@ static void ws2812_write_bit(bool one)
 {
     (void)uapi_gpio_set_val(WS2812_PWM_PIN, GPIO_LEVEL_HIGH);
     if (one) {
-        (void)uapi_systick_delay_count(g_t1h_count);
+        ws2812_tcxo_delay_ticks(g_t1h_count);
     } else {
-        (void)uapi_systick_delay_count(g_t0h_count);
+        ws2812_tcxo_delay_ticks(g_t0h_count);
     }
 
     (void)uapi_gpio_set_val(WS2812_PWM_PIN, GPIO_LEVEL_LOW);
     if (one) {
-        (void)uapi_systick_delay_count(g_t1l_count);
+        ws2812_tcxo_delay_ticks(g_t1l_count);
     } else {
-        (void)uapi_systick_delay_count(g_t0l_count);
+        ws2812_tcxo_delay_ticks(g_t0l_count);
     }
 }
 
