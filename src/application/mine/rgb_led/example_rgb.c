@@ -86,6 +86,7 @@ static volatile bool g_dma_error = false;
 static volatile bool g_pwm_sending = false;
 static volatile uint16_t g_symbol_index = 0U;
 static uint16_t g_symbol_total = 0U;
+static bool g_pwm_ready = false;
 
 static uint8_t g_pwm_group_channel = WS2812_PWM_CHANNEL;
 static uint8_t g_color_index = 0U;
@@ -340,30 +341,23 @@ static errcode_t ws2812_send_frame(void)
     uint32_t wait_us = WS2812_PWM_WAIT_US;
     errcode_t ret;
 
+    if (!g_pwm_ready) {
+        return ERRCODE_PWM_NOT_OPEN;
+    }
+
     g_symbol_index = 1U;
     g_pwm_sending = true;
 
-    ret = uapi_pwm_open(WS2812_PWM_CHANNEL, &g_frame_active[0]);
+    /* 先将首个码元预装载，再由中断回调继续推送后续码元。 */
+    ret = uapi_pwm_config_preload(WS2812_PWM_GROUP, WS2812_PWM_CHANNEL, &g_frame_active[0]);
     if (ret != ERRCODE_SUCC) {
         g_pwm_sending = false;
         return ret;
     }
 
-    /*
-     * 注意：uapi_pwm_register_interrupt 内部会检查“通道已 open”，
-     * 因此必须放在 uapi_pwm_open 之后调用。
-     */
-    ret = uapi_pwm_register_interrupt(WS2812_PWM_CHANNEL, ws2812_pwm_callback);
+    ret = uapi_pwm_start_group(WS2812_PWM_GROUP);
     if (ret != ERRCODE_SUCC) {
         g_pwm_sending = false;
-        (void)uapi_pwm_close(WS2812_PWM_CHANNEL);
-        return ret;
-    }
-
-    ret = uapi_pwm_start(WS2812_PWM_CHANNEL);
-    if (ret != ERRCODE_SUCC) {
-        g_pwm_sending = false;
-        (void)uapi_pwm_close(WS2812_PWM_CHANNEL);
         return ret;
     }
 
@@ -375,7 +369,6 @@ static errcode_t ws2812_send_frame(void)
     }
 
     (void)uapi_pwm_stop_group(WS2812_PWM_GROUP);
-    (void)uapi_pwm_close(WS2812_PWM_CHANNEL);
     ws2812_hold_reset_low();
 
     if (wait_us == 0U) {
@@ -419,6 +412,23 @@ static errcode_t ws2812_init(void)
         return ret;
     }
 
+    /*
+     * 仅在初始化阶段打开一次 PWM 通道并注册中断，
+     * 运行阶段只做 preload/start/stop，避免高频申请释放 IRQ 资源。
+     */
+    ret = uapi_pwm_open(WS2812_PWM_CHANNEL, &g_bit_cfg[0]);
+    if (ret != ERRCODE_SUCC) {
+        osal_printk("[mine_rgb_led] pwm open failed, ret=0x%x\r\n", (unsigned int)ret);
+        return ret;
+    }
+
+    ret = uapi_pwm_register_interrupt(WS2812_PWM_CHANNEL, ws2812_pwm_callback);
+    if (ret != ERRCODE_SUCC) {
+        osal_printk("[mine_rgb_led] pwm register isr failed, ret=0x%x\r\n", (unsigned int)ret);
+        (void)uapi_pwm_close(WS2812_PWM_CHANNEL);
+        return ret;
+    }
+
     ret = uapi_dma_init();
     if (ret != ERRCODE_SUCC) {
         osal_printk("[mine_rgb_led] dma init failed, ret=0x%x\r\n", (unsigned int)ret);
@@ -433,6 +443,7 @@ static errcode_t ws2812_init(void)
 
     g_pwm_clk_hz = uapi_pwm_get_frequency(WS2812_PWM_CHANNEL);
     ws2812_calibrate_timing();
+    g_pwm_ready = true;
     ws2812_hold_reset_low();
     return ERRCODE_SUCC;
 }
