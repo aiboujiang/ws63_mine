@@ -1,18 +1,3 @@
-/*
- * Copyright (c) 2024 HiSilicon Technologies CO., Ltd.
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
 #include "pinctrl.h"
 #include "gpio.h"
 #include "pwm.h"
@@ -24,12 +9,15 @@
 #define BUZZER_TASK_PRIO 24
 #define BUZZER_TASK_STACK_SIZE 0x1000
 
-/* GPIO3 在复用模式 1 下对应 PWM3。 */
-#define BUZZER_GPIO_PIN GPIO_03
+/* GPIO9 在复用模式 1 下对应 PWM1。 */
+#define BUZZER_GPIO_PIN GPIO_09
 #define BUZZER_PWM_PIN_MODE PIN_MODE_1
 #define BUZZER_GPIO_MODE HAL_PIO_FUNC_GPIO
-#define BUZZER_PWM_CHANNEL 3U
-#define BUZZER_PWM_GROUP_ID 3U
+#define BUZZER_PWM_CHANNEL 1U
+#define BUZZER_PWM_GROUP_ID 1U
+
+/* WS63 PWM v151 的计数器有效位宽限制。 */
+#define BUZZER_PWM_PERIOD_TICKS_MAX 0xFFFFU
 
 #define BUZZER_NOTE_GAP_MS 30U
 #define BUZZER_LOOP_GAP_MS 800U
@@ -84,6 +72,8 @@ static errcode_t buzzer_force_silent(void)
 static errcode_t buzzer_build_pwm_cfg(uint16_t freq_hz, pwm_config_t *cfg)
 {
     uint32_t pwm_clk_hz;
+    uint32_t min_support_freq_hz;
+    uint32_t adapted_freq_hz;
     uint32_t period_ticks;
     uint32_t high_ticks;
     uint32_t low_ticks;
@@ -97,9 +87,25 @@ static errcode_t buzzer_build_pwm_cfg(uint16_t freq_hz, pwm_config_t *cfg)
         return ERRCODE_FAIL;
     }
 
-    period_ticks = pwm_clk_hz / (uint32_t)freq_hz;
+    /*
+     * v151 对单周期计数有 16bit 上限，低频时会触发参数非法。
+     * 这里自动按 2 倍升八度，直到周期计数落入硬件可支持范围。
+     */
+    min_support_freq_hz = (pwm_clk_hz + BUZZER_PWM_PERIOD_TICKS_MAX - 1U) / BUZZER_PWM_PERIOD_TICKS_MAX;
+    adapted_freq_hz = (uint32_t)freq_hz;
+    while ((adapted_freq_hz < min_support_freq_hz) && (adapted_freq_hz <= (UINT16_MAX / 2U))) {
+        adapted_freq_hz <<= 1U;
+    }
+    if (adapted_freq_hz < min_support_freq_hz) {
+        adapted_freq_hz = min_support_freq_hz;
+    }
+
+    period_ticks = pwm_clk_hz / adapted_freq_hz;
     if (period_ticks < 2U) {
         period_ticks = 2U;
+    }
+    if (period_ticks > BUZZER_PWM_PERIOD_TICKS_MAX) {
+        period_ticks = BUZZER_PWM_PERIOD_TICKS_MAX;
     }
 
     high_ticks = period_ticks / 2U;
@@ -194,11 +200,13 @@ static errcode_t buzzer_play_note(const buzzer_note_t *note)
 
     ret = uapi_pwm_open(BUZZER_PWM_CHANNEL, &cfg);
     if (ret != ERRCODE_SUCC) {
+        osal_printk("[mine_beep] pwm open failed, ret=0x%x\r\n", (unsigned int)ret);
         return ret;
     }
 
     ret = uapi_pwm_start(BUZZER_PWM_CHANNEL);
     if (ret != ERRCODE_SUCC) {
+        osal_printk("[mine_beep] pwm start failed, ret=0x%x\r\n", (unsigned int)ret);
         (void)uapi_pwm_close(BUZZER_PWM_CHANNEL);
         return ret;
     }
@@ -229,7 +237,7 @@ static void *buzzer_task(const char *arg)
         return NULL;
     }
 
-    osal_printk("[mine_beep] start on GPIO3/PWM3 (mux1), playing tones\r\n");
+    osal_printk("[mine_beep] start on GPIO9/PWM1 (mux1), playing tones\r\n");
 
     while (1) {
         for (i = 0U; i < (uint32_t)(sizeof(g_buzzer_scale) / sizeof(g_buzzer_scale[0])); i++) {
