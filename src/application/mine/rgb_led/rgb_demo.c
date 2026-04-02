@@ -6,6 +6,7 @@
 #include "pinctrl.h"
 #include "soc_osal.h"
 #include "tcxo.h"
+#include "watchdog.h"
 
 #define RGB_LED_TASK_PRIO                24
 #define RGB_LED_TASK_STACK_SIZE          0x1000
@@ -177,7 +178,13 @@ static void *rgb_led_task(const char *arg)
     while (1) {
         for (i = 0U; i < (uint32_t)(sizeof(g_ws2812_demo_colors) / sizeof(g_ws2812_demo_colors[0])); i++) {
             ws2812_set_color(&g_ws2812_demo_colors[i]);
-            (void)uapi_tcxo_delay_ms(WS2812_DEMO_INTERVAL_MS);
+
+            /*
+             * 避免使用忙等毫秒延时占满 CPU。
+             * 采用 OS 睡眠让出调度，并在循环中喂狗，降低 NMI/看门狗复位风险。
+             */
+            (void)uapi_watchdog_kick();
+            osal_msleep(WS2812_DEMO_INTERVAL_MS);
         }
     }
 }
