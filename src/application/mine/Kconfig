@@ -41,3 +41,11 @@ config MINE_SUPPORT_RGB_LED_DEMO
         Build passive buzzer demo under application/mine/rgb_led.
         GPIO9 must be configured as mux mode 1 (PWM1 output).
         The demo loops through multiple tones by changing PWM frequency.
+
+config MINE_SUPPORT_BEEP_DEMO
+    bool "Support Mine Beep Demo (GPIO3/PWM3)."
+    default n
+    help
+        Build passive buzzer demo under application/mine/beep.
+        GPIO3 should be configured as mux mode 1 (PWM3 output).
+        The demo supports multi-tone playback with robust error handling.

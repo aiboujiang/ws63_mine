@@ -30,6 +30,10 @@ if(DEFINED CONFIG_MINE_SUPPORT_RGB_LED_DEMO)
     add_subdirectory_if_exist(rgb_led)
 endif()
 
+if(DEFINED CONFIG_MINE_SUPPORT_BEEP_DEMO)
+    add_subdirectory_if_exist(beep)
+endif()
+
 set(PRIVATE_HEADER
 )
 
