@@ -87,6 +87,23 @@ void ws63_bsp_sleep_ms(uint32_t ms);
  */
 uint32_t ws63_bsp_get_tick_ms(void);
 
+/**
+ * @brief 初始化 RGB WS2812 使用的 SPI1 输出链路。
+ *
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_bsp_rgb_spi_init(void);
+
+/**
+ * @brief 通过 RGB SPI1 链路发送编码后的 WS2812 帧数据。
+ *
+ * @param tx_buf     待发送缓冲区。
+ * @param tx_bytes   发送字节数。
+ * @param timeout_ms SPI 发送超时（毫秒）。
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_bsp_rgb_spi_write(const uint8_t *tx_buf, uint32_t tx_bytes, uint32_t timeout_ms);
+
 #ifdef __cplusplus
 #if __cplusplus
 }

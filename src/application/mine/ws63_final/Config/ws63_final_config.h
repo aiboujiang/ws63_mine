@@ -10,6 +10,7 @@
 #ifndef WS63_CONFIG_H
 #define WS63_CONFIG_H
 
+#include "platform_core.h"
 #include "uart.h"
 
 #ifdef __cplusplus
@@ -52,7 +53,7 @@ extern "C" {
 #define WS63_SUBPORT3_ENABLE    0U
 #define WS63_SUBPORT4_ENABLE    0U
 
-/* 璁惧?囩??鍙ｆ槧灏? */
+/* 子串口编号。 */
 #define ZW101_SUBPORT  1U
 #define LD2402_SUBPORT 2U
 
@@ -76,6 +77,24 @@ extern "C" {
 
 /* 调试输出节流周期。 */
 #define WS63_LOG_GAP_MS         1000U
+
+/* RGB WS2812 演示开关：0=关闭，1=开启。 */
+#define WS63_RGB_ENABLE                 1U
+
+/* WS2812 使用 SPI1 输出：GPIO1=SPI1_OUT(GPIO1 Mode3), GPIO6=SPI1_SCK(GPIO6 Mode3)。 */
+#define WS63_RGB_SPI_BUS                SPI_BUS_1
+#define WS63_RGB_DATA_PIN               GPIO_01
+#define WS63_RGB_DATA_PIN_MODE          3
+#define WS63_RGB_CLK_PIN                GPIO_06
+#define WS63_RGB_CLK_PIN_MODE           3
+
+/* WS2812 发送参数：4MHz + 5bit 编码，单 bit 约 1.25us。 */
+#define WS63_RGB_SPI_FREQ_MHZ           4U
+#define WS63_RGB_SPI_TIMEOUT_MS         0xFFFFFFFFU
+#define WS63_RGB_DEMO_INTERVAL_MS       500U
+
+/* 日志开关：调试阶段建议开启，稳定后可关闭降低串口开销。 */
+#define WS63_RGB_LOG_ENABLE             1U
 
 #ifdef __cplusplus
 #if __cplusplus
