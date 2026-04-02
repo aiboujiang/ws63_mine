@@ -5,7 +5,7 @@
 set(COMPONENT_NAME "mine_rgb_led")
 
 set(SOURCES
-    "example_rgb.c"
+    "rgb_demo.c"
 )
 
 set(PUBLIC_HEADER
