@@ -35,9 +35,9 @@ config MINE_SUPPORT_WS63_FINAL_LAYERED
         as an external expansion chip in Driver layer.
 
 config MINE_SUPPORT_RGB_LED_DEMO
-    bool "Support Mine RGB LED Demo (GPIO4 DI)."
+    bool "Support Mine PWM Buzzer Demo (GPIO9/PWM1)."
     default n
     help
-        Build single RGB LED demo under application/mine/rgb_led.
-        DI is fixed to GPIO4 (mux mode 1 = PWM4) for WS2812B timing.
-        The demo uses PWM waveform output with DMA frame preparation.
+        Build passive buzzer demo under application/mine/rgb_led.
+        GPIO9 must be configured as mux mode 1 (PWM1 output).
+        The demo loops through multiple tones by changing PWM frequency.

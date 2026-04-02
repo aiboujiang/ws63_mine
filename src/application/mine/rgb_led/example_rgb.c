@@ -14,249 +14,244 @@
  */
 
 #include "pinctrl.h"
+#include "gpio.h"
+#include "pwm.h"
 #include "tcxo.h"
-#include "hal_gpio.h"
 #include "soc_osal.h"
 #include "app_init.h"
-#include "gpio.h"
 #include "watchdog.h"
 
-#define WS2812_TASK_PRIO 24
-#define WS2812_TASK_STACK_SIZE 0x1000
+#define BUZZER_TASK_PRIO 24
+#define BUZZER_TASK_STACK_SIZE 0x1000
 
-/* 使用 GPIO9 直接软件模拟 WS2812 单线时序。 */
-#define WS2812_GPIO_PIN 9
-#define WS2812_GPIO_MODE 0
-#define WS2812_PIN_PULL_NONE 0
+/* GPIO9 在复用模式 1 下对应 PWM1。 */
+#define BUZZER_GPIO_PIN GPIO_09
+#define BUZZER_GPIO_MODE HAL_PIO_FUNC_GPIO
+#define BUZZER_PWM_PIN_MODE PIN_MODE_1
+#define BUZZER_PWM_CHANNEL 1U
 
-/* WS2812 手册时序（mine/lib/RGB_LED.pdf）。 */
-#define WS2812_T0H_NS 295U
-#define WS2812_T0L_NS 595U
-#define WS2812_T1H_NS 595U
-#define WS2812_T1L_NS 295U
-#define WS2812_RESET_US 120U
+/* 音符之间留短间隔，避免无源蜂鸣器连续驱动时听感粘连。 */
+#define BUZZER_NOTE_GAP_MS 30U
+#define BUZZER_LOOP_GAP_MS 800U
 
-/* 固定红色：GRB 顺序 = G=0x00, R=0xFF, B=0x00。 */
-#define WS2812_RED_G 0x00U
-#define WS2812_RED_R 0xFFU
-#define WS2812_RED_B 0x00U
-
-/* 周期刷新，保证灯色稳定。 */
-#define WS2812_REFRESH_MS 100U
-
-static uint32_t g_tcxo_ticks_per_1000us = 0U;
-static uint32_t g_t0h_ticks = 0U;
-static uint32_t g_t0l_ticks = 0U;
-static uint32_t g_t1h_ticks = 0U;
-static uint32_t g_t1l_ticks = 0U;
+typedef struct {
+    uint16_t freq_hz;
+    uint16_t duration_ms;
+} buzzer_note_t;
 
 /*
- * 某些构建路径下 hal_tcxo 接口来自 ROM 函数表，
- * 这里声明最小必要结构，优先走高速 get 回调读取计数。
+ * 以 C 大调上行为例：Do-Re-Mi-Fa-So-La-Si-Do。
+ * 若需自定义音调，仅修改下表频率和时长即可。
  */
-typedef uint64_t (*ws2812_hal_tcxo_get_t)(void);
-typedef struct {
-    void *init;
-    void *deinit;
-    ws2812_hal_tcxo_get_t get;
-} ws2812_hal_tcxo_funcs_t;
-extern ws2812_hal_tcxo_funcs_t *hal_tcxo_get_funcs(void);
+static const buzzer_note_t g_buzzer_scale[] = {
+    {262U, 220U},
+    {294U, 220U},
+    {330U, 220U},
+    {349U, 220U},
+    {392U, 220U},
+    {440U, 220U},
+    {494U, 220U},
+    {523U, 420U},
+    {0U,   160U}
+};
 
 /**
- * @brief 获取高速 TCXO 计数。
- *
- * 优先使用 HAL 函数表直读计数，避免 UAPI 的锁开销影响位时序。
- *
- * @return uint64_t 当前 TCXO 计数。
- */
-static uint64_t ws2812_fast_tcxo_get(void)
-{
-    ws2812_hal_tcxo_funcs_t *funcs = hal_tcxo_get_funcs();
-    if ((funcs != NULL) && (funcs->get != NULL)) {
-        return funcs->get();
-    }
-    return uapi_tcxo_get_count();
-}
-
-/**
- * @brief 将纳秒换算为 TCXO tick。
- *
- * @param time_ns 纳秒。
- * @return uint32_t 至少为 1 tick。
- */
-static uint32_t ws2812_ns_to_ticks(uint32_t time_ns)
-{
-    uint64_t ticks = ((uint64_t)time_ns * (uint64_t)g_tcxo_ticks_per_1000us + 999999ULL) / 1000000ULL;
-    if (ticks == 0ULL) {
-        ticks = 1ULL;
-    }
-    return (uint32_t)ticks;
-}
-
-/**
- * @brief 以 TCXO tick 进行忙等延时。
- *
- * @param ticks 需要延时的 tick 数。
- */
-static void ws2812_delay_ticks(uint32_t ticks)
-{
-    uint64_t target = ws2812_fast_tcxo_get() + (uint64_t)ticks;
-    while (ws2812_fast_tcxo_get() < target) {
-    }
-}
-
-/**
- * @brief 发送一个 WS2812 bit。
- *
- * @param one true 发送“1”，false 发送“0”。
- */
-static void ws2812_write_bit(bool one)
-{
-    (void)hal_gpio_output(WS2812_GPIO_PIN, GPIO_LEVEL_HIGH);
-    if (one) {
-        ws2812_delay_ticks(g_t1h_ticks);
-    } else {
-        ws2812_delay_ticks(g_t0h_ticks);
-    }
-
-    (void)hal_gpio_output(WS2812_GPIO_PIN, GPIO_LEVEL_LOW);
-    if (one) {
-        ws2812_delay_ticks(g_t1l_ticks);
-    } else {
-        ws2812_delay_ticks(g_t0l_ticks);
-    }
-}
-
-/**
- * @brief 按高位先发发送一个字节。
- *
- * @param value 待发送字节。
- */
-static void ws2812_write_byte(uint8_t value)
-{
-    uint8_t i;
-    for (i = 0U; i < 8U; i++) {
-        ws2812_write_bit((value & 0x80U) != 0U);
-        value <<= 1U;
-    }
-}
-
-/**
- * @brief 发送固定红色（GRB）。
- */
-static void ws2812_send_red(void)
-{
-    uint32_t irq_state = osal_irq_lock();
-
-    ws2812_write_byte(WS2812_RED_G);
-    ws2812_write_byte(WS2812_RED_R);
-    ws2812_write_byte(WS2812_RED_B);
-
-    osal_irq_restore(irq_state);
-
-    /* 一帧结束后的复位低电平。 */
-    (void)hal_gpio_output(WS2812_GPIO_PIN, GPIO_LEVEL_LOW);
-    uapi_tcxo_delay_us(WS2812_RESET_US);
-}
-
-/**
- * @brief 初始化 GPIO 和时序标定。
+ * @brief 让蜂鸣器引脚回到 GPIO 低电平，确保静音。
  *
  * @return errcode_t 成功返回 ERRCODE_SUCC。
  */
-static errcode_t ws2812_gpio_init(void)
+static errcode_t buzzer_force_silent(void)
 {
     errcode_t ret;
-    uint64_t start_count;
-    uint64_t end_count;
 
-    (void)uapi_tcxo_init();
-    uapi_gpio_init();
-
-    ret = uapi_pin_set_mode(WS2812_GPIO_PIN, WS2812_GPIO_MODE);
+    ret = uapi_pin_set_mode(BUZZER_GPIO_PIN, BUZZER_GPIO_MODE);
     if (ret != ERRCODE_SUCC) {
         return ret;
     }
 
-    ret = uapi_pin_set_pull(WS2812_GPIO_PIN, WS2812_PIN_PULL_NONE);
+    ret = uapi_gpio_set_dir(BUZZER_GPIO_PIN, GPIO_DIRECTION_OUTPUT);
     if (ret != ERRCODE_SUCC) {
         return ret;
     }
 
-    ret = uapi_gpio_set_dir(WS2812_GPIO_PIN, GPIO_DIRECTION_OUTPUT);
-    if (ret != ERRCODE_SUCC) {
-        return ret;
+    return uapi_gpio_set_val(BUZZER_GPIO_PIN, GPIO_LEVEL_LOW);
+}
+
+/**
+ * @brief 根据目标频率生成 PWM 配置。
+ *
+ * @param freq_hz 目标频率（Hz）。
+ * @param cfg 输出配置。
+ * @return errcode_t 成功返回 ERRCODE_SUCC。
+ */
+static errcode_t buzzer_build_pwm_cfg(uint16_t freq_hz, pwm_config_t *cfg)
+{
+    uint32_t pwm_clk_hz;
+    uint32_t period_ticks;
+    uint32_t high_ticks;
+    uint32_t low_ticks;
+
+    if ((cfg == NULL) || (freq_hz == 0U)) {
+        return ERRCODE_INVALID_PARAM;
     }
 
-    (void)uapi_gpio_set_val(WS2812_GPIO_PIN, GPIO_LEVEL_LOW);
-
-    /* 标定 1000us 的 TCXO tick 数，用于换算亚微秒时序。 */
-    start_count = ws2812_fast_tcxo_get();
-    uapi_tcxo_delay_us(1000U);
-    end_count = ws2812_fast_tcxo_get();
-    if (end_count > start_count) {
-        g_tcxo_ticks_per_1000us = (uint32_t)(end_count - start_count);
-    }
-    if (g_tcxo_ticks_per_1000us == 0U) {
-        g_tcxo_ticks_per_1000us = 40000U;
+    pwm_clk_hz = uapi_pwm_get_frequency(BUZZER_PWM_CHANNEL);
+    if (pwm_clk_hz == 0U) {
+        return ERRCODE_FAIL;
     }
 
-    g_t0h_ticks = ws2812_ns_to_ticks(WS2812_T0H_NS);
-    g_t0l_ticks = ws2812_ns_to_ticks(WS2812_T0L_NS);
-    g_t1h_ticks = ws2812_ns_to_ticks(WS2812_T1H_NS);
-    g_t1l_ticks = ws2812_ns_to_ticks(WS2812_T1L_NS);
+    period_ticks = pwm_clk_hz / (uint32_t)freq_hz;
+    if (period_ticks < 2U) {
+        period_ticks = 2U;
+    }
 
-    osal_printk("[mine_rgb_led] gpio bitbang red start, T0H/T0L/T1H/T1L ticks=%u/%u/%u/%u\r\n",
-        (unsigned int)g_t0h_ticks,
-        (unsigned int)g_t0l_ticks,
-        (unsigned int)g_t1h_ticks,
-        (unsigned int)g_t1l_ticks);
+    high_ticks = period_ticks / 2U;
+    low_ticks = period_ticks - high_ticks;
+    if (high_ticks == 0U) {
+        high_ticks = 1U;
+    }
+    if (low_ticks == 0U) {
+        low_ticks = 1U;
+    }
+
+    cfg->low_time = low_ticks;
+    cfg->high_time = high_ticks;
+    cfg->offset_time = 0U;
+    cfg->cycles = 0U;
+    cfg->repeat = true;
     return ERRCODE_SUCC;
 }
 
 /**
- * @brief GPIO 软件模拟 WS2812 任务，仅输出红色。
+ * @brief 初始化蜂鸣器依赖外设。
+ *
+ * @return errcode_t 成功返回 ERRCODE_SUCC。
+ */
+static errcode_t buzzer_init(void)
+{
+    errcode_t ret;
+
+    (void)uapi_tcxo_init();
+    uapi_gpio_init();
+
+    ret = buzzer_force_silent();
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+
+    uapi_pwm_deinit();
+    return uapi_pwm_init();
+}
+
+/**
+ * @brief 以指定频率播放一个音符。
+ *
+ * @param note 音符描述，freq_hz=0 表示休止符。
+ * @return errcode_t 成功返回 ERRCODE_SUCC。
+ */
+static errcode_t buzzer_play_note(const buzzer_note_t *note)
+{
+    errcode_t ret;
+    pwm_config_t cfg;
+
+    if (note == NULL) {
+        return ERRCODE_INVALID_PARAM;
+    }
+
+    if (note->freq_hz == 0U) {
+        uapi_tcxo_delay_ms(note->duration_ms);
+        return ERRCODE_SUCC;
+    }
+
+    ret = buzzer_build_pwm_cfg(note->freq_hz, &cfg);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+
+    /* 每次切频前强制停止上一音符，防止通道保持旧参数。 */
+    (void)uapi_pwm_close(BUZZER_PWM_CHANNEL);
+
+    ret = uapi_pin_set_mode(BUZZER_GPIO_PIN, BUZZER_PWM_PIN_MODE);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+
+    ret = uapi_pwm_open(BUZZER_PWM_CHANNEL, &cfg);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+
+    ret = uapi_pwm_start(BUZZER_PWM_CHANNEL);
+    if (ret != ERRCODE_SUCC) {
+        (void)uapi_pwm_close(BUZZER_PWM_CHANNEL);
+        return ret;
+    }
+
+    uapi_tcxo_delay_ms(note->duration_ms);
+
+    /* 音符结束后拉低引脚，避免听到残余电平噪声。 */
+    (void)uapi_pwm_close(BUZZER_PWM_CHANNEL);
+    (void)buzzer_force_silent();
+    return ERRCODE_SUCC;
+}
+
+/**
+ * @brief 蜂鸣器任务：循环播放多音调音阶。
  *
  * @param arg 任务参数。
  * @return void* 固定返回 NULL。
  */
-static void *ws2812_task(const char *arg)
+static void *buzzer_task(const char *arg)
 {
     errcode_t ret;
+    uint32_t i;
 
     (void)arg;
 
-    ret = ws2812_gpio_init();
+    ret = buzzer_init();
     if (ret != ERRCODE_SUCC) {
-        osal_printk("[mine_rgb_led] gpio init failed, ret=0x%x\r\n", (unsigned int)ret);
+        osal_printk("[mine_buzzer] init failed, ret=0x%x\r\n", (unsigned int)ret);
         return NULL;
     }
 
+    osal_printk("[mine_buzzer] start on GPIO9/PWM1 (mux1), playing tones\r\n");
+
     while (1) {
-        ws2812_send_red();
-        (void)uapi_watchdog_kick();
-        uapi_tcxo_delay_ms(WS2812_REFRESH_MS);
+        for (i = 0U; i < (uint32_t)(sizeof(g_buzzer_scale) / sizeof(g_buzzer_scale[0])); i++) {
+            ret = buzzer_play_note(&g_buzzer_scale[i]);
+            if (ret != ERRCODE_SUCC) {
+                osal_printk("[mine_buzzer] play note failed, idx=%u, ret=0x%x\r\n",
+                    (unsigned int)i,
+                    (unsigned int)ret);
+            }
+
+            (void)uapi_watchdog_kick();
+            uapi_tcxo_delay_ms(BUZZER_NOTE_GAP_MS);
+        }
+
+        /* 每轮音阶之间停顿，便于区分循环边界。 */
+        uapi_tcxo_delay_ms(BUZZER_LOOP_GAP_MS);
     }
 }
 
 /**
- * @brief 创建 WS2812 任务。
+ * @brief 创建蜂鸣器任务。
  */
-static void ws2812_entry(void)
+static void buzzer_entry(void)
 {
     osal_task *task_handle = NULL;
 
     osal_kthread_lock();
-    task_handle = osal_kthread_create((osal_kthread_handler)ws2812_task,
+    task_handle = osal_kthread_create((osal_kthread_handler)buzzer_task,
                                       0,
-                                      "Ws2812Task",
-                                      WS2812_TASK_STACK_SIZE);
+                                      "BuzzerTask",
+                                      BUZZER_TASK_STACK_SIZE);
     if (task_handle != NULL) {
-        osal_kthread_set_priority(task_handle, WS2812_TASK_PRIO);
+        osal_kthread_set_priority(task_handle, BUZZER_TASK_PRIO);
         osal_kfree(task_handle);
     }
     osal_kthread_unlock();
 }
 
-/* Run the ws2812_entry. */
-app_run(ws2812_entry);
+/* Run the buzzer_entry. */
+app_run(buzzer_entry);
