@@ -18,7 +18,7 @@
 #include "watchdog.h"
 #include "soc_osal.h"
 
-#define WS2812_TASK_PRIO                 24
+#define WS2812_TASK_PRIO                 28
 #define WS2812_TASK_STACK_SIZE           0x1000
 
 #define WS2812_GPIO_PIN                  GPIO_04
@@ -28,7 +28,7 @@
  * 按硬件文档要求：上电启动阶段不要对关键引脚施加上拉。
  * 这里先进入“无上下拉 + 输入态”并等待系统启动完成，再执行 LED 输出。
  */
-#define WS2812_STARTUP_DELAY_MS          5000U
+#define WS2812_STARTUP_DELAY_MS          30000U
 
 #define WS2812_T0H_NS                    295U
 #define WS2812_T0L_NS                    595U
@@ -75,17 +75,6 @@ static uint8_t ws2812_apply_brightness(uint8_t value)
         scaled = 255U;
     }
     return (uint8_t)scaled;
-}
-
-/**
- * @brief 启动阶段的引脚保护配置：关闭上下拉并保持输入态。
- */
-static void ws2812_prepare_pin_safe_state(void)
-{
-    uapi_gpio_init();
-    (void)uapi_pin_set_mode(WS2812_GPIO_PIN, WS2812_GPIO_MODE);
-    (void)uapi_pin_set_pull(WS2812_GPIO_PIN, PIN_PULL_TYPE_DISABLE);
-    (void)uapi_gpio_set_dir(WS2812_GPIO_PIN, GPIO_DIRECTION_INPUT);
 }
 
 /**
@@ -217,11 +206,18 @@ static errcode_t ws2812_init(void)
 {
     errcode_t ret;
 
+    /* 校准窗口结束后再初始化 GPIO，避免上电阶段触碰关键引脚。 */
     uapi_gpio_init();
 
     ret = uapi_pin_set_mode(WS2812_GPIO_PIN, WS2812_GPIO_MODE);
     if (ret != ERRCODE_SUCC) {
         osal_printk("[mine_rgb_led] pin mode failed, ret=%d\r\n", (int)ret);
+        return ret;
+    }
+
+    ret = uapi_pin_set_pull(WS2812_GPIO_PIN, PIN_PULL_TYPE_DISABLE);
+    if (ret != ERRCODE_SUCC) {
+        osal_printk("[mine_rgb_led] pin pull disable failed, ret=%d\r\n", (int)ret);
         return ret;
     }
 
@@ -248,8 +244,7 @@ static void *ws2812_task(const char *arg)
     UNUSED(arg);
     osal_printk("[mine_rgb_led] ws2812 gpio4 restart from scratch\r\n");
 
-    ws2812_prepare_pin_safe_state();
-    osal_printk("[mine_rgb_led] startup delay %u ms, led start after boot\r\n",
+    osal_printk("[mine_rgb_led] startup delay %u ms for RF cali window\r\n",
                 (unsigned int)WS2812_STARTUP_DELAY_MS);
     ws2812_task_delay_ms(WS2812_STARTUP_DELAY_MS);
 
