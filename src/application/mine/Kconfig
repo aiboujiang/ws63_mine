@@ -35,11 +35,12 @@ config MINE_SUPPORT_WS63_FINAL_LAYERED
         as an external expansion chip in Driver layer.
 
 config MINE_SUPPORT_RGB_LED_DEMO
-    bool "Support Mine RGB LED Demo (WS2812/GPIO0)."
+    bool "Support Mine RGB LED Demo (WS2812/GPIO9)."
     default n
     help
         Build WS2812 RGB LED demo under application/mine/rgb_led.
-        Default data pin is GPIO0 configured as normal GPIO output.
+        Default data pin is GPIO9.
+        The demo prefers SPI+DMA output and falls back to GPIO bit-bang automatically.
         The demo cycles R/G/B colors in GRB transfer order.
 
 config MINE_SUPPORT_BEEP_DEMO
