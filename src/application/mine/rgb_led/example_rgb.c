@@ -29,6 +29,7 @@
 #define BUZZER_GPIO_MODE HAL_PIO_FUNC_GPIO
 #define BUZZER_PWM_PIN_MODE PIN_MODE_1
 #define BUZZER_PWM_CHANNEL 1U
+#define BUZZER_PWM_GROUP_ID 1U
 
 /* 音符之间留短间隔，避免无源蜂鸣器连续驱动时听感粘连。 */
 #define BUZZER_NOTE_GAP_MS 30U
@@ -140,7 +141,27 @@ static errcode_t buzzer_init(void)
     }
 
     uapi_pwm_deinit();
-    return uapi_pwm_init();
+    ret = uapi_pwm_init();
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+
+#if defined(CONFIG_PWM_USING_V151)
+    {
+        uint8_t channel_id = BUZZER_PWM_CHANNEL;
+
+        /*
+         * WS63 默认使用 PWM v151，通道在 start 前必须先归属到某个 group，
+         * 否则 uapi_pwm_start(channel) 会返回 ERRCODE_PWM_INVALID_PARAMETER(0x80001082)。
+         */
+        ret = uapi_pwm_set_group(BUZZER_PWM_GROUP_ID, &channel_id, 1U);
+        if ((ret != ERRCODE_SUCC) && (ret != ERRCODE_PWM_INVALID_PARAMETER)) {
+            return ret;
+        }
+    }
+#endif
+
+    return ERRCODE_SUCC;
 }
 
 /**
