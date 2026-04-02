@@ -18,7 +18,7 @@
 #include "watchdog.h"
 #include "soc_osal.h"
 
-#define WS2812_TASK_PRIO                 28
+#define WS2812_TASK_PRIO                 24
 #define WS2812_TASK_STACK_SIZE           0x1000
 
 #define WS2812_GPIO_PIN                  GPIO_04
