@@ -349,6 +349,17 @@ static errcode_t ws2812_send_frame(void)
         return ret;
     }
 
+    /*
+     * 注意：uapi_pwm_register_interrupt 内部会检查“通道已 open”，
+     * 因此必须放在 uapi_pwm_open 之后调用。
+     */
+    ret = uapi_pwm_register_interrupt(WS2812_PWM_CHANNEL, ws2812_pwm_callback);
+    if (ret != ERRCODE_SUCC) {
+        g_pwm_sending = false;
+        (void)uapi_pwm_close(WS2812_PWM_CHANNEL);
+        return ret;
+    }
+
     ret = uapi_pwm_start(WS2812_PWM_CHANNEL);
     if (ret != ERRCODE_SUCC) {
         g_pwm_sending = false;
@@ -386,36 +397,37 @@ static errcode_t ws2812_init(void)
 
     ret = uapi_pin_set_mode(WS2812_PWM_PIN, WS2812_PWM_PIN_MODE);
     if (ret != ERRCODE_SUCC) {
+        osal_printk("[mine_rgb_led] pin mode failed, ret=0x%x\r\n", (unsigned int)ret);
         return ret;
     }
 
     ret = uapi_pin_set_pull(WS2812_PWM_PIN, PIN_PULL_TYPE_DISABLE);
     if (ret != ERRCODE_SUCC) {
+        osal_printk("[mine_rgb_led] pin pull failed, ret=0x%x\r\n", (unsigned int)ret);
         return ret;
     }
 
     ret = uapi_pwm_init();
     if (ret != ERRCODE_SUCC) {
+        osal_printk("[mine_rgb_led] pwm init failed, ret=0x%x\r\n", (unsigned int)ret);
         return ret;
     }
 
     ret = uapi_pwm_set_group(WS2812_PWM_GROUP, &g_pwm_group_channel, 1U);
     if (ret != ERRCODE_SUCC) {
-        return ret;
-    }
-
-    ret = uapi_pwm_register_interrupt(WS2812_PWM_CHANNEL, ws2812_pwm_callback);
-    if (ret != ERRCODE_SUCC) {
+        osal_printk("[mine_rgb_led] pwm set group failed, ret=0x%x\r\n", (unsigned int)ret);
         return ret;
     }
 
     ret = uapi_dma_init();
     if (ret != ERRCODE_SUCC) {
+        osal_printk("[mine_rgb_led] dma init failed, ret=0x%x\r\n", (unsigned int)ret);
         return ret;
     }
 
     ret = uapi_dma_open();
     if (ret != ERRCODE_SUCC) {
+        osal_printk("[mine_rgb_led] dma open failed, ret=0x%x\r\n", (unsigned int)ret);
         return ret;
     }
 
