@@ -11,14 +11,17 @@
 #define RGB_LED_TASK_PRIO                24
 #define RGB_LED_TASK_STACK_SIZE          0x1000
 
-/* WS2812 数据脚使用 GPIO4。 */
-#define WS2812_DATA_PIN                  GPIO_04
+/* WS2812 数据脚使用 GPIO9。 */
+#define WS2812_DATA_PIN                  GPIO_09
 
 /*
- * 按当前硬件连线要求，GPIO4 需先切到复用信号2，
+ * 按当前硬件连线要求，GPIO9 需切到复用信号0，
  * 再作为普通 GPIO 输出使用。
  */
-#define WS2812_DATA_PIN_MODE             PIN_MODE_2
+#define WS2812_DATA_PIN_MODE             PIN_MODE_0
+
+/* 调试阶段默认打开日志，稳定后可改为 0 降低串口输出。 */
+#define WS2812_DEBUG_LOG_ENABLE          1
 
 /* WS2812 的复位锁存时间要求 > 50us，这里留出裕量。 */
 #define WS2812_RESET_LATCH_US            80U
@@ -46,6 +49,25 @@ static const ws2812_color_t g_ws2812_demo_colors[] = {
     {0U, 255U, 0U},
     {0U, 0U, 255U}
 };
+
+/**
+ * @brief 打印 RGB 配置参数，便于确认固件与接线一致。
+ */
+static void ws2812_log_config(void)
+{
+#if (WS2812_DEBUG_LOG_ENABLE == 1)
+    osal_printk("[mine_rgb][cfg] pin=%u mode=%u reset_us=%u interval_ms=%u\r\n",
+        (unsigned int)WS2812_DATA_PIN,
+        (unsigned int)WS2812_DATA_PIN_MODE,
+        (unsigned int)WS2812_RESET_LATCH_US,
+        (unsigned int)WS2812_DEMO_INTERVAL_MS);
+    osal_printk("[mine_rgb][cfg] nop T0H=%u T0L=%u T1H=%u T1L=%u\r\n",
+        (unsigned int)WS2812_T0H_NOP,
+        (unsigned int)WS2812_T0L_NOP,
+        (unsigned int)WS2812_T1H_NOP,
+        (unsigned int)WS2812_T1L_NOP);
+#endif
+}
 
 /**
  * @brief NOP 延时，用于 WS2812 子微秒级时序粗调。
@@ -132,25 +154,49 @@ static errcode_t ws2812_init(void)
 {
     errcode_t ret;
 
+    ws2812_log_config();
+
     (void)uapi_tcxo_init();
     uapi_gpio_init();
 
     ret = uapi_pin_set_mode(WS2812_DATA_PIN, WS2812_DATA_PIN_MODE);
     if (ret != ERRCODE_SUCC) {
+#if (WS2812_DEBUG_LOG_ENABLE == 1)
+        osal_printk("[mine_rgb][init] pin_set_mode failed, ret=0x%x\r\n", (unsigned int)ret);
+#endif
         return ret;
     }
+
+#if (WS2812_DEBUG_LOG_ENABLE == 1)
+    osal_printk("[mine_rgb][init] pin_set_mode ok\r\n");
+#endif
 
     ret = uapi_gpio_set_dir(WS2812_DATA_PIN, GPIO_DIRECTION_OUTPUT);
     if (ret != ERRCODE_SUCC) {
+#if (WS2812_DEBUG_LOG_ENABLE == 1)
+        osal_printk("[mine_rgb][init] gpio_set_dir failed, ret=0x%x\r\n", (unsigned int)ret);
+#endif
         return ret;
     }
 
+#if (WS2812_DEBUG_LOG_ENABLE == 1)
+    osal_printk("[mine_rgb][init] gpio_set_dir ok\r\n");
+#endif
+
     ret = uapi_gpio_set_val(WS2812_DATA_PIN, GPIO_LEVEL_LOW);
     if (ret != ERRCODE_SUCC) {
+#if (WS2812_DEBUG_LOG_ENABLE == 1)
+        osal_printk("[mine_rgb][init] gpio_set_low failed, ret=0x%x\r\n", (unsigned int)ret);
+#endif
         return ret;
     }
 
     ws2812_reset_latch();
+
+#if (WS2812_DEBUG_LOG_ENABLE == 1)
+    osal_printk("[mine_rgb][init] ws2812_reset_latch done\r\n");
+#endif
+
     return ERRCODE_SUCC;
 }
 
@@ -163,7 +209,11 @@ static errcode_t ws2812_init(void)
 static void *rgb_led_task(const char *arg)
 {
     errcode_t ret;
+    errcode_t wdt_ret;
     uint32_t i;
+    uint32_t frame_cnt = 0U;
+    uint64_t tx_begin_us;
+    uint64_t tx_end_us;
 
     unused(arg);
 
@@ -173,19 +223,51 @@ static void *rgb_led_task(const char *arg)
         return NULL;
     }
 
-    osal_printk("[mine_rgb] ws2812 demo start on GPIO_04 (PIN_MODE_2)\\r\\n");
+    osal_printk("[mine_rgb] ws2812 demo start on GPIO_09 (PIN_MODE_0)\\r\\n");
 
     while (1) {
         for (i = 0U; i < (uint32_t)(sizeof(g_ws2812_demo_colors) / sizeof(g_ws2812_demo_colors[0])); i++) {
+            tx_begin_us = uapi_tcxo_get_us();
+#if (WS2812_DEBUG_LOG_ENABLE == 1)
+            osal_printk("[mine_rgb][loop] frame=%u idx=%u rgb=(%u,%u,%u) begin_us=%llu\\r\\n",
+                (unsigned int)frame_cnt,
+                (unsigned int)i,
+                (unsigned int)g_ws2812_demo_colors[i].r,
+                (unsigned int)g_ws2812_demo_colors[i].g,
+                (unsigned int)g_ws2812_demo_colors[i].b,
+                (unsigned long long)tx_begin_us);
+#endif
+
             ws2812_set_color(&g_ws2812_demo_colors[i]);
+            tx_end_us = uapi_tcxo_get_us();
+
+#if (WS2812_DEBUG_LOG_ENABLE == 1)
+            osal_printk("[mine_rgb][loop] frame=%u idx=%u tx_cost_us=%llu gpio_out=%u\\r\\n",
+                (unsigned int)frame_cnt,
+                (unsigned int)i,
+                (unsigned long long)(tx_end_us - tx_begin_us),
+                (unsigned int)uapi_gpio_get_output_val(WS2812_DATA_PIN));
+#endif
 
             /*
              * 避免使用忙等毫秒延时占满 CPU。
              * 采用 OS 睡眠让出调度，并在循环中喂狗，降低 NMI/看门狗复位风险。
              */
-            (void)uapi_watchdog_kick();
+            wdt_ret = uapi_watchdog_kick();
+#if (WS2812_DEBUG_LOG_ENABLE == 1)
+            if (wdt_ret != ERRCODE_SUCC) {
+                osal_printk("[mine_rgb][loop] watchdog_kick failed, ret=0x%x\\r\\n", (unsigned int)wdt_ret);
+            }
+#endif
             osal_msleep(WS2812_DEMO_INTERVAL_MS);
         }
+
+        frame_cnt++;
+#if (WS2812_DEBUG_LOG_ENABLE == 1)
+        osal_printk("[mine_rgb][hb] frame cycle done, frame=%u uptime_ms=%llu\\r\\n",
+            (unsigned int)frame_cnt,
+            (unsigned long long)uapi_tcxo_get_ms());
+#endif
     }
 }
 
