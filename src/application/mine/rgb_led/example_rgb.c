@@ -15,6 +15,7 @@
 
 #include "pinctrl.h"
 #include "tcxo.h"
+#include "hal_gpio.h"
 #include "soc_osal.h"
 #include "app_init.h"
 #include "gpio.h"
@@ -49,6 +50,34 @@ static uint32_t g_t0l_ticks = 0U;
 static uint32_t g_t1h_ticks = 0U;
 static uint32_t g_t1l_ticks = 0U;
 
+/*
+ * 某些构建路径下 hal_tcxo 接口来自 ROM 函数表，
+ * 这里声明最小必要结构，优先走高速 get 回调读取计数。
+ */
+typedef uint64_t (*ws2812_hal_tcxo_get_t)(void);
+typedef struct {
+    void *init;
+    void *deinit;
+    ws2812_hal_tcxo_get_t get;
+} ws2812_hal_tcxo_funcs_t;
+extern ws2812_hal_tcxo_funcs_t *hal_tcxo_get_funcs(void);
+
+/**
+ * @brief 获取高速 TCXO 计数。
+ *
+ * 优先使用 HAL 函数表直读计数，避免 UAPI 的锁开销影响位时序。
+ *
+ * @return uint64_t 当前 TCXO 计数。
+ */
+static uint64_t ws2812_fast_tcxo_get(void)
+{
+    ws2812_hal_tcxo_funcs_t *funcs = hal_tcxo_get_funcs();
+    if ((funcs != NULL) && (funcs->get != NULL)) {
+        return funcs->get();
+    }
+    return uapi_tcxo_get_count();
+}
+
 /**
  * @brief 将纳秒换算为 TCXO tick。
  *
@@ -71,8 +100,8 @@ static uint32_t ws2812_ns_to_ticks(uint32_t time_ns)
  */
 static void ws2812_delay_ticks(uint32_t ticks)
 {
-    uint64_t target = uapi_tcxo_get_count() + (uint64_t)ticks;
-    while (uapi_tcxo_get_count() < target) {
+    uint64_t target = ws2812_fast_tcxo_get() + (uint64_t)ticks;
+    while (ws2812_fast_tcxo_get() < target) {
     }
 }
 
@@ -83,14 +112,14 @@ static void ws2812_delay_ticks(uint32_t ticks)
  */
 static void ws2812_write_bit(bool one)
 {
-    (void)uapi_gpio_set_val(WS2812_GPIO_PIN, GPIO_LEVEL_HIGH);
+    (void)hal_gpio_output(WS2812_GPIO_PIN, GPIO_LEVEL_HIGH);
     if (one) {
         ws2812_delay_ticks(g_t1h_ticks);
     } else {
         ws2812_delay_ticks(g_t0h_ticks);
     }
 
-    (void)uapi_gpio_set_val(WS2812_GPIO_PIN, GPIO_LEVEL_LOW);
+    (void)hal_gpio_output(WS2812_GPIO_PIN, GPIO_LEVEL_LOW);
     if (one) {
         ws2812_delay_ticks(g_t1l_ticks);
     } else {
@@ -126,7 +155,7 @@ static void ws2812_send_red(void)
     osal_irq_restore(irq_state);
 
     /* 一帧结束后的复位低电平。 */
-    (void)uapi_gpio_set_val(WS2812_GPIO_PIN, GPIO_LEVEL_LOW);
+    (void)hal_gpio_output(WS2812_GPIO_PIN, GPIO_LEVEL_LOW);
     uapi_tcxo_delay_us(WS2812_RESET_US);
 }
 
@@ -162,9 +191,9 @@ static errcode_t ws2812_gpio_init(void)
     (void)uapi_gpio_set_val(WS2812_GPIO_PIN, GPIO_LEVEL_LOW);
 
     /* 标定 1000us 的 TCXO tick 数，用于换算亚微秒时序。 */
-    start_count = uapi_tcxo_get_count();
+    start_count = ws2812_fast_tcxo_get();
     uapi_tcxo_delay_us(1000U);
-    end_count = uapi_tcxo_get_count();
+    end_count = ws2812_fast_tcxo_get();
     if (end_count > start_count) {
         g_tcxo_ticks_per_1000us = (uint32_t)(end_count - start_count);
     }
