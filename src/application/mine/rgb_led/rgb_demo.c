@@ -4,6 +4,7 @@
 #include "app_init.h"
 #include "gpio.h"
 #include "pinctrl.h"
+#include "platform_core.h"
 #include "soc_osal.h"
 #include "tcxo.h"
 #include "watchdog.h"
@@ -22,6 +23,17 @@
 
 /* 调试阶段默认打开日志，稳定后可改为 0 降低串口输出。 */
 #define WS2812_DEBUG_LOG_ENABLE          1
+
+/* 直写 GPIO 数据寄存器，降低单 bit 输出开销。 */
+#define WS2812_USE_DIRECT_REG_IO         1
+
+#define WS2812_GPIO9_CHANNEL_BASE        GPIO_CHANNEL_1_BASE_ADDR
+#define WS2812_GPIO_GROUP_STRIDE         0x40U
+#define WS2812_GPIO_DATA_SET_OFFSET      0x30U
+#define WS2812_GPIO_DATA_CLR_OFFSET      0x34U
+#define WS2812_GPIO_GROUP_INDEX          0U
+#define WS2812_GPIO_GROUP_PIN            1U
+#define WS2812_GPIO_PIN_MASK             (1U << WS2812_GPIO_GROUP_PIN)
 
 /* WS2812 的复位锁存时间要求 > 50us，这里留出裕量。 */
 #define WS2812_RESET_LATCH_US            80U
@@ -50,6 +62,14 @@ static const ws2812_color_t g_ws2812_demo_colors[] = {
     {0U, 0U, 255U}
 };
 
+static volatile uint32_t *const g_ws2812_gpio_data_set_reg =
+    (volatile uint32_t *)(uintptr_t)(WS2812_GPIO9_CHANNEL_BASE +
+    WS2812_GPIO_GROUP_INDEX * WS2812_GPIO_GROUP_STRIDE + WS2812_GPIO_DATA_SET_OFFSET);
+
+static volatile uint32_t *const g_ws2812_gpio_data_clr_reg =
+    (volatile uint32_t *)(uintptr_t)(WS2812_GPIO9_CHANNEL_BASE +
+    WS2812_GPIO_GROUP_INDEX * WS2812_GPIO_GROUP_STRIDE + WS2812_GPIO_DATA_CLR_OFFSET);
+
 /**
  * @brief 打印 RGB 配置参数，便于确认固件与接线一致。
  */
@@ -66,6 +86,38 @@ static void ws2812_log_config(void)
         (unsigned int)WS2812_T0L_NOP,
         (unsigned int)WS2812_T1H_NOP,
         (unsigned int)WS2812_T1L_NOP);
+#if (WS2812_USE_DIRECT_REG_IO == 1)
+    osal_printk("[mine_rgb][cfg] direct-reg-io=on set=0x%08x clr=0x%08x mask=0x%08x\r\n",
+        (unsigned int)(uintptr_t)g_ws2812_gpio_data_set_reg,
+        (unsigned int)(uintptr_t)g_ws2812_gpio_data_clr_reg,
+        (unsigned int)WS2812_GPIO_PIN_MASK);
+#else
+    osal_printk("[mine_rgb][cfg] direct-reg-io=off (uapi_gpio_set_val)\r\n");
+#endif
+#endif
+}
+
+/**
+ * @brief 将 WS2812 数据脚拉高。
+ */
+static inline void ws2812_gpio_high(void)
+{
+#if (WS2812_USE_DIRECT_REG_IO == 1)
+    *g_ws2812_gpio_data_set_reg = WS2812_GPIO_PIN_MASK;
+#else
+    (void)uapi_gpio_set_val(WS2812_DATA_PIN, GPIO_LEVEL_HIGH);
+#endif
+}
+
+/**
+ * @brief 将 WS2812 数据脚拉低。
+ */
+static inline void ws2812_gpio_low(void)
+{
+#if (WS2812_USE_DIRECT_REG_IO == 1)
+    *g_ws2812_gpio_data_clr_reg = WS2812_GPIO_PIN_MASK;
+#else
+    (void)uapi_gpio_set_val(WS2812_DATA_PIN, GPIO_LEVEL_LOW);
 #endif
 }
 
@@ -88,10 +140,10 @@ static inline void ws2812_delay_nop(uint32_t cycles)
  */
 static inline void ws2812_send_bit(bool bit_val)
 {
-    (void)uapi_gpio_set_val(WS2812_DATA_PIN, GPIO_LEVEL_HIGH);
+    ws2812_gpio_high();
     ws2812_delay_nop(bit_val ? WS2812_T1H_NOP : WS2812_T0H_NOP);
 
-    (void)uapi_gpio_set_val(WS2812_DATA_PIN, GPIO_LEVEL_LOW);
+    ws2812_gpio_low();
     ws2812_delay_nop(bit_val ? WS2812_T1L_NOP : WS2812_T0L_NOP);
 }
 
@@ -115,7 +167,7 @@ static void ws2812_send_byte(uint8_t data)
  */
 static void ws2812_reset_latch(void)
 {
-    (void)uapi_gpio_set_val(WS2812_DATA_PIN, GPIO_LEVEL_LOW);
+    ws2812_gpio_low();
     (void)uapi_tcxo_delay_us(WS2812_RESET_LATCH_US);
 }
 
@@ -214,6 +266,8 @@ static void *rgb_led_task(const char *arg)
     uint32_t frame_cnt = 0U;
     uint64_t tx_begin_us;
     uint64_t tx_end_us;
+    uint64_t wave_begin_us;
+    uint64_t wave_end_us;
 
     unused(arg);
 
@@ -238,14 +292,17 @@ static void *rgb_led_task(const char *arg)
                 (unsigned long long)tx_begin_us);
 #endif
 
+            wave_begin_us = uapi_tcxo_get_us();
             ws2812_set_color(&g_ws2812_demo_colors[i]);
             tx_end_us = uapi_tcxo_get_us();
+            wave_end_us = tx_end_us;
 
 #if (WS2812_DEBUG_LOG_ENABLE == 1)
-            osal_printk("[mine_rgb][loop] frame=%u idx=%u tx_cost_us=%llu gpio_out=%u\\r\\n",
+            osal_printk("[mine_rgb][loop] frame=%u idx=%u total_cost_us=%llu wave_cost_us=%llu gpio_out=%u\\r\\n",
                 (unsigned int)frame_cnt,
                 (unsigned int)i,
                 (unsigned long long)(tx_end_us - tx_begin_us),
+                (unsigned long long)(wave_end_us - wave_begin_us),
                 (unsigned int)uapi_gpio_get_output_val(WS2812_DATA_PIN));
 #endif
 
