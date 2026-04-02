@@ -24,6 +24,12 @@
 #define WS2812_GPIO_PIN                  GPIO_04
 #define WS2812_GPIO_MODE                 PIN_MODE_2
 
+/*
+ * 按硬件文档要求：上电启动阶段不要对关键引脚施加上拉。
+ * 这里先进入“无上下拉 + 输入态”并等待系统启动完成，再执行 LED 输出。
+ */
+#define WS2812_STARTUP_DELAY_MS          5000U
+
 #define WS2812_T0H_NS                    295U
 #define WS2812_T0L_NS                    595U
 #define WS2812_T1H_NS                    595U
@@ -54,6 +60,17 @@ static const ws2812_color_t g_color_table[] = {
     {  0U, 255U, 255U, "CYAN"},
     {255U, 255U, 255U, "WHITE"}
 };
+
+/**
+ * @brief 启动阶段的引脚保护配置：关闭上下拉并保持输入态。
+ */
+static void ws2812_prepare_pin_safe_state(void)
+{
+    uapi_gpio_init();
+    (void)uapi_pin_set_mode(WS2812_GPIO_PIN, WS2812_GPIO_MODE);
+    (void)uapi_pin_set_pull(WS2812_GPIO_PIN, PIN_PULL_TYPE_DISABLE);
+    (void)uapi_gpio_set_dir(WS2812_GPIO_PIN, GPIO_DIRECTION_INPUT);
+}
 
 /**
  * @brief 分片休眠并喂狗，避免长延时触发看门狗。
@@ -214,6 +231,11 @@ static void *ws2812_task(const char *arg)
 
     UNUSED(arg);
     osal_printk("[mine_rgb_led] ws2812 gpio4 restart from scratch\r\n");
+
+    ws2812_prepare_pin_safe_state();
+    osal_printk("[mine_rgb_led] startup delay %u ms, led start after boot\r\n",
+                (unsigned int)WS2812_STARTUP_DELAY_MS);
+    ws2812_task_delay_ms(WS2812_STARTUP_DELAY_MS);
 
     if (ws2812_init() != ERRCODE_SUCC) {
         return NULL;
