@@ -17,6 +17,7 @@
 #include "pwm.h"
 #include "dma.h"
 #include "tcxo.h"
+#include "systick.h"
 #include "soc_osal.h"
 #include "app_init.h"
 #include "gpio.h"
@@ -47,8 +48,6 @@
 #define WS2812_RESET_US 120U
 
 #define WS2812_DMA_WAIT_US 2000U
-#define WS2812_PWM_WAIT_US 3000U
-
 #define WS2812_BREATH_MIN_PERCENT 8U
 #define WS2812_BREATH_MAX_PERCENT 100U
 #define WS2812_BREATH_STEP_PERCENT 4U
@@ -83,16 +82,17 @@ static uint8_t g_grb_frame[WS2812_LED_COUNT * 3U];
 
 static volatile bool g_dma_done = false;
 static volatile bool g_dma_error = false;
-static volatile bool g_pwm_sending = false;
-static volatile uint16_t g_symbol_index = 0U;
 static uint16_t g_symbol_total = 0U;
-static bool g_pwm_ready = false;
 
-static uint8_t g_pwm_group_channel = WS2812_PWM_CHANNEL;
 static uint8_t g_color_index = 0U;
 static uint8_t g_breath_percent = WS2812_BREATH_MIN_PERCENT;
 static int8_t g_breath_step = (int8_t)WS2812_BREATH_STEP_PERCENT;
 static uint32_t g_pwm_clk_hz = 0U;
+static uint32_t g_t0h_count = 0U;
+static uint32_t g_t0l_count = 0U;
+static uint32_t g_t1h_count = 0U;
+static uint32_t g_t1l_count = 0U;
+static uint32_t g_systick_count_per_1000us = 0U;
 
 /**
  * @brief 将纳秒时间转换为 PWM 计数值。
@@ -152,12 +152,42 @@ static void ws2812_calibrate_timing(void)
     g_bit_cfg[1].cycles = 1U;
     g_bit_cfg[1].repeat = false;
 
+    /*
+     * 使用实测的 systick 计数做纳秒换算，避免依赖固定频率假设。
+     * 1000us 标定能在精度和耗时之间取得平衡。
+     */
+    {
+        uint64_t start_count = uapi_systick_get_count();
+        uint64_t end_count;
+        uapi_systick_delay_us(1000U);
+        end_count = uapi_systick_get_count();
+        if (end_count > start_count) {
+            g_systick_count_per_1000us = (uint32_t)(end_count - start_count);
+        }
+        if (g_systick_count_per_1000us == 0U) {
+            g_systick_count_per_1000us = 32000U;
+        }
+        g_t0h_count = (uint32_t)(((uint64_t)WS2812_T0H_NS * g_systick_count_per_1000us + 999999ULL) / 1000000ULL);
+        g_t0l_count = (uint32_t)(((uint64_t)WS2812_T0L_NS * g_systick_count_per_1000us + 999999ULL) / 1000000ULL);
+        g_t1h_count = (uint32_t)(((uint64_t)WS2812_T1H_NS * g_systick_count_per_1000us + 999999ULL) / 1000000ULL);
+        g_t1l_count = (uint32_t)(((uint64_t)WS2812_T1L_NS * g_systick_count_per_1000us + 999999ULL) / 1000000ULL);
+        if (g_t0h_count == 0U) { g_t0h_count = 1U; }
+        if (g_t0l_count == 0U) { g_t0l_count = 1U; }
+        if (g_t1h_count == 0U) { g_t1h_count = 1U; }
+        if (g_t1l_count == 0U) { g_t1l_count = 1U; }
+    }
+
     osal_printk("[mine_rgb_led] pwm clk=%uHz, count T0H/T0L/T1H/T1L=%u/%u/%u/%u\r\n",
         (unsigned int)g_pwm_clk_hz,
         (unsigned int)t0h,
         (unsigned int)t0l,
         (unsigned int)t1h,
         (unsigned int)t1l);
+    osal_printk("[mine_rgb_led] systick count T0H/T0L/T1H/T1L=%u/%u/%u/%u\r\n",
+        (unsigned int)g_t0h_count,
+        (unsigned int)g_t0l_count,
+        (unsigned int)g_t1h_count,
+        (unsigned int)g_t1l_count);
 }
 
 /**
@@ -170,8 +200,7 @@ static void ws2812_hold_reset_low(void)
     (void)uapi_pin_set_mode(WS2812_PWM_PIN, GPIO_FUNC);
     (void)uapi_gpio_set_dir(WS2812_PWM_PIN, GPIO_DIRECTION_OUTPUT);
     (void)uapi_gpio_set_val(WS2812_PWM_PIN, GPIO_LEVEL_LOW);
-    uapi_tcxo_delay_us(WS2812_RESET_US);
-    (void)uapi_pin_set_mode(WS2812_PWM_PIN, WS2812_PWM_PIN_MODE);
+    uapi_systick_delay_us(WS2812_RESET_US);
 }
 
 /**
@@ -237,28 +266,6 @@ static errcode_t ws2812_dma_copy_frame(uint16_t symbols)
     if ((!g_dma_done) || g_dma_error) {
         return ERRCODE_FAIL;
     }
-    return ERRCODE_SUCC;
-}
-
-/**
- * @brief PWM 周期装载中断回调。
- *
- * @param channel PWM 通道。
- * @return errcode_t 固定返回 ERRCODE_SUCC。
- */
-static errcode_t ws2812_pwm_callback(uint8_t channel)
-{
-    if (!g_pwm_sending) {
-        return ERRCODE_SUCC;
-    }
-
-    if (g_symbol_index < g_symbol_total) {
-        (void)uapi_pwm_config_preload(WS2812_PWM_GROUP, channel, &g_frame_active[g_symbol_index]);
-        g_symbol_index++;
-    } else {
-        g_pwm_sending = false;
-    }
-
     return ERRCODE_SUCC;
 }
 
@@ -332,48 +339,49 @@ static void ws2812_step_breath(void)
 }
 
 /**
+ * @brief 发送单个 WS2812 码元。
+ *
+ * @param one true 表示发送 1 码，false 表示发送 0 码。
+ */
+static void ws2812_write_bit(bool one)
+{
+    (void)uapi_gpio_set_val(WS2812_PWM_PIN, GPIO_LEVEL_HIGH);
+    if (one) {
+        (void)uapi_systick_delay_count(g_t1h_count);
+    } else {
+        (void)uapi_systick_delay_count(g_t0h_count);
+    }
+
+    (void)uapi_gpio_set_val(WS2812_PWM_PIN, GPIO_LEVEL_LOW);
+    if (one) {
+        (void)uapi_systick_delay_count(g_t1l_count);
+    } else {
+        (void)uapi_systick_delay_count(g_t0l_count);
+    }
+}
+
+/**
  * @brief 发出一帧 WS2812 数据。
  *
  * @return errcode_t ERRCODE_SUCC 表示发送成功。
  */
 static errcode_t ws2812_send_frame(void)
 {
-    uint32_t wait_us = WS2812_PWM_WAIT_US;
-    errcode_t ret;
+    uint16_t idx;
+    uint32_t irq_state;
 
-    if (!g_pwm_ready) {
-        return ERRCODE_PWM_NOT_OPEN;
+    /*
+     * 发送阶段临时关中断，避免任意任务切换导致 bit 间隔超过 35us 被识别为 RESET。
+     * 仅发送 24bit * LED_COUNT，临界区非常短。
+     */
+    irq_state = osal_irq_lock();
+    for (idx = 0U; idx < g_symbol_total; idx++) {
+        bool bit_one = (g_frame_active[idx].high_time > g_frame_active[idx].low_time);
+        ws2812_write_bit(bit_one);
     }
+    osal_irq_restore(irq_state);
 
-    g_symbol_index = 1U;
-    g_pwm_sending = true;
-
-    /* 先将首个码元预装载，再由中断回调继续推送后续码元。 */
-    ret = uapi_pwm_config_preload(WS2812_PWM_GROUP, WS2812_PWM_CHANNEL, &g_frame_active[0]);
-    if (ret != ERRCODE_SUCC) {
-        g_pwm_sending = false;
-        return ret;
-    }
-
-    ret = uapi_pwm_start_group(WS2812_PWM_GROUP);
-    if (ret != ERRCODE_SUCC) {
-        g_pwm_sending = false;
-        return ret;
-    }
-
-    /* 等待回调推送完整帧，期间持续喂狗避免系统复位。 */
-    while (g_pwm_sending && (wait_us > 0U)) {
-        (void)uapi_watchdog_kick();
-        uapi_tcxo_delay_us(1U);
-        wait_us--;
-    }
-
-    (void)uapi_pwm_stop_group(WS2812_PWM_GROUP);
     ws2812_hold_reset_low();
-
-    if (wait_us == 0U) {
-        return ERRCODE_FAIL;
-    }
     return ERRCODE_SUCC;
 }
 
@@ -388,7 +396,7 @@ static errcode_t ws2812_init(void)
 
     uapi_gpio_init();
 
-    ret = uapi_pin_set_mode(WS2812_PWM_PIN, WS2812_PWM_PIN_MODE);
+    ret = uapi_pin_set_mode(WS2812_PWM_PIN, GPIO_FUNC);
     if (ret != ERRCODE_SUCC) {
         osal_printk("[mine_rgb_led] pin mode failed, ret=0x%x\r\n", (unsigned int)ret);
         return ret;
@@ -400,34 +408,16 @@ static errcode_t ws2812_init(void)
         return ret;
     }
 
-    ret = uapi_pwm_init();
+    ret = uapi_gpio_set_dir(WS2812_PWM_PIN, GPIO_DIRECTION_OUTPUT);
     if (ret != ERRCODE_SUCC) {
-        osal_printk("[mine_rgb_led] pwm init failed, ret=0x%x\r\n", (unsigned int)ret);
+        osal_printk("[mine_rgb_led] gpio dir failed, ret=0x%x\r\n", (unsigned int)ret);
         return ret;
     }
 
-    ret = uapi_pwm_set_group(WS2812_PWM_GROUP, &g_pwm_group_channel, 1U);
-    if (ret != ERRCODE_SUCC) {
-        osal_printk("[mine_rgb_led] pwm set group failed, ret=0x%x\r\n", (unsigned int)ret);
-        return ret;
-    }
+    (void)uapi_gpio_set_val(WS2812_PWM_PIN, GPIO_LEVEL_LOW);
 
-    /*
-     * 仅在初始化阶段打开一次 PWM 通道并注册中断，
-     * 运行阶段只做 preload/start/stop，避免高频申请释放 IRQ 资源。
-     */
-    ret = uapi_pwm_open(WS2812_PWM_CHANNEL, &g_bit_cfg[0]);
-    if (ret != ERRCODE_SUCC) {
-        osal_printk("[mine_rgb_led] pwm open failed, ret=0x%x\r\n", (unsigned int)ret);
-        return ret;
-    }
-
-    ret = uapi_pwm_register_interrupt(WS2812_PWM_CHANNEL, ws2812_pwm_callback);
-    if (ret != ERRCODE_SUCC) {
-        osal_printk("[mine_rgb_led] pwm register isr failed, ret=0x%x\r\n", (unsigned int)ret);
-        (void)uapi_pwm_close(WS2812_PWM_CHANNEL);
-        return ret;
-    }
+    /* 保留 PWM 时钟读取，仅用于日志与参数换算参考。 */
+    g_pwm_clk_hz = uapi_pwm_get_frequency(WS2812_PWM_CHANNEL);
 
     ret = uapi_dma_init();
     if (ret != ERRCODE_SUCC) {
@@ -441,9 +431,7 @@ static errcode_t ws2812_init(void)
         return ret;
     }
 
-    g_pwm_clk_hz = uapi_pwm_get_frequency(WS2812_PWM_CHANNEL);
     ws2812_calibrate_timing();
-    g_pwm_ready = true;
     ws2812_hold_reset_low();
     return ERRCODE_SUCC;
 }
