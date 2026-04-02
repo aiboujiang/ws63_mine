@@ -14,8 +14,6 @@
  */
 
 #include "pinctrl.h"
-#include "pwm.h"
-#include "dma.h"
 #include "tcxo.h"
 #include "soc_osal.h"
 #include "app_init.h"
@@ -25,324 +23,53 @@
 #define WS2812_TASK_PRIO 24
 #define WS2812_TASK_STACK_SIZE 0x1000
 
-/* 硬件连接：示例默认使用 GPIO9 的 PWM 复用（与原验证代码一致）。 */
-#define WS2812_PWM_PIN 9
-#define WS2812_PWM_PIN_MODE 1
-#define WS2812_PWM_CHANNEL 1
-#define WS2812_PWM_GROUP 1
+/* 使用 GPIO9 直接软件模拟 WS2812 单线时序。 */
+#define WS2812_GPIO_PIN 9
+#define WS2812_GPIO_MODE 0
+#define WS2812_PIN_PULL_NONE 0
 
-#define WS2812_LED_COUNT 1
-#define WS2812_BITS_PER_LED 24
-#define WS2812_FRAME_SYMBOLS (WS2812_LED_COUNT * WS2812_BITS_PER_LED)
-
-/*
- * WS2812B 时序来自 mine/lib/RGB_LED.pdf：
- * Tin0h=0.295us, Tin1h=0.595us, T0L=0.595us, T1L=0.295us。
- * 另外文档备注建议复位低电平至少 100us。
- */
+/* WS2812 手册时序（mine/lib/RGB_LED.pdf）。 */
 #define WS2812_T0H_NS 295U
 #define WS2812_T0L_NS 595U
 #define WS2812_T1H_NS 595U
 #define WS2812_T1L_NS 295U
 #define WS2812_RESET_US 120U
 
-#define WS2812_DMA_WAIT_US 2000U
-#define WS2812_BREATH_MIN_PERCENT 8U
-#define WS2812_BREATH_MAX_PERCENT 100U
-#define WS2812_BREATH_STEP_PERCENT 4U
-#define WS2812_FRAME_INTERVAL_MS 20U
+/* 固定红色：GRB 顺序 = G=0x00, R=0xFF, B=0x00。 */
+#define WS2812_RED_G 0x00U
+#define WS2812_RED_R 0xFFU
+#define WS2812_RED_B 0x00U
 
-/* DMA 配置取值参考 include/driver/dma.h 里的字段注释。 */
-#define WS2812_DMA_WIDTH_WORD 2U
-#define WS2812_DMA_PRIORITY_HIGH 3U
-#define WS2812_DMA_INTR_TFR 0U
+/* 周期刷新，保证灯色稳定。 */
+#define WS2812_REFRESH_MS 100U
 
-typedef struct {
-    uint8_t r;
-    uint8_t g;
-    uint8_t b;
-} ws2812_color_t;
-
-static const ws2812_color_t g_color_table[] = {
-    {255U, 0U, 0U},
-    {0U, 255U, 0U},
-    {0U, 0U, 255U},
-    {255U, 120U, 0U},
-    {0U, 255U, 180U},
-    {180U, 0U, 255U}
-};
-
-/* bit0/bit1 的 PWM 模板，在时序校准后初始化。 */
-static pwm_config_t g_bit_cfg[2];
-/* staging -> active 通过 DMA 拷贝，避免发送时被上层改写。 */
-static pwm_config_t g_frame_staging[WS2812_FRAME_SYMBOLS];
-static pwm_config_t g_frame_active[WS2812_FRAME_SYMBOLS];
-static uint8_t g_grb_frame[WS2812_LED_COUNT * 3U];
-
-static volatile bool g_dma_done = false;
-static volatile bool g_dma_error = false;
-static uint16_t g_symbol_total = 0U;
-
-static uint8_t g_color_index = 0U;
-static uint8_t g_breath_percent = WS2812_BREATH_MIN_PERCENT;
-static int8_t g_breath_step = (int8_t)WS2812_BREATH_STEP_PERCENT;
-static uint32_t g_pwm_clk_hz = 0U;
-static uint32_t g_t0h_count = 0U;
-static uint32_t g_t0l_count = 0U;
-static uint32_t g_t1h_count = 0U;
-static uint32_t g_t1l_count = 0U;
-static uint32_t g_tcxo_count_per_1000us = 0U;
+static uint32_t g_tcxo_ticks_per_1000us = 0U;
+static uint32_t g_t0h_ticks = 0U;
+static uint32_t g_t0l_ticks = 0U;
+static uint32_t g_t1h_ticks = 0U;
+static uint32_t g_t1l_ticks = 0U;
 
 /**
- * @brief 将纳秒时间转换为 PWM 计数值。
+ * @brief 将纳秒换算为 TCXO tick。
  *
- * @param time_ns 时间（ns）。
- * @return uint32_t 对应计数值，最小为 1。
+ * @param time_ns 纳秒。
+ * @return uint32_t 至少为 1 tick。
  */
-static uint32_t ws2812_ns_to_count(uint32_t time_ns)
+static uint32_t ws2812_ns_to_ticks(uint32_t time_ns)
 {
-    uint64_t count;
-
-    if (g_pwm_clk_hz == 0U) {
-        g_pwm_clk_hz = uapi_pwm_get_frequency(WS2812_PWM_CHANNEL);
+    uint64_t ticks = ((uint64_t)time_ns * (uint64_t)g_tcxo_ticks_per_1000us + 999999ULL) / 1000000ULL;
+    if (ticks == 0ULL) {
+        ticks = 1ULL;
     }
-    count = ((uint64_t)time_ns * (uint64_t)g_pwm_clk_hz + 999999999ULL) / 1000000000ULL;
-    if (count == 0ULL) {
-        count = 1ULL;
-    }
-    return (uint32_t)count;
+    return (uint32_t)ticks;
 }
 
 /**
- * @brief 线性亮度缩放。
- *
- * @param value 原始颜色分量。
- * @param percent 亮度百分比。
- * @return uint8_t 缩放后的分量值。
- */
-static uint8_t ws2812_apply_brightness(uint8_t value, uint8_t percent)
-{
-    uint32_t scaled = ((uint32_t)value * (uint32_t)percent + 50U) / 100U;
-    if (scaled > 255U) {
-        scaled = 255U;
-    }
-    return (uint8_t)scaled;
-}
-
-/**
- * @brief 计算并更新 bit0/bit1 的 PWM 模板。
- */
-static void ws2812_calibrate_timing(void)
-{
-    uint32_t t0h = ws2812_ns_to_count(WS2812_T0H_NS);
-    uint32_t t0l = ws2812_ns_to_count(WS2812_T0L_NS);
-    uint32_t t1h = ws2812_ns_to_count(WS2812_T1H_NS);
-    uint32_t t1l = ws2812_ns_to_count(WS2812_T1L_NS);
-
-    g_bit_cfg[0].low_time = t0l;
-    g_bit_cfg[0].high_time = t0h;
-    g_bit_cfg[0].offset_time = 0U;
-    g_bit_cfg[0].cycles = 1U;
-    g_bit_cfg[0].repeat = false;
-
-    g_bit_cfg[1].low_time = t1l;
-    g_bit_cfg[1].high_time = t1h;
-    g_bit_cfg[1].offset_time = 0U;
-    g_bit_cfg[1].cycles = 1U;
-    g_bit_cfg[1].repeat = false;
-
-    /*
-     * 使用实测的 TCXO 高速计数做纳秒换算。
-     * systick 在 WS63 端口是 32kHz，无法承载 WS2812 亚微秒时序。
-     */
-    {
-        uint64_t start_count = uapi_tcxo_get_count();
-        uint64_t end_count;
-        uapi_tcxo_delay_us(1000U);
-        end_count = uapi_tcxo_get_count();
-        if (end_count > start_count) {
-            g_tcxo_count_per_1000us = (uint32_t)(end_count - start_count);
-        }
-        if (g_tcxo_count_per_1000us == 0U) {
-            g_tcxo_count_per_1000us = 40000U;
-        }
-        g_t0h_count = (uint32_t)(((uint64_t)WS2812_T0H_NS * g_tcxo_count_per_1000us + 999999ULL) / 1000000ULL);
-        g_t0l_count = (uint32_t)(((uint64_t)WS2812_T0L_NS * g_tcxo_count_per_1000us + 999999ULL) / 1000000ULL);
-        g_t1h_count = (uint32_t)(((uint64_t)WS2812_T1H_NS * g_tcxo_count_per_1000us + 999999ULL) / 1000000ULL);
-        g_t1l_count = (uint32_t)(((uint64_t)WS2812_T1L_NS * g_tcxo_count_per_1000us + 999999ULL) / 1000000ULL);
-        if (g_t0h_count == 0U) { g_t0h_count = 1U; }
-        if (g_t0l_count == 0U) { g_t0l_count = 1U; }
-        if (g_t1h_count == 0U) { g_t1h_count = 1U; }
-        if (g_t1l_count == 0U) { g_t1l_count = 1U; }
-    }
-
-    osal_printk("[mine_rgb_led] pwm clk=%uHz, count T0H/T0L/T1H/T1L=%u/%u/%u/%u\r\n",
-        (unsigned int)g_pwm_clk_hz,
-        (unsigned int)t0h,
-        (unsigned int)t0l,
-        (unsigned int)t1h,
-        (unsigned int)t1l);
-    osal_printk("[mine_rgb_led] tcxo count T0H/T0L/T1H/T1L=%u/%u/%u/%u\r\n",
-        (unsigned int)g_t0h_count,
-        (unsigned int)g_t0l_count,
-        (unsigned int)g_t1h_count,
-        (unsigned int)g_t1l_count);
-}
-
-/**
- * @brief 切换到 GPIO 输出低电平并保持复位时间。
- *
- * 这样可以确保每帧后都有明确的 RESET 窗口，避免灯珠误判帧边界。
- */
-static void ws2812_hold_reset_low(void)
-{
-    (void)uapi_pin_set_mode(WS2812_PWM_PIN, GPIO_FUNC);
-    (void)uapi_gpio_set_dir(WS2812_PWM_PIN, GPIO_DIRECTION_OUTPUT);
-    (void)uapi_gpio_set_val(WS2812_PWM_PIN, GPIO_LEVEL_LOW);
-    uapi_tcxo_delay_us(WS2812_RESET_US);
-}
-
-/**
- * @brief DMA 传输完成/错误回调。
- *
- * @param intr DMA 中断类型。
- * @param channel DMA 通道。
- * @param arg 用户参数。
- */
-static void ws2812_dma_callback(uint8_t intr, uint8_t channel, uintptr_t arg)
-{
-    unused(channel);
-    unused(arg);
-
-    if (intr == WS2812_DMA_INTR_TFR) {
-        g_dma_done = true;
-    } else {
-        g_dma_error = true;
-    }
-}
-
-/**
- * @brief 使用 DMA 将 staging 帧复制到 active 帧。
- *
- * WS63 当前 DMA 握手源里没有 PWM 通道，因此这里采用“DMA 帧准备 + PWM 定时发送”的组合。
- * 这样既满足 PWM+DMA 架构，也能保证 WS2812 发送阶段的时序稳定。
- *
- * @param symbols 待复制的符号数。
- * @return errcode_t ERRCODE_SUCC 表示成功。
- */
-static errcode_t ws2812_dma_copy_frame(uint16_t symbols)
-{
-    dma_ch_user_memory_config_t cfg;
-    uint32_t wait_us = WS2812_DMA_WAIT_US;
-    uint32_t transfer_words;
-    errcode_t ret;
-
-    if ((symbols == 0U) || (symbols > WS2812_FRAME_SYMBOLS)) {
-        return ERRCODE_INVALID_PARAM;
-    }
-
-    transfer_words = ((uint32_t)symbols * (uint32_t)sizeof(pwm_config_t)) / sizeof(uint32_t);
-
-    cfg.src = (uint32_t)(uintptr_t)g_frame_staging;
-    cfg.dest = (uint32_t)(uintptr_t)g_frame_active;
-    cfg.transfer_num = (uint16_t)transfer_words;
-    cfg.priority = WS2812_DMA_PRIORITY_HIGH;
-    cfg.width = WS2812_DMA_WIDTH_WORD;
-
-    g_dma_done = false;
-    g_dma_error = false;
-    ret = uapi_dma_transfer_memory_single(&cfg, ws2812_dma_callback, (uintptr_t)symbols);
-    if (ret != ERRCODE_SUCC) {
-        return ret;
-    }
-
-    /* DMA copy 完成前不进入发送流程，避免发送与改写并发。 */
-    while ((!g_dma_done) && (!g_dma_error) && (wait_us > 0U)) {
-        uapi_tcxo_delay_us(1U);
-        wait_us--;
-    }
-
-    if ((!g_dma_done) || g_dma_error) {
-        return ERRCODE_FAIL;
-    }
-    return ERRCODE_SUCC;
-}
-
-/**
- * @brief 将 GRB 字节帧编码为 PWM 符号帧。
- *
- * 每个 bit 映射为一组 high/low 时长，顺序严格按“高位先发”。
- */
-static void ws2812_encode_frame(void)
-{
-    uint16_t symbol = 0U;
-    uint16_t idx;
-
-    for (idx = 0U; idx < (uint16_t)sizeof(g_grb_frame); idx++) {
-        uint8_t value = g_grb_frame[idx];
-        uint8_t bit;
-        for (bit = 0U; bit < 8U; bit++) {
-            uint8_t code = (uint8_t)((value & 0x80U) ? 1U : 0U);
-            g_frame_staging[symbol] = g_bit_cfg[code];
-            value <<= 1U;
-            symbol++;
-        }
-    }
-
-    g_symbol_total = symbol;
-}
-
-/**
- * @brief 按当前颜色与亮度生成 GRB 帧。
- */
-static void ws2812_build_grb_frame(void)
-{
-    const ws2812_color_t *color = &g_color_table[g_color_index];
-    uint8_t r = ws2812_apply_brightness(color->r, g_breath_percent);
-    uint8_t g = ws2812_apply_brightness(color->g, g_breath_percent);
-    uint8_t b = ws2812_apply_brightness(color->b, g_breath_percent);
-    uint16_t led;
-
-    for (led = 0U; led < WS2812_LED_COUNT; led++) {
-        uint16_t base = (uint16_t)(led * 3U);
-        g_grb_frame[base + 0U] = g;
-        g_grb_frame[base + 1U] = r;
-        g_grb_frame[base + 2U] = b;
-    }
-}
-
-/**
- * @brief 更新“呼吸亮度 + 颜色切换”状态机。
- */
-static void ws2812_step_breath(void)
-{
-    int16_t next_percent = (int16_t)g_breath_percent + (int16_t)g_breath_step;
-
-    if (next_percent >= (int16_t)WS2812_BREATH_MAX_PERCENT) {
-        g_breath_percent = WS2812_BREATH_MAX_PERCENT;
-        g_breath_step = -((int8_t)WS2812_BREATH_STEP_PERCENT);
-        return;
-    }
-
-    if (next_percent <= (int16_t)WS2812_BREATH_MIN_PERCENT) {
-        g_breath_percent = WS2812_BREATH_MIN_PERCENT;
-        g_breath_step = (int8_t)WS2812_BREATH_STEP_PERCENT;
-        g_color_index++;
-        if (g_color_index >= (uint8_t)(sizeof(g_color_table) / sizeof(g_color_table[0]))) {
-            g_color_index = 0U;
-        }
-        return;
-    }
-
-    g_breath_percent = (uint8_t)next_percent;
-}
-
-/**
- * @brief 按 TCXO tick 进行忙等延时。
+ * @brief 以 TCXO tick 进行忙等延时。
  *
  * @param ticks 需要延时的 tick 数。
  */
-static void ws2812_tcxo_delay_ticks(uint32_t ticks)
+static void ws2812_delay_ticks(uint32_t ticks)
 {
     uint64_t target = uapi_tcxo_get_count() + (uint64_t)ticks;
     while (uapi_tcxo_get_count() < target) {
@@ -350,105 +77,116 @@ static void ws2812_tcxo_delay_ticks(uint32_t ticks)
 }
 
 /**
- * @brief 发送单个 WS2812 码元。
+ * @brief 发送一个 WS2812 bit。
  *
- * @param one true 表示发送 1 码，false 表示发送 0 码。
+ * @param one true 发送“1”，false 发送“0”。
  */
 static void ws2812_write_bit(bool one)
 {
-    (void)uapi_gpio_set_val(WS2812_PWM_PIN, GPIO_LEVEL_HIGH);
+    (void)uapi_gpio_set_val(WS2812_GPIO_PIN, GPIO_LEVEL_HIGH);
     if (one) {
-        ws2812_tcxo_delay_ticks(g_t1h_count);
+        ws2812_delay_ticks(g_t1h_ticks);
     } else {
-        ws2812_tcxo_delay_ticks(g_t0h_count);
+        ws2812_delay_ticks(g_t0h_ticks);
     }
 
-    (void)uapi_gpio_set_val(WS2812_PWM_PIN, GPIO_LEVEL_LOW);
+    (void)uapi_gpio_set_val(WS2812_GPIO_PIN, GPIO_LEVEL_LOW);
     if (one) {
-        ws2812_tcxo_delay_ticks(g_t1l_count);
+        ws2812_delay_ticks(g_t1l_ticks);
     } else {
-        ws2812_tcxo_delay_ticks(g_t0l_count);
+        ws2812_delay_ticks(g_t0l_ticks);
     }
 }
 
 /**
- * @brief 发出一帧 WS2812 数据。
+ * @brief 按高位先发发送一个字节。
  *
- * @return errcode_t ERRCODE_SUCC 表示发送成功。
+ * @param value 待发送字节。
  */
-static errcode_t ws2812_send_frame(void)
+static void ws2812_write_byte(uint8_t value)
 {
-    uint16_t idx;
-    uint32_t irq_state;
-
-    /*
-     * 发送阶段临时关中断，避免任意任务切换导致 bit 间隔超过 35us 被识别为 RESET。
-     * 仅发送 24bit * LED_COUNT，临界区非常短。
-     */
-    irq_state = osal_irq_lock();
-    for (idx = 0U; idx < g_symbol_total; idx++) {
-        bool bit_one = (g_frame_active[idx].high_time > g_frame_active[idx].low_time);
-        ws2812_write_bit(bit_one);
+    uint8_t i;
+    for (i = 0U; i < 8U; i++) {
+        ws2812_write_bit((value & 0x80U) != 0U);
+        value <<= 1U;
     }
+}
+
+/**
+ * @brief 发送固定红色（GRB）。
+ */
+static void ws2812_send_red(void)
+{
+    uint32_t irq_state = osal_irq_lock();
+
+    ws2812_write_byte(WS2812_RED_G);
+    ws2812_write_byte(WS2812_RED_R);
+    ws2812_write_byte(WS2812_RED_B);
+
     osal_irq_restore(irq_state);
 
-    ws2812_hold_reset_low();
-    return ERRCODE_SUCC;
+    /* 一帧结束后的复位低电平。 */
+    (void)uapi_gpio_set_val(WS2812_GPIO_PIN, GPIO_LEVEL_LOW);
+    uapi_tcxo_delay_us(WS2812_RESET_US);
 }
 
 /**
- * @brief 初始化 WS2812 所需的 GPIO/PWM/DMA 资源。
+ * @brief 初始化 GPIO 和时序标定。
  *
- * @return errcode_t ERRCODE_SUCC 表示初始化成功。
+ * @return errcode_t 成功返回 ERRCODE_SUCC。
  */
-static errcode_t ws2812_init(void)
+static errcode_t ws2812_gpio_init(void)
 {
     errcode_t ret;
+    uint64_t start_count;
+    uint64_t end_count;
 
+    (void)uapi_tcxo_init();
     uapi_gpio_init();
 
-    ret = uapi_pin_set_mode(WS2812_PWM_PIN, GPIO_FUNC);
+    ret = uapi_pin_set_mode(WS2812_GPIO_PIN, WS2812_GPIO_MODE);
     if (ret != ERRCODE_SUCC) {
-        osal_printk("[mine_rgb_led] pin mode failed, ret=0x%x\r\n", (unsigned int)ret);
         return ret;
     }
 
-    ret = uapi_pin_set_pull(WS2812_PWM_PIN, PIN_PULL_TYPE_DISABLE);
+    ret = uapi_pin_set_pull(WS2812_GPIO_PIN, WS2812_PIN_PULL_NONE);
     if (ret != ERRCODE_SUCC) {
-        osal_printk("[mine_rgb_led] pin pull failed, ret=0x%x\r\n", (unsigned int)ret);
         return ret;
     }
 
-    ret = uapi_gpio_set_dir(WS2812_PWM_PIN, GPIO_DIRECTION_OUTPUT);
+    ret = uapi_gpio_set_dir(WS2812_GPIO_PIN, GPIO_DIRECTION_OUTPUT);
     if (ret != ERRCODE_SUCC) {
-        osal_printk("[mine_rgb_led] gpio dir failed, ret=0x%x\r\n", (unsigned int)ret);
         return ret;
     }
 
-    (void)uapi_gpio_set_val(WS2812_PWM_PIN, GPIO_LEVEL_LOW);
+    (void)uapi_gpio_set_val(WS2812_GPIO_PIN, GPIO_LEVEL_LOW);
 
-    /* 保留 PWM 时钟读取，仅用于日志与参数换算参考。 */
-    g_pwm_clk_hz = uapi_pwm_get_frequency(WS2812_PWM_CHANNEL);
-
-    ret = uapi_dma_init();
-    if (ret != ERRCODE_SUCC) {
-        osal_printk("[mine_rgb_led] dma init failed, ret=0x%x\r\n", (unsigned int)ret);
-        return ret;
+    /* 标定 1000us 的 TCXO tick 数，用于换算亚微秒时序。 */
+    start_count = uapi_tcxo_get_count();
+    uapi_tcxo_delay_us(1000U);
+    end_count = uapi_tcxo_get_count();
+    if (end_count > start_count) {
+        g_tcxo_ticks_per_1000us = (uint32_t)(end_count - start_count);
+    }
+    if (g_tcxo_ticks_per_1000us == 0U) {
+        g_tcxo_ticks_per_1000us = 40000U;
     }
 
-    ret = uapi_dma_open();
-    if (ret != ERRCODE_SUCC) {
-        osal_printk("[mine_rgb_led] dma open failed, ret=0x%x\r\n", (unsigned int)ret);
-        return ret;
-    }
+    g_t0h_ticks = ws2812_ns_to_ticks(WS2812_T0H_NS);
+    g_t0l_ticks = ws2812_ns_to_ticks(WS2812_T0L_NS);
+    g_t1h_ticks = ws2812_ns_to_ticks(WS2812_T1H_NS);
+    g_t1l_ticks = ws2812_ns_to_ticks(WS2812_T1L_NS);
 
-    ws2812_calibrate_timing();
-    ws2812_hold_reset_low();
+    osal_printk("[mine_rgb_led] gpio bitbang red start, T0H/T0L/T1H/T1L ticks=%u/%u/%u/%u\r\n",
+        (unsigned int)g_t0h_ticks,
+        (unsigned int)g_t0l_ticks,
+        (unsigned int)g_t1h_ticks,
+        (unsigned int)g_t1l_ticks);
     return ERRCODE_SUCC;
 }
 
 /**
- * @brief WS2812 多色呼吸任务。
+ * @brief GPIO 软件模拟 WS2812 任务，仅输出红色。
  *
  * @param arg 任务参数。
  * @return void* 固定返回 NULL。
@@ -458,35 +196,17 @@ static void *ws2812_task(const char *arg)
     errcode_t ret;
 
     (void)arg;
-    osal_printk("\r\n[mine_rgb_led] WS2812 PWM+DMA breathing start\r\n");
 
-    ret = ws2812_init();
+    ret = ws2812_gpio_init();
     if (ret != ERRCODE_SUCC) {
-        osal_printk("[mine_rgb_led] init failed, ret=%d\r\n", (int)ret);
+        osal_printk("[mine_rgb_led] gpio init failed, ret=0x%x\r\n", (unsigned int)ret);
         return NULL;
     }
 
     while (1) {
-        ws2812_build_grb_frame();
-        ws2812_encode_frame();
-
-        ret = ws2812_dma_copy_frame(g_symbol_total);
-        if (ret != ERRCODE_SUCC) {
-            osal_printk("[mine_rgb_led] dma copy failed, ret=%d\r\n", (int)ret);
-            uapi_tcxo_delay_ms(5U);
-            continue;
-        }
-
-        ret = ws2812_send_frame();
-        if (ret != ERRCODE_SUCC) {
-            osal_printk("[mine_rgb_led] pwm send failed, ret=%d\r\n", (int)ret);
-            uapi_tcxo_delay_ms(5U);
-            continue;
-        }
-
-        ws2812_step_breath();
+        ws2812_send_red();
         (void)uapi_watchdog_kick();
-        uapi_tcxo_delay_ms(WS2812_FRAME_INTERVAL_MS);
+        uapi_tcxo_delay_ms(WS2812_REFRESH_MS);
     }
 }
 
