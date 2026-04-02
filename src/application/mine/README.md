@@ -231,23 +231,6 @@ ws63_final/
    - 使用 `mine_ws63_final_task_register_rx_callback()` 注册子串口接收处理。
    - 使用 `mine_ws63_final_task_send()` 向指定子串口发送业务数据。
 
-## 10. RGB LED 单灯模块（可选）
-
-1. 目录：`application/mine/rgb_led`
-2. 使能开关：
-   - `Application -> Mine -> Support Mine RGB LED Demo (GPIO4 DI).`
-3. 硬件连接：
-   - 仅支持单颗灯珠，`DI -> GPIO4`，`DO` 悬空。
-4. 时序来源：
-   - 依据 `application/mine/lib/RGB_LED.pdf` 抽取的 `WS2812B` 兼容时序实现。
-   - 按 `GRB` 顺序发送 24bit，帧尾发送复位低电平。
-5. 示例行为：
-   - 启动后循环显示：红 -> 绿 -> 蓝 -> 白 -> 灭灯（每步 500ms）。
-6. 关键实现：
-   - 使用 `GPIO4` 复用 `PWM4` 输出单线波形。
-   - 通过 `PWM + DMA` 实现帧准备和发送：DMA 负责帧缓冲搬运，PWM 负责时序输出。
-   - 按手册时序窗口生成 `0/1` 码高低电平占空比，并在帧尾追加复位低电平窗口。
-
 ## 11. 快速联调步骤
 
 
@@ -272,11 +255,6 @@ ws63_final/
 4. 现象：`FP STATUS`、`FP VERIFY` 等短命令无回显。
    - 已兼容“无 CRLF 结尾”的命令帧；若仍无响应，确认命令前缀为 `FP` 或 `ZW101`。
 
-5. 现象：RGB 灯珠不亮或颜色异常。
-   - 确认仅接单颗灯珠，`DI` 接 `GPIO4`，`DO` 悬空。
-   - 确认供电为灯珠规格范围，且控制器与灯珠地线共地。
-   - 若现场频点/负载导致边沿误差，可在 `mine_rgb_led_drv.c` 中微调 `T0H/T1H/T0L/T1L` 常量。
-
 ## 13. README 维护约定
 
 1. 每次需求完成后（代码修改 + 编译验证），必须同步更新本 `README`。
@@ -289,18 +267,6 @@ ws63_final/
 
 ## 14. 变更记录
 
-### 2026-04-01
-
-1. 新增 `application/mine/rgb_led`：`WS2812` 单灯 `PWM4 + DMA` 示例。
-2. 固定连接方式：`GPIO4` 复用模式 `1` 输出 `PWM4`，灯珠 `DI -> GPIO4`。
-3. 发送顺序遵循 `GRB`（高位先发），帧尾附加低电平复位时间。
-4. 文档来源统一到 `application/mine/lib/RGB_LED.pdf`。
-5. 编译验证：在 `src` 目录执行 `python3 build.py -c ws63-liteos-app`，结果见本次任务执行记录。
-6. 运行稳定性修复：`rgb_led` 任务增加启动延迟（默认 30000ms），避开 `cali_offline_cali_entry` 射频校准窗口，降低与 `wifi_frw` 校准链路冲突风险。
-7. 发送链路优化：PWM 通道改为一次初始化复用，运行期仅执行 preload + start/stop，避免每帧 open/close + IRQ free 引入抖动。
-8. 适配 `application/mine/rgb_led/example_rgb.c`（外部板卡已验证 demo）到 WS63 API：修正 PWM 分组接口用法、补充错误码日志、保持 GPIO4(PWM4) 两种占空比循环输出行为。
-9. 在 `PWM V151` 下新增 WS2812 颜色循环显示：红 -> 绿 -> 蓝 -> 白 -> 灭；`PWM V150` 保留原始占空比波形循环作为兼容回退。
-
 ### 2026-03-31
 
 1. 新增 `application/mine/ws63_final` 最终版分层框架（`Config/Common/BSP/Driver/Middleware/App`）。
@@ -310,14 +276,6 @@ ws63_final/
    - `mine_ws63_final_task_register_rx_callback()`
    - `mine_ws63_final_task_send()`
 5. 编译验证：在 `src` 目录执行 `python3 build.py ws63-liteos-app`，结果通过（见任务执行记录）。
-
-### 2026-03-27
-
-1. 新增 `application/mine/rgb_led` 单颗 RGB 灯珠模块（驱动 + 示例任务）。
-2. 驱动固定 `DI=GPIO4`，按手册 `GRB` 顺序发送 24bit，并在帧末输出复位低电平。
-3. 新增编译开关：`Support Mine RGB LED Demo (GPIO4 DI).`
-4. 示例线程启动后循环展示基础色：红/绿/蓝/白/灭灯。
-5. 编译验证：在 `src` 目录执行 `python3 build.py -c ws63-liteos-app`，结果见本次任务执行记录。
 
 ### 2026-03-18
 
