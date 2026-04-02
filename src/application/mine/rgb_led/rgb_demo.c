@@ -45,10 +45,10 @@
  * WS2812 位编码时序依赖 CPU 主频，此处使用 NOP 粗调脉宽。
  * 若实测颜色异常或闪烁，请根据示波器波形微调以下参数。
  */
-#define WS2812_T0H_NOP                   4U
-#define WS2812_T0L_NOP                   10U
-#define WS2812_T1H_NOP                   9U
-#define WS2812_T1L_NOP                   5U
+#define WS2812_T0H_NOP                   8U
+#define WS2812_T0L_NOP                   18U
+#define WS2812_T1H_NOP                   15U
+#define WS2812_T1L_NOP                   11U
 
 typedef struct {
     uint8_t r;
@@ -176,12 +176,23 @@ static void ws2812_reset_latch(void)
  *
  * @param color 目标颜色。
  */
-static void ws2812_set_color(const ws2812_color_t *color)
+static void ws2812_set_color(const ws2812_color_t *color, uint32_t *send_us, uint32_t *reset_us)
 {
     uint32_t irq_state;
+    uint64_t t_send_begin;
+    uint64_t t_send_end;
+    uint64_t t_reset_begin;
+    uint64_t t_reset_end;
 
     if (color == NULL) {
         return;
+    }
+
+    if (send_us != NULL) {
+        *send_us = 0U;
+    }
+    if (reset_us != NULL) {
+        *reset_us = 0U;
     }
 
     /*
@@ -189,12 +200,25 @@ static void ws2812_set_color(const ws2812_color_t *color)
      * 发送完成后立即恢复中断，避免影响系统实时性。
      */
     irq_state = osal_irq_lock();
+
+    t_send_begin = uapi_tcxo_get_us();
     ws2812_send_byte(color->g);
     ws2812_send_byte(color->r);
     ws2812_send_byte(color->b);
+    t_send_end = uapi_tcxo_get_us();
+
     osal_irq_restore(irq_state);
 
+    t_reset_begin = uapi_tcxo_get_us();
     ws2812_reset_latch();
+    t_reset_end = uapi_tcxo_get_us();
+
+    if (send_us != NULL) {
+        *send_us = (uint32_t)(t_send_end - t_send_begin);
+    }
+    if (reset_us != NULL) {
+        *reset_us = (uint32_t)(t_reset_end - t_reset_begin);
+    }
 }
 
 /**
@@ -266,8 +290,8 @@ static void *rgb_led_task(const char *arg)
     uint32_t frame_cnt = 0U;
     uint64_t tx_begin_us;
     uint64_t tx_end_us;
-    uint64_t wave_begin_us;
-    uint64_t wave_end_us;
+    uint32_t send24_us;
+    uint32_t reset_cost_us;
 
     unused(arg);
 
@@ -292,17 +316,17 @@ static void *rgb_led_task(const char *arg)
                 (unsigned long long)tx_begin_us);
 #endif
 
-            wave_begin_us = uapi_tcxo_get_us();
-            ws2812_set_color(&g_ws2812_demo_colors[i]);
+            ws2812_set_color(&g_ws2812_demo_colors[i], &send24_us, &reset_cost_us);
             tx_end_us = uapi_tcxo_get_us();
-            wave_end_us = tx_end_us;
 
 #if (WS2812_DEBUG_LOG_ENABLE == 1)
-            osal_printk("[mine_rgb][loop] frame=%u idx=%u total_cost_us=%llu wave_cost_us=%llu gpio_out=%u\\r\\n",
+            osal_printk("[mine_rgb][loop] frame=%u idx=%u total_cost_us=%llu send24_us=%u reset_us=%u bit_ns=%u gpio_out=%u\\r\\n",
                 (unsigned int)frame_cnt,
                 (unsigned int)i,
                 (unsigned long long)(tx_end_us - tx_begin_us),
-                (unsigned long long)(wave_end_us - wave_begin_us),
+                (unsigned int)send24_us,
+                (unsigned int)reset_cost_us,
+                (unsigned int)((send24_us * 1000U) / 24U),
                 (unsigned int)uapi_gpio_get_output_val(WS2812_DATA_PIN));
 #endif
 
