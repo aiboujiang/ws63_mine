@@ -10,8 +10,14 @@
 #define RGB_LED_TASK_PRIO                24
 #define RGB_LED_TASK_STACK_SIZE          0x1000
 
-/* WS2812 数据脚，默认使用 GPIO0，可按硬件连线修改。 */
-#define WS2812_DATA_PIN                  GPIO_00
+/* WS2812 数据脚使用 GPIO4。 */
+#define WS2812_DATA_PIN                  GPIO_04
+
+/*
+ * 按当前硬件连线要求，GPIO4 需先切到复用信号2，
+ * 再作为普通 GPIO 输出使用。
+ */
+#define WS2812_DATA_PIN_MODE             PIN_MODE_2
 
 /* WS2812 的复位锁存时间要求 > 50us，这里留出裕量。 */
 #define WS2812_RESET_LATCH_US            80U
@@ -128,7 +134,7 @@ static errcode_t ws2812_init(void)
     (void)uapi_tcxo_init();
     uapi_gpio_init();
 
-    ret = uapi_pin_set_mode(WS2812_DATA_PIN, HAL_PIO_FUNC_GPIO);
+    ret = uapi_pin_set_mode(WS2812_DATA_PIN, WS2812_DATA_PIN_MODE);
     if (ret != ERRCODE_SUCC) {
         return ret;
     }
@@ -166,7 +172,7 @@ static void *rgb_led_task(const char *arg)
         return NULL;
     }
 
-    osal_printk("[mine_rgb] ws2812 demo start on GPIO_00\\r\\n");
+    osal_printk("[mine_rgb] ws2812 demo start on GPIO_04 (PIN_MODE_2)\\r\\n");
 
     while (1) {
         for (i = 0U; i < (uint32_t)(sizeof(g_ws2812_demo_colors) / sizeof(g_ws2812_demo_colors[0])); i++) {
