@@ -12,7 +12,9 @@
 #include "wk2114.h"
 #include "ld2402.h"
 #include "zw101.h"
+#if (WS63_RGB_ENABLE == 1U)
 #include "ws63_rgb_ws2812.h"
+#endif
 #include "ws63_final_osal.h"
 #include "ws63_final_sle.h"
 #include "watchdog.h"
@@ -23,6 +25,7 @@
 static ws63_rx_callback_t g_ws63_rx_cb[WS63_SUBPORT_MAX + 1U] = {0};
 static uint32_t g_ws63_last_log_ms[WS63_SUBPORT_MAX + 1U] = {0};
 
+#if (WS63_RGB_ENABLE == 1U)
 /* RGB 演示颜色表：固定红绿蓝循环。 */
 static const ws63_rgb_color_t g_ws63_rgb_demo_colors[] = {
     {255U, 0U, 0U},
@@ -34,6 +37,7 @@ static const ws63_rgb_color_t g_ws63_rgb_demo_colors[] = {
 static uint8_t g_ws63_rgb_ready = 0U;
 static uint8_t g_ws63_rgb_color_index = 0U;
 static uint32_t g_ws63_rgb_last_switch_ms = 0U;
+#endif
 
 /**
  * @brief 处理 SLE 下行数据：按模块开关分发到对应子口。
@@ -216,8 +220,6 @@ static void ws63_rgb_demo_init(void)
     g_ws63_rgb_color_index = 0U;
     g_ws63_rgb_last_switch_ms = ws63_os_tick_ms() - WS63_RGB_DEMO_INTERVAL_MS;
     osal_printk("[wk2114 final task] rgb demo start (SPI1/GPIO1+GPIO6)\r\n");
-#else
-    g_ws63_rgb_ready = 0U;
 #endif
 }
 

@@ -129,7 +129,7 @@ extern "C" {
 #define WS63_SLE_FALLBACK_MAC           {0xE2, 0x00, 0x73, 0xC8, 0x11, 0x02}
 
 /* RGB WS2812 演示开关：0=关闭，1=开启。 */
-#define WS63_RGB_ENABLE                 1U
+#define WS63_RGB_ENABLE                 0U
 
 /* WS2812 使用 SPI1 输出：GPIO1=SPI1_OUT(GPIO1 Mode3), GPIO6=SPI1_SCK(GPIO6 Mode3)。 */
 #define WS63_RGB_SPI_BUS                SPI_BUS_1
