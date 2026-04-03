@@ -32,10 +32,15 @@
 
 /* 仅低 12 位有效，对应 ELE0~ELE11。 */
 #define MPR121_TOUCH_VALID_MASK          0x0FFFU
+#define MPR121_ELECTRODE_COUNT           12U
 
-/* 任务参数：与 mine 现有模块保持一致的优先级区间。 */
-#define MPR121_TASK_PRIO                 26
-#define MPR121_TASK_STACK_SIZE           0x1000
+/* I2C 通信容错：读写失败后进行短延时重试。 */
+#define MPR121_I2C_RW_RETRY_MAX          3U
+#define MPR121_I2C_RW_RETRY_DELAY_MS     2U
+
+/* 任务参数：本任务逻辑较轻，适当降低优先级并缩小栈占用。 */
+#define MPR121_TASK_PRIO                 27
+#define MPR121_TASK_STACK_SIZE           0x0C00
 #define MPR121_TASK_POLL_MS              10U
 #define MPR121_BOOT_DELAY_MS             100U
 #define MPR121_INIT_RETRY_MS             3000U
@@ -45,6 +50,89 @@ static volatile uint8_t g_mpr121_irq_pending = 0U;
 
 /* 记录上次状态用于边沿检测，避免长按重复刷屏。 */
 static uint16_t g_mpr121_last_status = 0U;
+
+/* 保存任务句柄，避免误释放内核对象导致异常。 */
+static osal_task *g_mpr121_task_handle = NULL;
+
+/**
+ * @brief 置位 IRQ 待处理标志（带发布屏障）。
+ */
+static inline void mpr121_irq_pending_set(void)
+{
+    g_mpr121_irq_pending = 1U;
+    osal_wmb();
+}
+
+/**
+ * @brief 原子读取并清零 IRQ 待处理标志（带获取屏障）。
+ *
+ * @return uint8_t 1 表示有待处理 IRQ，0 表示无事件。
+ */
+static inline uint8_t mpr121_irq_pending_test_and_clear(void)
+{
+    uint8_t pending;
+    unsigned int irq_state;
+
+    /*
+     * 通过关中断保护“读并清零”临界区，避免 ISR 与线程并发导致事件丢失。
+     * 配合 rmb/mb 保证跨上下文的可见性顺序。
+     */
+    irq_state = osal_irq_lock();
+    osal_rmb();
+    pending = g_mpr121_irq_pending;
+    g_mpr121_irq_pending = 0U;
+    osal_mb();
+    osal_irq_restore(irq_state);
+    return pending;
+}
+
+/**
+ * @brief I2C 写事务（带重试）。
+ *
+ * @param data 发送数据描述。
+ * @return errcode_t ERRCODE_SUCC 表示成功。
+ */
+static errcode_t mpr121_i2c_write_retry(i2c_data_t *data)
+{
+    errcode_t ret = ERRCODE_FAIL;
+
+    for (uint8_t attempt = 0U; attempt < MPR121_I2C_RW_RETRY_MAX; attempt++) {
+        ret = uapi_i2c_master_write(I2C_BUS_1, MPR121_I2C_ADDR, data);
+        if (ret == ERRCODE_SUCC) {
+            return ERRCODE_SUCC;
+        }
+
+        if ((attempt + 1U) < MPR121_I2C_RW_RETRY_MAX) {
+            (void)osal_msleep(MPR121_I2C_RW_RETRY_DELAY_MS);
+        }
+    }
+
+    return ret;
+}
+
+/**
+ * @brief I2C 写后读事务（带重试）。
+ *
+ * @param data 收发数据描述。
+ * @return errcode_t ERRCODE_SUCC 表示成功。
+ */
+static errcode_t mpr121_i2c_writeread_retry(i2c_data_t *data)
+{
+    errcode_t ret = ERRCODE_FAIL;
+
+    for (uint8_t attempt = 0U; attempt < MPR121_I2C_RW_RETRY_MAX; attempt++) {
+        ret = uapi_i2c_master_writeread(I2C_BUS_1, MPR121_I2C_ADDR, data);
+        if (ret == ERRCODE_SUCC) {
+            return ERRCODE_SUCC;
+        }
+
+        if ((attempt + 1U) < MPR121_I2C_RW_RETRY_MAX) {
+            (void)osal_msleep(MPR121_I2C_RW_RETRY_DELAY_MS);
+        }
+    }
+
+    return ret;
+}
 
 /**
  * @brief GPIO5 中断回调。
@@ -59,7 +147,7 @@ static void mpr121_irq_callback(pin_t pin, uintptr_t param)
         return;
     }
 
-    g_mpr121_irq_pending = 1U;
+    mpr121_irq_pending_set();
 }
 
 /**
@@ -79,30 +167,31 @@ static errcode_t mpr121_write_reg(uint8_t reg_addr, uint8_t reg_val)
     data.receive_buf = NULL;
     data.receive_len = 0;
 
-    return uapi_i2c_master_write(I2C_BUS_1, MPR121_I2C_ADDR, &data);
+    return mpr121_i2c_write_retry(&data);
 }
 
 /**
- * @brief 读取 MPR121 单个寄存器。
+ * @brief 从指定寄存器起始地址连续读取多个字节。
  *
- * @param reg_addr 寄存器地址。
- * @param reg_val 输出参数，返回寄存器值。
+ * @param start_reg 起始寄存器地址。
+ * @param read_buf  读取缓冲区。
+ * @param read_len  读取长度。
  * @return errcode_t ERRCODE_SUCC 表示成功。
  */
-static errcode_t mpr121_read_reg(uint8_t reg_addr, uint8_t *reg_val)
+static errcode_t mpr121_read_regs(uint8_t start_reg, uint8_t *read_buf, uint8_t read_len)
 {
     i2c_data_t data = {0};
 
-    if (reg_val == NULL) {
+    if ((read_buf == NULL) || (read_len == 0U)) {
         return ERRCODE_INVALID_PARAM;
     }
 
-    data.send_buf = &reg_addr;
+    data.send_buf = &start_reg;
     data.send_len = 1U;
-    data.receive_buf = reg_val;
-    data.receive_len = 1U;
+    data.receive_buf = read_buf;
+    data.receive_len = read_len;
 
-    return uapi_i2c_master_writeread(I2C_BUS_1, MPR121_I2C_ADDR, &data);
+    return mpr121_i2c_writeread_retry(&data);
 }
 
 /**
@@ -115,6 +204,7 @@ static errcode_t mpr121_read_reg(uint8_t reg_addr, uint8_t *reg_val)
 static errcode_t mpr121_quick_config(void)
 {
     errcode_t ret;
+    uint8_t ele_idx;
 
     /* Section A: data > baseline 时的滤波参数。 */
     ret = mpr121_write_reg(MHD_R, 0x01U);
@@ -152,102 +242,23 @@ static errcode_t mpr121_quick_config(void)
         return ret;
     }
 
-    /* Section C: 每路电极触摸/释放阈值。 */
-    ret = mpr121_write_reg(ELE0_T, TOU_THRESH);
-    if (ret != ERRCODE_SUCC) {
-        return ret;
-    }
-    ret = mpr121_write_reg(ELE0_R, REL_THRESH);
-    if (ret != ERRCODE_SUCC) {
-        return ret;
-    }
-    ret = mpr121_write_reg(ELE1_T, TOU_THRESH);
-    if (ret != ERRCODE_SUCC) {
-        return ret;
-    }
-    ret = mpr121_write_reg(ELE1_R, REL_THRESH);
-    if (ret != ERRCODE_SUCC) {
-        return ret;
-    }
-    ret = mpr121_write_reg(ELE2_T, TOU_THRESH);
-    if (ret != ERRCODE_SUCC) {
-        return ret;
-    }
-    ret = mpr121_write_reg(ELE2_R, REL_THRESH);
-    if (ret != ERRCODE_SUCC) {
-        return ret;
-    }
-    ret = mpr121_write_reg(ELE3_T, TOU_THRESH);
-    if (ret != ERRCODE_SUCC) {
-        return ret;
-    }
-    ret = mpr121_write_reg(ELE3_R, REL_THRESH);
-    if (ret != ERRCODE_SUCC) {
-        return ret;
-    }
-    ret = mpr121_write_reg(ELE4_T, TOU_THRESH);
-    if (ret != ERRCODE_SUCC) {
-        return ret;
-    }
-    ret = mpr121_write_reg(ELE4_R, REL_THRESH);
-    if (ret != ERRCODE_SUCC) {
-        return ret;
-    }
-    ret = mpr121_write_reg(ELE5_T, TOU_THRESH);
-    if (ret != ERRCODE_SUCC) {
-        return ret;
-    }
-    ret = mpr121_write_reg(ELE5_R, REL_THRESH);
-    if (ret != ERRCODE_SUCC) {
-        return ret;
-    }
-    ret = mpr121_write_reg(ELE6_T, TOU_THRESH);
-    if (ret != ERRCODE_SUCC) {
-        return ret;
-    }
-    ret = mpr121_write_reg(ELE6_R, REL_THRESH);
-    if (ret != ERRCODE_SUCC) {
-        return ret;
-    }
-    ret = mpr121_write_reg(ELE7_T, TOU_THRESH);
-    if (ret != ERRCODE_SUCC) {
-        return ret;
-    }
-    ret = mpr121_write_reg(ELE7_R, REL_THRESH);
-    if (ret != ERRCODE_SUCC) {
-        return ret;
-    }
-    ret = mpr121_write_reg(ELE8_T, TOU_THRESH);
-    if (ret != ERRCODE_SUCC) {
-        return ret;
-    }
-    ret = mpr121_write_reg(ELE8_R, REL_THRESH);
-    if (ret != ERRCODE_SUCC) {
-        return ret;
-    }
-    ret = mpr121_write_reg(ELE9_T, TOU_THRESH);
-    if (ret != ERRCODE_SUCC) {
-        return ret;
-    }
-    ret = mpr121_write_reg(ELE9_R, REL_THRESH);
-    if (ret != ERRCODE_SUCC) {
-        return ret;
-    }
-    ret = mpr121_write_reg(ELE10_T, TOU_THRESH);
-    if (ret != ERRCODE_SUCC) {
-        return ret;
-    }
-    ret = mpr121_write_reg(ELE10_R, REL_THRESH);
-    if (ret != ERRCODE_SUCC) {
-        return ret;
-    }
-    ret = mpr121_write_reg(ELE11_T, TOU_THRESH);
-    if (ret != ERRCODE_SUCC) {
-        return ret;
-    }
-    ret = mpr121_write_reg(ELE11_R, REL_THRESH);
-    if (ret != ERRCODE_SUCC) {
-        return ret;
+    /*
+     * Section C: 每路电极触摸/释放阈值。
+     * ELE0_T/ELE0_R 起始后按 2 字节步进连续排布，可用循环减少冗余。
+     */
+    for (ele_idx = 0U; ele_idx < MPR121_ELECTRODE_COUNT; ele_idx++) {
+        uint8_t touch_reg = (uint8_t)(ELE0_T + (ele_idx * 2U));
+        uint8_t release_reg = (uint8_t)(touch_reg + 1U);
+
+        ret = mpr121_write_reg(touch_reg, TOU_THRESH);
+        if (ret != ERRCODE_SUCC) {
+            return ret;
+        }
+
+        ret = mpr121_write_reg(release_reg, REL_THRESH);
+        if (ret != ERRCODE_SUCC) {
+            return ret;
+        }
     }
 
     /* Section D: Filter Configuration。 */
@@ -257,7 +268,7 @@ static errcode_t mpr121_quick_config(void)
     }
 
     /* Section E: 使能 12 路电极，切到 run 模式。 */
-    ret = mpr121_write_reg(ELE_CFG, 0x0CU);
+    ret = mpr121_write_reg(ELE_CFG, 0x7FU);
     if (ret != ERRCODE_SUCC) {
         return ret;
     }
@@ -274,24 +285,22 @@ static errcode_t mpr121_quick_config(void)
 static errcode_t mpr121_read_touch_status(uint16_t *touch_status)
 {
     errcode_t ret;
-    uint8_t status_l;
-    uint8_t status_h;
+    uint8_t status_buf[2] = {0};
 
     if (touch_status == NULL) {
         return ERRCODE_INVALID_PARAM;
     }
 
-    ret = mpr121_read_reg(MPR121_REG_TOUCH_STATUS_L, &status_l);
+    /*
+     * 连续读 0x00/0x01，保证同一事务内获取状态快照，
+     * 避免分两次读导致低/高字节跨采样窗口产生撕裂。
+     */
+    ret = mpr121_read_regs(MPR121_REG_TOUCH_STATUS_L, status_buf, sizeof(status_buf));
     if (ret != ERRCODE_SUCC) {
         return ret;
     }
 
-    ret = mpr121_read_reg(MPR121_REG_TOUCH_STATUS_H, &status_h);
-    if (ret != ERRCODE_SUCC) {
-        return ret;
-    }
-
-    *touch_status = (((uint16_t)status_h << 8U) | (uint16_t)status_l) & MPR121_TOUCH_VALID_MASK;
+    *touch_status = (((uint16_t)status_buf[1] << 8U) | (uint16_t)status_buf[0]) & MPR121_TOUCH_VALID_MASK;
     return ERRCODE_SUCC;
 }
 
@@ -425,7 +434,7 @@ static errcode_t mpr121_init(void)
 
     /* 若上电瞬间已经有触摸，确保线程能在下一轮读取到状态。 */
     if (uapi_gpio_get_val(MPR121_IRQ_PIN) == GPIO_LEVEL_LOW) {
-        g_mpr121_irq_pending = 1U;
+        mpr121_irq_pending_set();
     }
 
     osal_printk("[mpr121] init ok: I2C1 SDA=GPIO15(mode2), SCL=GPIO16(mode2), IRQ=GPIO5\r\n");
@@ -521,9 +530,11 @@ static void *mpr121_keypad_task(const char *arg)
     osal_printk("[mpr121] keypad task started, output mode=raw status\r\n");
 
     while (1) {
+        uint8_t irq_pending;
+
         /* IRQ 事件优先，IRQ 线低电平作为兜底，防止极端场景漏中断。 */
-        if ((g_mpr121_irq_pending != 0U) || (uapi_gpio_get_val(MPR121_IRQ_PIN) == GPIO_LEVEL_LOW)) {
-            g_mpr121_irq_pending = 0U;
+        irq_pending = mpr121_irq_pending_test_and_clear();
+        if ((irq_pending != 0U) || (uapi_gpio_get_val(MPR121_IRQ_PIN) == GPIO_LEVEL_LOW)) {
             mpr121_process_touch_once();
         }
 
@@ -538,16 +549,19 @@ static void *mpr121_keypad_task(const char *arg)
  */
 static void mpr121_keypad_entry(void)
 {
-    osal_task *task_handle = NULL;
-
     osal_kthread_lock();
-    task_handle = osal_kthread_create((osal_kthread_handler)mpr121_keypad_task,
-        0,
-        "Mpr121Task",
-        MPR121_TASK_STACK_SIZE);
-    if (task_handle != NULL) {
-        osal_kthread_set_priority(task_handle, MPR121_TASK_PRIO);
-        osal_kfree(task_handle);
+    if (g_mpr121_task_handle == NULL) {
+        g_mpr121_task_handle = osal_kthread_create((osal_kthread_handler)mpr121_keypad_task,
+            0,
+            "Mpr121Task",
+            MPR121_TASK_STACK_SIZE);
+        if (g_mpr121_task_handle != NULL) {
+            if (osal_kthread_set_priority(g_mpr121_task_handle, MPR121_TASK_PRIO) != OSAL_SUCCESS) {
+                osal_printk("[mpr121] set task priority failed\r\n");
+            }
+        } else {
+            osal_printk("[mpr121] create task failed\r\n");
+        }
     }
     osal_kthread_unlock();
 }
