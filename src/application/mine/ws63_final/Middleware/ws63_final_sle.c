@@ -23,6 +23,12 @@
 #define WS63_SLE_TAG_ZW101  "[ZW101]"
 #define WS63_SLE_TAG_CAMERA "[CAMERA]"
 
+#if (WS63_SLE_LOG_ENABLE == 1U)
+#define WS63_SLE_LOG(fmt, ...) osal_printk("[ws63 sle] " fmt "\r\n", ##__VA_ARGS__)
+#else
+#define WS63_SLE_LOG(...) do { } while (0)
+#endif
+
 /* UUID 在 SDK 结构体中的 16bit 高低字节索引。 */
 #define WS63_UUID_BASE_INDEX_14 14
 #define WS63_UUID_BASE_INDEX_15 15
@@ -127,10 +133,12 @@ static void ws63_sle_prepare_mac(void)
     uint8_t sle_mac[SLE_ADDR_LEN] = {0};
 
     if (get_dev_addr(sle_mac, SLE_ADDR_LEN, IFTYPE_SLE) == ERRCODE_SUCC) {
+        WS63_SLE_LOG("use system mac");
         return;
     }
 
     (void)set_dev_addr(g_ws63_sle_fallback_mac, SLE_ADDR_LEN, IFTYPE_SLE);
+    WS63_SLE_LOG("use fallback mac");
 }
 
 /**
@@ -207,6 +215,9 @@ static void ws63_sle_start_scan(void)
 
     g_ws63_sle_seek_started = true;
     g_ws63_sle_seek_stop_pending = false;
+    /* 仅在扫描真正启动成功后打印一次，避免周期流程刷屏。 */
+    WS63_SLE_LOG("scan start success(interval=%u, window=%u)",
+        (unsigned int)WS63_SLE_SEEK_INTERVAL, (unsigned int)WS63_SLE_SEEK_WINDOW);
 }
 
 /**
@@ -299,6 +310,7 @@ static void ws63_sle_seek_result_cb(sle_seek_result_info_t *seek_result_data)
         return;
     }
 
+    WS63_SLE_LOG("target advertisement matched");
     g_ws63_sle_seek_stop_pending = true;
     ret = sle_stop_seek();
     if (ret != ERRCODE_SLE_SUCCESS) {
@@ -329,6 +341,7 @@ static void ws63_sle_seek_disable_cb(errcode_t status)
     g_ws63_sle_connecting_pending = true;
 
     (void)sle_remove_paired_remote_device(&g_ws63_sle_remote_addr);
+    WS63_SLE_LOG("scan stopped, connect start");
     ret = sle_connect_remote_device(&g_ws63_sle_remote_addr);
     if (ret != ERRCODE_SLE_SUCCESS) {
         g_ws63_sle_connecting_pending = false;
@@ -352,6 +365,7 @@ static void ws63_sle_connect_state_changed_cb(uint16_t conn_id, const sle_addr_t
         g_ws63_sle_connecting_pending = false;
         g_ws63_sle_conn_id = conn_id;
         g_ws63_sle_peer_connected = true;
+        WS63_SLE_LOG("connected, conn_id=%u", (unsigned int)conn_id);
 
         if (pair_state == SLE_PAIR_NONE) {
             (void)sle_pair_remote_device(&g_ws63_sle_remote_addr);
@@ -367,6 +381,7 @@ static void ws63_sle_connect_state_changed_cb(uint16_t conn_id, const sle_addr_t
         g_ws63_sle_peer_connected = false;
         g_ws63_sle_property_ready = false;
         g_ws63_sle_write_param.handle = 0U;
+        WS63_SLE_LOG("disconnected, conn_id=%u", (unsigned int)conn_id);
         ws63_sle_start_scan();
     }
 }
@@ -387,6 +402,7 @@ static void ws63_sle_pair_complete_cb(uint16_t conn_id, const sle_addr_t *addr, 
 
     exchange_info.mtu_size = WS63_SLE_DEFAULT_MTU_SIZE;
     exchange_info.version = 1;
+    WS63_SLE_LOG("pair success, request mtu exchange");
     (void)ssapc_exchange_info_req(0U, conn_id, &exchange_info);
 }
 
@@ -405,6 +421,7 @@ static void ws63_sle_exchange_info_cb(uint8_t client_id, uint16_t conn_id,
         return;
     }
 
+    WS63_SLE_LOG("mtu exchange success, mtu=%u", (unsigned int)param->mtu_size);
     find_param.type = SSAP_FIND_TYPE_PROPERTY;
     find_param.start_hdl = 1U;
     find_param.end_hdl = 0xFFFFU;
@@ -446,6 +463,7 @@ static void ws63_sle_find_property_cb(uint8_t client_id, uint16_t conn_id,
     g_ws63_sle_write_param.handle = property->handle;
     g_ws63_sle_write_param.type = SSAP_PROPERTY_TYPE_VALUE;
     g_ws63_sle_property_ready = true;
+    WS63_SLE_LOG("property ready, handle=%u", (unsigned int)property->handle);
 }
 
 /**
@@ -489,6 +507,7 @@ static void ws63_sle_notification_cb(uint8_t client_id, uint16_t conn_id,
         return;
     }
 
+    WS63_SLE_LOG("notify downlink len=%u", (unsigned int)data->data_len);
     if (g_ws63_sle_downlink_cb != NULL) {
         (void)g_ws63_sle_downlink_cb(data->data, data->data_len);
     }
@@ -508,6 +527,7 @@ static void ws63_sle_indication_cb(uint8_t client_id, uint16_t conn_id,
         return;
     }
 
+    WS63_SLE_LOG("indication downlink len=%u", (unsigned int)data->data_len);
     if (g_ws63_sle_downlink_cb != NULL) {
         (void)g_ws63_sle_downlink_cb(data->data, data->data_len);
     }
@@ -557,6 +577,8 @@ errcode_t ws63_sle_init(ws63_sle_downlink_cb_t downlink_cb)
 {
     errcode_t ret;
 
+    WS63_SLE_LOG("init start");
+
     g_ws63_sle_downlink_cb = downlink_cb;
     g_ws63_sle_seek_started = false;
     g_ws63_sle_seek_stop_pending = false;
@@ -598,6 +620,7 @@ errcode_t ws63_sle_init(ws63_sle_downlink_cb_t downlink_cb)
     }
 
     ws63_sle_start_scan();
+    WS63_SLE_LOG("init success");
     return ERRCODE_SUCC;
 }
 
@@ -659,6 +682,8 @@ errcode_t ws63_sle_send_subport_data(uint8_t sub_port, const uint8_t *data, uint
 
         ret = ssapc_write_cmd(0U, conn_id_snapshot, &g_ws63_sle_write_param);
         if (ret != ERRCODE_SLE_SUCCESS) {
+            WS63_SLE_LOG("uplink send failed, sub_port=%u, len=%u, ret=0x%x",
+                (unsigned int)sub_port, (unsigned int)len, (unsigned int)ret);
             osal_vfree(payload);
             return ret;
         }
@@ -667,6 +692,7 @@ errcode_t ws63_sle_send_subport_data(uint8_t sub_port, const uint8_t *data, uint
     }
 
     osal_vfree(payload);
+    WS63_SLE_LOG("uplink send success, sub_port=%u, len=%u", (unsigned int)sub_port, (unsigned int)len);
     return ERRCODE_SUCC;
 }
 

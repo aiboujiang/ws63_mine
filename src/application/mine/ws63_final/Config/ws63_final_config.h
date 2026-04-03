@@ -125,6 +125,9 @@ extern "C" {
 #define WS63_SLE_SEEK_INTERVAL          100U
 #define WS63_SLE_SEEK_WINDOW            100U
 
+/* SLE 日志开关：稳定后可关闭，减少串口输出。 */
+#define WS63_SLE_LOG_ENABLE             1U
+
 /* SLE 地址兜底值：系统地址不可用时使用。 */
 #define WS63_SLE_FALLBACK_MAC           {0xE2, 0x00, 0x73, 0xC8, 0x11, 0x02}
 
