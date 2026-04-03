@@ -458,6 +458,7 @@ static errcode_t mpr121_irq_pin_init(void)
 static errcode_t mpr121_init(void)
 {
     errcode_t ret;
+    errcode_t cfg_ret = ERRCODE_FAIL;
     uint8_t cfg_attempt;
 
     uapi_gpio_init();
@@ -473,16 +474,16 @@ static errcode_t mpr121_init(void)
      * 这样即便配置阶段失败，也不会留下已注册的 GPIO 回调，避免下次重试冲突。
      */
     for (cfg_attempt = 0U; cfg_attempt < MPR121_CFG_RETRY_MAX; cfg_attempt++) {
-        ret = mpr121_quick_config();
-        if (ret == ERRCODE_SUCC) {
+        cfg_ret = mpr121_quick_config();
+        if (cfg_ret == ERRCODE_SUCC) {
             break;
         }
 
         osal_printk("[mpr121] quick config attempt %u failed, ret=0x%x\r\n",
             (unsigned int)(cfg_attempt + 1U),
-            (unsigned int)ret);
+            (unsigned int)cfg_ret);
 
-        if ((ret == ERRCODE_I2C_ACK_ERR) || (ret == ERRCODE_I2C_TIMEOUT)) {
+        if ((cfg_ret == ERRCODE_I2C_ACK_ERR) || (cfg_ret == ERRCODE_I2C_TIMEOUT)) {
             /* ACK/超时场景主动做总线恢复，提升现场偶发 NACK 的自愈能力。 */
             (void)uapi_i2c_deinit(I2C_BUS_1);
             (void)osal_msleep(2);
@@ -494,9 +495,9 @@ static errcode_t mpr121_init(void)
         }
     }
 
-    if (ret != ERRCODE_SUCC) {
-        osal_printk("[mpr121] quick config failed, ret=0x%x\r\n", (unsigned int)ret);
-        return ret;
+    if (cfg_ret != ERRCODE_SUCC) {
+        osal_printk("[mpr121] quick config failed, ret=0x%x\r\n", (unsigned int)cfg_ret);
+        return cfg_ret;
     }
 
     ret = mpr121_irq_pin_init();
