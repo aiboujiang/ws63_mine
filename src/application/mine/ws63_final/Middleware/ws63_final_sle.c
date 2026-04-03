@@ -57,6 +57,8 @@ static ssapc_callbacks_t g_ws63_sle_ssapc_cbks = {0};
  */
 static const char *ws63_sle_get_tag_by_subport(uint8_t sub_port)
 {
+    (void)sub_port;
+
 #if (WS63_SLE_LD2402_ENABLE == 1U)
     if (sub_port == WS63_SLE_LD2402_SUBPORT) {
         return WS63_SLE_TAG_LD2402;
@@ -617,6 +619,7 @@ errcode_t ws63_sle_send_subport_data(uint8_t sub_port, const uint8_t *data, uint
     uint8_t *payload = NULL;
     uint16_t payload_len = 0U;
     uint16_t offset = 0U;
+    uint16_t remain;
     uint16_t chunk_len;
     uint16_t conn_id_snapshot;
     uint16_t handle_snapshot;
@@ -645,8 +648,9 @@ errcode_t ws63_sle_send_subport_data(uint8_t sub_port, const uint8_t *data, uint
     handle_snapshot = g_ws63_sle_write_param.handle;
 
     while (offset < payload_len) {
-        chunk_len = (uint16_t)((payload_len - offset) > WS63_SLE_SAFE_CHUNK_LEN ?
-            WS63_SLE_SAFE_CHUNK_LEN : (payload_len - offset));
+        remain = (uint16_t)(payload_len - offset);
+        chunk_len = (remain > (uint16_t)WS63_SLE_SAFE_CHUNK_LEN) ?
+            (uint16_t)WS63_SLE_SAFE_CHUNK_LEN : remain;
 
         g_ws63_sle_write_param.handle = handle_snapshot;
         g_ws63_sle_write_param.type = SSAP_PROPERTY_TYPE_VALUE;

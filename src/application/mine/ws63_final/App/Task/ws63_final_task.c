@@ -45,7 +45,6 @@ static uint32_t g_ws63_rgb_last_switch_ms = 0U;
 #if (WS63_SLE_CORE_ENABLE == 1U)
 static errcode_t ws63_sle_downlink_handler(const uint8_t *data, uint16_t len)
 {
-    errcode_t ret = ERRCODE_FAIL;
     uint8_t sent_count = 0U;
 
     if ((data == NULL) || (len == 0U)) {
@@ -54,8 +53,7 @@ static errcode_t ws63_sle_downlink_handler(const uint8_t *data, uint16_t len)
 
 #if (WS63_SLE_LD2402_ENABLE == 1U)
     if (ws63_is_subport_enabled(WS63_SLE_LD2402_SUBPORT)) {
-        ret = wk2114_subport_write(WS63_SLE_LD2402_SUBPORT, data, len);
-        if (ret == ERRCODE_SUCC) {
+        if (wk2114_subport_write(WS63_SLE_LD2402_SUBPORT, data, len) == ERRCODE_SUCC) {
             sent_count++;
         }
     }
@@ -63,8 +61,7 @@ static errcode_t ws63_sle_downlink_handler(const uint8_t *data, uint16_t len)
 
 #if (WS63_SLE_ZW101_ENABLE == 1U)
     if (ws63_is_subport_enabled(WS63_SLE_ZW101_SUBPORT)) {
-        ret = wk2114_subport_write(WS63_SLE_ZW101_SUBPORT, data, len);
-        if (ret == ERRCODE_SUCC) {
+        if (wk2114_subport_write(WS63_SLE_ZW101_SUBPORT, data, len) == ERRCODE_SUCC) {
             sent_count++;
         }
     }
@@ -72,8 +69,7 @@ static errcode_t ws63_sle_downlink_handler(const uint8_t *data, uint16_t len)
 
 #if (WS63_SLE_CAMERA_ENABLE == 1U)
     if (ws63_is_subport_enabled(WS63_SLE_CAMERA_SUBPORT)) {
-        ret = wk2114_subport_write(WS63_SLE_CAMERA_SUBPORT, data, len);
-        if (ret == ERRCODE_SUCC) {
+        if (wk2114_subport_write(WS63_SLE_CAMERA_SUBPORT, data, len) == ERRCODE_SUCC) {
             sent_count++;
         }
     }
