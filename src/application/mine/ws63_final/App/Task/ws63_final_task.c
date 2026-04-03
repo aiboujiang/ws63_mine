@@ -284,33 +284,44 @@ void *ws63_task_entry(const char *arg)
 {
     /* 链路状态类型由驱动层定义，应用层直接复用统一结构。 */
     wk2114_link_status_t status = {0};
+    bool wk2114_ready = false;
     errcode_t wdt_ret;
 
     (void)arg;
     ws63_os_sleep_ms(WS63_BOOT_DELAY_MS);
 
-    if (wk2114_init() != ERRCODE_SUCC) {
-        osal_printk("[wk2114 final task] driver init fail\r\n");
-        return NULL;
-    }
-    ws63_os_sleep_ms(10U);
-
-    wk2114_get_link_status(&status);
-    osal_printk("[wk2114 final task] link matched=%u gena=0x%02x\r\n",
-        (unsigned int)status.matched, (unsigned int)status.last_gena);
-
-    if (ws63_init_enabled_subports() != ERRCODE_SUCC) {
-        osal_printk("[wk2114 final task] subport init fail\r\n");
-        return NULL;
-    }
-
-    ws63_rgb_demo_init();
+    /* 先启动 SLE 桥接：即使 WK2114 链路异常，也能保留无线侧诊断日志。 */
     ws63_sle_bridge_init();
+
+    if (wk2114_init() != ERRCODE_SUCC) {
+        osal_printk("[wk2114 final task] driver init fail, keep sle alive\r\n");
+    } else {
+        wk2114_ready = true;
+    }
+
+    if (wk2114_ready) {
+        ws63_os_sleep_ms(10U);
+
+        wk2114_get_link_status(&status);
+        osal_printk("[wk2114 final task] link matched=%u gena=0x%02x\r\n",
+            (unsigned int)status.matched, (unsigned int)status.last_gena);
+
+        if (ws63_init_enabled_subports() != ERRCODE_SUCC) {
+            osal_printk("[wk2114 final task] subport init fail\r\n");
+            wk2114_ready = false;
+        }
+
+        if (wk2114_ready) {
+            ws63_rgb_demo_init();
+        }
+    }
 
     while (1) {
         uint32_t now_ms;
 
-        ws63_poll_and_dispatch();
+        if (wk2114_ready) {
+            ws63_poll_and_dispatch();
+        }
         now_ms = ws63_os_tick_ms();
         ws63_rgb_demo_process(now_ms);
 
