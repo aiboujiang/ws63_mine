@@ -12,8 +12,10 @@
 #include "platform_core_rom.h"
 #include "soc_osal.h"
 
-/* MPR121 器件地址：7-bit 0x5A。 */
-#define MPR121_I2C_ADDR                  0x5AU
+/* MPR121 器件地址：ADDR 引脚不同接法可能落在 0x5A~0x5D。 */
+#define MPR121_I2C_ADDR_DEFAULT          0x5AU
+#define MPR121_I2C_ADDR_MIN              0x5AU
+#define MPR121_I2C_ADDR_MAX              0x5DU
 #define MPR121_I2C_SPEED                 100000U
 #define MPR121_I2C_HIGH_SPEED_CODE       0U
 
@@ -59,6 +61,9 @@ static uint16_t g_mpr121_last_status = 0U;
 /* 保存任务句柄，避免误释放内核对象导致异常。 */
 static osal_task *g_mpr121_task_handle = NULL;
 
+/* 当前探测到的 MPR121 地址，默认从 0x5A 开始。 */
+static uint16_t g_mpr121_i2c_addr = MPR121_I2C_ADDR_DEFAULT;
+
 /**
  * @brief 置位 IRQ 待处理标志（带发布屏障）。
  */
@@ -102,7 +107,7 @@ static errcode_t mpr121_i2c_write_retry(i2c_data_t *data)
     errcode_t ret = ERRCODE_FAIL;
 
     for (uint8_t attempt = 0U; attempt < MPR121_I2C_RW_RETRY_MAX; attempt++) {
-        ret = uapi_i2c_master_write(I2C_BUS_1, MPR121_I2C_ADDR, data);
+        ret = uapi_i2c_master_write(I2C_BUS_1, g_mpr121_i2c_addr, data);
         if (ret == ERRCODE_SUCC) {
             return ERRCODE_SUCC;
         }
@@ -126,7 +131,7 @@ static errcode_t mpr121_i2c_writeread_retry(i2c_data_t *data)
     errcode_t ret = ERRCODE_FAIL;
 
     for (uint8_t attempt = 0U; attempt < MPR121_I2C_RW_RETRY_MAX; attempt++) {
-        ret = uapi_i2c_master_writeread(I2C_BUS_1, MPR121_I2C_ADDR, data);
+        ret = uapi_i2c_master_writeread(I2C_BUS_1, g_mpr121_i2c_addr, data);
         if (ret == ERRCODE_SUCC) {
             return ERRCODE_SUCC;
         }
@@ -136,6 +141,42 @@ static errcode_t mpr121_i2c_writeread_retry(i2c_data_t *data)
         }
     }
 
+    return ret;
+}
+
+/**
+ * @brief 探测 MPR121 实际 I2C 地址（0x5A~0x5D）。
+ *
+ * 通过读取触摸状态寄存器验证设备应答，兼容 ADDR 引脚不同接法。
+ *
+ * @return errcode_t ERRCODE_SUCC 表示探测成功。
+ */
+static errcode_t mpr121_detect_i2c_addr(void)
+{
+    uint16_t addr;
+    errcode_t ret = ERRCODE_I2C_ACK_ERR;
+    uint8_t reg = MPR121_REG_TOUCH_STATUS_L;
+    uint8_t probe = 0U;
+    i2c_data_t data = {0};
+
+    data.send_buf = &reg;
+    data.send_len = 1U;
+    data.receive_buf = &probe;
+    data.receive_len = 1U;
+
+    for (addr = MPR121_I2C_ADDR_MIN; addr <= MPR121_I2C_ADDR_MAX; addr++) {
+        ret = uapi_i2c_master_writeread(I2C_BUS_1, addr, &data);
+        if (ret == ERRCODE_SUCC) {
+            g_mpr121_i2c_addr = addr;
+            osal_printk("[mpr121] detected i2c addr=0x%02x\r\n", (unsigned int)addr);
+            return ERRCODE_SUCC;
+        }
+    }
+
+    osal_printk("[mpr121] detect i2c addr failed in [0x%02x-0x%02x], ret=0x%x\r\n",
+        (unsigned int)MPR121_I2C_ADDR_MIN,
+        (unsigned int)MPR121_I2C_ADDR_MAX,
+        (unsigned int)ret);
     return ret;
 }
 
@@ -469,6 +510,11 @@ static errcode_t mpr121_init(void)
         return ret;
     }
 
+    ret = mpr121_detect_i2c_addr();
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+
     /*
      * 先完成器件参数配置，再打开 IRQ。
      * 这样即便配置阶段失败，也不会留下已注册的 GPIO 回调，避免下次重试冲突。
@@ -492,6 +538,11 @@ static errcode_t mpr121_init(void)
                 osal_printk("[mpr121] recover i2c1 failed, ret=0x%x\r\n", (unsigned int)ret);
                 return ret;
             }
+
+            ret = mpr121_detect_i2c_addr();
+            if (ret != ERRCODE_SUCC) {
+                return ret;
+            }
         }
     }
 
@@ -511,7 +562,8 @@ static errcode_t mpr121_init(void)
         mpr121_irq_pending_set();
     }
 
-    osal_printk("[mpr121] init ok: I2C1 SDA=GPIO15(mode2), SCL=GPIO16(mode2), IRQ=GPIO5\r\n");
+    osal_printk("[mpr121] init ok: addr=0x%02x, I2C1 SDA=GPIO15(mode2), SCL=GPIO16(mode2), IRQ=GPIO5\r\n",
+        (unsigned int)g_mpr121_i2c_addr);
     return ERRCODE_SUCC;
 }
 
