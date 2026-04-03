@@ -38,6 +38,7 @@
 #define MPR121_TASK_STACK_SIZE           0x1000
 #define MPR121_TASK_POLL_MS              10U
 #define MPR121_BOOT_DELAY_MS             100U
+#define MPR121_INIT_RETRY_MS             3000U
 
 /* MPR121 共有 12 路电极。 */
 #define MPR121_ELECTRODE_COUNT           12U
@@ -314,28 +315,63 @@ static errcode_t mpr121_read_touch_status(uint16_t *touch_status)
 static errcode_t mpr121_i2c_bus_init(void)
 {
     errcode_t ret;
+    uint8_t attempt;
 
     ret = uapi_pin_set_mode(MPR121_I2C_SCL_PIN, MPR121_I2C_PIN_MODE);
     if (ret != ERRCODE_SUCC) {
+        osal_printk("[mpr121] set SCL pin mode failed, ret=0x%x\r\n", (unsigned int)ret);
         return ret;
     }
 
     ret = uapi_pin_set_mode(MPR121_I2C_SDA_PIN, MPR121_I2C_PIN_MODE);
     if (ret != ERRCODE_SUCC) {
+        osal_printk("[mpr121] set SDA pin mode failed, ret=0x%x\r\n", (unsigned int)ret);
         return ret;
     }
 
+    /*
+     * 某些板级配置下，GPIO15/16 的 pull 能力可能不可配或被硬件固定，
+     * 这里降级为“打印告警但继续初始化”，避免无谓阻断 I2C 总线启动。
+     */
     ret = uapi_pin_set_pull(MPR121_I2C_SCL_PIN, PIN_PULL_TYPE_UP);
     if (ret != ERRCODE_SUCC) {
-        return ret;
+        osal_printk("[mpr121] warn: set SCL pull-up failed, ret=0x%x\r\n", (unsigned int)ret);
     }
 
     ret = uapi_pin_set_pull(MPR121_I2C_SDA_PIN, PIN_PULL_TYPE_UP);
     if (ret != ERRCODE_SUCC) {
-        return ret;
+        osal_printk("[mpr121] warn: set SDA pull-up failed, ret=0x%x\r\n", (unsigned int)ret);
     }
 
-    return uapi_i2c_master_init(I2C_BUS_1, MPR121_I2C_SPEED, MPR121_I2C_HIGH_SPEED_CODE);
+    /*
+     * 若总线曾被其它路径占用或上次初始化残留，先 deinit 再 init，
+     * 并做一次重试，提升现场冷启动稳定性。
+     */
+    for (attempt = 0U; attempt < 2U; attempt++) {
+        if (attempt > 0U) {
+            (void)uapi_i2c_deinit(I2C_BUS_1);
+            (void)osal_msleep(5);
+        }
+
+        ret = uapi_i2c_master_init(I2C_BUS_1, MPR121_I2C_SPEED, MPR121_I2C_HIGH_SPEED_CODE);
+        if (ret == ERRCODE_SUCC) {
+            return ERRCODE_SUCC;
+        }
+
+        if (ret == ERRCODE_I2C_ALREADY_INIT) {
+            (void)uapi_i2c_deinit(I2C_BUS_1);
+            ret = uapi_i2c_master_init(I2C_BUS_1, MPR121_I2C_SPEED, MPR121_I2C_HIGH_SPEED_CODE);
+            if (ret == ERRCODE_SUCC) {
+                return ERRCODE_SUCC;
+            }
+        }
+
+        osal_printk("[mpr121] i2c1 init attempt %u failed, ret=0x%x\r\n",
+            (unsigned int)(attempt + 1U),
+            (unsigned int)ret);
+    }
+
+    return ret;
 }
 
 /**
@@ -519,10 +555,17 @@ static void *mpr121_keypad_task(const char *arg)
 
     (void)osal_msleep(MPR121_BOOT_DELAY_MS);
 
-    ret = mpr121_init();
-    if (ret != ERRCODE_SUCC) {
-        osal_printk("[mpr121] init failed, task exit, ret=0x%x\r\n", (unsigned int)ret);
-        return NULL;
+    while (1) {
+        ret = mpr121_init();
+        if (ret == ERRCODE_SUCC) {
+            break;
+        }
+
+        /* 初始化失败不退出任务，后台重试，避免一次失败导致功能永久不可用。 */
+        osal_printk("[mpr121] init failed, retry after %u ms, ret=0x%x\r\n",
+            (unsigned int)MPR121_INIT_RETRY_MS,
+            (unsigned int)ret);
+        (void)osal_msleep(MPR121_INIT_RETRY_MS);
     }
 
     osal_printk("[mpr121] keypad task started, output mode=real-time single key\r\n");
