@@ -29,14 +29,19 @@
 /* 触摸状态寄存器：低字节 0x00，高字节 0x01。 */
 #define MPR121_REG_TOUCH_STATUS_L        0x00U
 #define MPR121_REG_TOUCH_STATUS_H        0x01U
+#define MPR121_REG_SOFT_RESET            0x80U
 
 /* 仅低 12 位有效，对应 ELE0~ELE11。 */
 #define MPR121_TOUCH_VALID_MASK          0x0FFFU
 #define MPR121_ELECTRODE_COUNT           12U
+#define MPR121_ELE_CFG_RUN_12            0x0CU
 
 /* I2C 通信容错：读写失败后进行短延时重试。 */
 #define MPR121_I2C_RW_RETRY_MAX          3U
 #define MPR121_I2C_RW_RETRY_DELAY_MS     2U
+#define MPR121_CFG_RETRY_MAX             2U
+#define MPR121_SOFT_RESET_CMD            0x63U
+#define MPR121_SOFT_RESET_DELAY_MS       2U
 
 /* 任务参数：本任务逻辑较轻，适当降低优先级并缩小栈占用。 */
 #define MPR121_TASK_PRIO                 27
@@ -171,6 +176,29 @@ static errcode_t mpr121_write_reg(uint8_t reg_addr, uint8_t reg_val)
 }
 
 /**
+ * @brief 写寄存器并在失败时输出寄存器上下文，方便定位 ACK 错误位置。
+ *
+ * @param reg_addr 寄存器地址。
+ * @param reg_val 写入值。
+ * @param stage   配置阶段标识字符串。
+ * @return errcode_t ERRCODE_SUCC 表示成功。
+ */
+static errcode_t mpr121_write_reg_checked(uint8_t reg_addr, uint8_t reg_val, const char *stage)
+{
+    errcode_t ret = mpr121_write_reg(reg_addr, reg_val);
+
+    if (ret != ERRCODE_SUCC) {
+        osal_printk("[mpr121] %s write reg 0x%02x val 0x%02x failed, ret=0x%x\r\n",
+            stage,
+            (unsigned int)reg_addr,
+            (unsigned int)reg_val,
+            (unsigned int)ret);
+    }
+
+    return ret;
+}
+
+/**
  * @brief 从指定寄存器起始地址连续读取多个字节。
  *
  * @param start_reg 起始寄存器地址。
@@ -206,38 +234,50 @@ static errcode_t mpr121_quick_config(void)
     errcode_t ret;
     uint8_t ele_idx;
 
+    /* 软复位后等待器件稳定，再进入 stop 模式执行参数下载。 */
+    ret = mpr121_write_reg_checked(MPR121_REG_SOFT_RESET, MPR121_SOFT_RESET_CMD, "reset");
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+    (void)osal_msleep(MPR121_SOFT_RESET_DELAY_MS);
+
+    ret = mpr121_write_reg_checked(ELE_CFG, 0x00U, "stop");
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+
     /* Section A: data > baseline 时的滤波参数。 */
-    ret = mpr121_write_reg(MHD_R, 0x01U);
+    ret = mpr121_write_reg_checked(MHD_R, 0x01U, "A");
     if (ret != ERRCODE_SUCC) {
         return ret;
     }
-    ret = mpr121_write_reg(NHD_R, 0x01U);
+    ret = mpr121_write_reg_checked(NHD_R, 0x01U, "A");
     if (ret != ERRCODE_SUCC) {
         return ret;
     }
-    ret = mpr121_write_reg(NCL_R, 0x00U);
+    ret = mpr121_write_reg_checked(NCL_R, 0x00U, "A");
     if (ret != ERRCODE_SUCC) {
         return ret;
     }
-    ret = mpr121_write_reg(FDL_R, 0x00U);
+    ret = mpr121_write_reg_checked(FDL_R, 0x00U, "A");
     if (ret != ERRCODE_SUCC) {
         return ret;
     }
 
     /* Section B: data < baseline 时的滤波参数。 */
-    ret = mpr121_write_reg(MHD_F, 0x01U);
+    ret = mpr121_write_reg_checked(MHD_F, 0x01U, "B");
     if (ret != ERRCODE_SUCC) {
         return ret;
     }
-    ret = mpr121_write_reg(NHD_F, 0x01U);
+    ret = mpr121_write_reg_checked(NHD_F, 0x01U, "B");
     if (ret != ERRCODE_SUCC) {
         return ret;
     }
-    ret = mpr121_write_reg(NCL_F, 0xFFU);
+    ret = mpr121_write_reg_checked(NCL_F, 0xFFU, "B");
     if (ret != ERRCODE_SUCC) {
         return ret;
     }
-    ret = mpr121_write_reg(FDL_F, 0x02U);
+    ret = mpr121_write_reg_checked(FDL_F, 0x02U, "B");
     if (ret != ERRCODE_SUCC) {
         return ret;
     }
@@ -250,25 +290,25 @@ static errcode_t mpr121_quick_config(void)
         uint8_t touch_reg = (uint8_t)(ELE0_T + (ele_idx * 2U));
         uint8_t release_reg = (uint8_t)(touch_reg + 1U);
 
-        ret = mpr121_write_reg(touch_reg, TOU_THRESH);
+        ret = mpr121_write_reg_checked(touch_reg, TOU_THRESH, "C");
         if (ret != ERRCODE_SUCC) {
             return ret;
         }
 
-        ret = mpr121_write_reg(release_reg, REL_THRESH);
+        ret = mpr121_write_reg_checked(release_reg, REL_THRESH, "C");
         if (ret != ERRCODE_SUCC) {
             return ret;
         }
     }
 
     /* Section D: Filter Configuration。 */
-    ret = mpr121_write_reg(FIL_CFG, 0x04U);
+    ret = mpr121_write_reg_checked(FIL_CFG, 0x04U, "D");
     if (ret != ERRCODE_SUCC) {
         return ret;
     }
 
     /* Section E: 使能 12 路电极，切到 run 模式。 */
-    ret = mpr121_write_reg(ELE_CFG, 0x7FU);
+    ret = mpr121_write_reg_checked(ELE_CFG, MPR121_ELE_CFG_RUN_12, "E");
     if (ret != ERRCODE_SUCC) {
         return ret;
     }
@@ -380,6 +420,13 @@ static errcode_t mpr121_irq_pin_init(void)
 {
     errcode_t ret;
 
+    /*
+     * 初始化可能被重入（例如前一次 quick config 失败后重试），
+     * 先清理旧的中断回调，避免 ERRCODE_GPIO_ALREADY_SET_CALLBACK。
+     */
+    (void)uapi_gpio_disable_interrupt(MPR121_IRQ_PIN);
+    (void)uapi_gpio_unregister_isr_func(MPR121_IRQ_PIN);
+
     ret = uapi_pin_set_mode(MPR121_IRQ_PIN, MPR121_IRQ_PIN_MODE);
     if (ret != ERRCODE_SUCC) {
         return ret;
@@ -411,6 +458,7 @@ static errcode_t mpr121_irq_pin_init(void)
 static errcode_t mpr121_init(void)
 {
     errcode_t ret;
+    uint8_t cfg_attempt;
 
     uapi_gpio_init();
 
@@ -420,15 +468,40 @@ static errcode_t mpr121_init(void)
         return ret;
     }
 
-    ret = mpr121_irq_pin_init();
+    /*
+     * 先完成器件参数配置，再打开 IRQ。
+     * 这样即便配置阶段失败，也不会留下已注册的 GPIO 回调，避免下次重试冲突。
+     */
+    for (cfg_attempt = 0U; cfg_attempt < MPR121_CFG_RETRY_MAX; cfg_attempt++) {
+        ret = mpr121_quick_config();
+        if (ret == ERRCODE_SUCC) {
+            break;
+        }
+
+        osal_printk("[mpr121] quick config attempt %u failed, ret=0x%x\r\n",
+            (unsigned int)(cfg_attempt + 1U),
+            (unsigned int)ret);
+
+        if ((ret == ERRCODE_I2C_ACK_ERR) || (ret == ERRCODE_I2C_TIMEOUT)) {
+            /* ACK/超时场景主动做总线恢复，提升现场偶发 NACK 的自愈能力。 */
+            (void)uapi_i2c_deinit(I2C_BUS_1);
+            (void)osal_msleep(2);
+            ret = uapi_i2c_master_init(I2C_BUS_1, MPR121_I2C_SPEED, MPR121_I2C_HIGH_SPEED_CODE);
+            if (ret != ERRCODE_SUCC) {
+                osal_printk("[mpr121] recover i2c1 failed, ret=0x%x\r\n", (unsigned int)ret);
+                return ret;
+            }
+        }
+    }
+
     if (ret != ERRCODE_SUCC) {
-        osal_printk("[mpr121] irq pin init failed, ret=0x%x\r\n", (unsigned int)ret);
+        osal_printk("[mpr121] quick config failed, ret=0x%x\r\n", (unsigned int)ret);
         return ret;
     }
 
-    ret = mpr121_quick_config();
+    ret = mpr121_irq_pin_init();
     if (ret != ERRCODE_SUCC) {
-        osal_printk("[mpr121] quick config failed, ret=0x%x\r\n", (unsigned int)ret);
+        osal_printk("[mpr121] irq pin init failed, ret=0x%x\r\n", (unsigned int)ret);
         return ret;
     }
 
