@@ -40,20 +40,8 @@
 #define MPR121_BOOT_DELAY_MS             100U
 #define MPR121_INIT_RETRY_MS             3000U
 
-/* MPR121 共有 12 路电极。 */
-#define MPR121_ELECTRODE_COUNT           12U
-
 /* IRQ 回调与任务线程之间的事件标志。 */
 static volatile uint8_t g_mpr121_irq_pending = 0U;
-
-/*
- * 直接沿用原 Arduino 示例中的电极映射：
- * STAR=0, SEVEN=1, FOUR=2, ONE=3, ZERO=4, EIGHT=5,
- * FIVE=6, TWO=7, POUND=8, NINE=9, SIX=10, THREE=11。
- */
-static const char g_mpr121_key_map[MPR121_ELECTRODE_COUNT] = {
-    '*', '7', '4', '1', '0', '8', '5', '2', '#', '9', '6', '3'
-};
 
 /* 记录上次状态用于边沿检测，避免长按重复刷屏。 */
 static uint16_t g_mpr121_last_status = 0U;
@@ -465,49 +453,20 @@ static uint8_t mpr121_count_set_bits(uint16_t value)
 }
 
 /**
- * @brief 从“新按下位图”中解析单个按键字符。
- *
- * @param new_pressed 本轮新按下位图（仅保留边沿新增位）。
- * @param key 输出按键字符。
- * @return true  解析成功。
- * @return false 非单键或参数非法。
- */
-static bool mpr121_parse_single_key(uint16_t new_pressed, char *key)
-{
-    uint8_t idx;
-
-    if (key == NULL) {
-        return false;
-    }
-
-    if (mpr121_count_set_bits(new_pressed) != 1U) {
-        return false;
-    }
-
-    for (idx = 0U; idx < MPR121_ELECTRODE_COUNT; idx++) {
-        if ((new_pressed & ((uint16_t)1U << idx)) != 0U) {
-            *key = g_mpr121_key_map[idx];
-            return true;
-        }
-    }
-
-    return false;
-}
-
-/**
- * @brief 处理一次触摸状态采样并输出键值。
+ * @brief 处理一次触摸状态采样并输出原始状态位图。
  *
  * 关键策略：
  * 1) 仅在状态变化时处理，抑制重复日志；
- * 2) 仅接受“单键新按下”事件，多键同时按下仅告警；
- * 3) 松开动作只更新状态，不输出字符。
+ * 2) 输出当前状态、按下边沿、释放边沿，便于上层自定义映射；
+ * 3) 不在此处做按键字符映射，避免业务耦合。
  */
 static void mpr121_process_touch_once(void)
 {
     errcode_t ret;
     uint16_t curr_status;
     uint16_t new_pressed;
-    char key;
+    uint16_t released;
+    uint8_t active_bits;
 
     ret = mpr121_read_touch_status(&curr_status);
     if (ret != ERRCODE_SUCC) {
@@ -519,24 +478,15 @@ static void mpr121_process_touch_once(void)
         return;
     }
 
-    if (curr_status == 0U) {
-        /* 全部松开：只更新状态，不输出字符。 */
-        g_mpr121_last_status = curr_status;
-        return;
-    }
-
     new_pressed = curr_status & (uint16_t)(~g_mpr121_last_status);
+    released = g_mpr121_last_status & (uint16_t)(~curr_status);
+    active_bits = mpr121_count_set_bits(curr_status);
 
-    /* 多键场景直接告警，避免误判成单键输入。 */
-    if (mpr121_count_set_bits(curr_status) > 1U) {
-        osal_printk("[mpr121] warning: multi-touch status=0x%03x\r\n", (unsigned int)curr_status);
-        g_mpr121_last_status = curr_status;
-        return;
-    }
-
-    if (mpr121_parse_single_key(new_pressed, &key)) {
-        osal_printk("[mpr121] key=%c (status=0x%03x)\r\n", key, (unsigned int)curr_status);
-    }
+    osal_printk("[mpr121] status=0x%03x, press=0x%03x, release=0x%03x, active=%u\r\n",
+        (unsigned int)curr_status,
+        (unsigned int)new_pressed,
+        (unsigned int)released,
+        (unsigned int)active_bits);
 
     g_mpr121_last_status = curr_status;
 }
@@ -568,7 +518,7 @@ static void *mpr121_keypad_task(const char *arg)
         (void)osal_msleep(MPR121_INIT_RETRY_MS);
     }
 
-    osal_printk("[mpr121] keypad task started, output mode=real-time single key\r\n");
+    osal_printk("[mpr121] keypad task started, output mode=raw status\r\n");
 
     while (1) {
         /* IRQ 事件优先，IRQ 线低电平作为兜底，防止极端场景漏中断。 */
