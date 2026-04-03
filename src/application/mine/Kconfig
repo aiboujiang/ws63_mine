@@ -83,3 +83,14 @@ config MINE_SUPPORT_BEEP_DEMO
         Build passive buzzer demo under application/mine/beep.
         GPIO3 should be configured as mux mode 1 (PWM3 output).
         The demo supports multi-tone playback with robust error handling.
+
+config MINE_SUPPORT_MPR121_KEYPAD_DEMO
+    bool "Support Mine MPR121 Keypad Demo (I2C1 GPIO15/16, IRQ GPIO5)."
+    default y
+    help
+        Build MPR121 keypad demo under application/mine/MPR121_Keypad_Example.
+        Fixed pin mapping:
+        - GPIO15 mux mode2 -> I2C1_SDA
+        - GPIO16 mux mode2 -> I2C1_SCL
+        - GPIO5 as IRQ input (falling-edge interrupt)
+        Demo behavior: output real-time single key events and warn on multi-touch.

@@ -1,0 +1,563 @@
+/**
+ * @file mpr121_keypad_demo.c
+ * @brief MPR121 触摸键盘示例（WS63 版，驱动与业务一体化实现）。
+ */
+
+#include "app_init.h"
+#include "gpio.h"
+#include <i2c.h>
+#include "mpr121.h"
+#include "osal_debug.h"
+#include "pinctrl.h"
+#include "platform_core_rom.h"
+#include "soc_osal.h"
+
+/* MPR121 器件地址：7-bit 0x5A。 */
+#define MPR121_I2C_ADDR                  0x5AU
+#define MPR121_I2C_SPEED                 100000U
+#define MPR121_I2C_HIGH_SPEED_CODE       0U
+
+/* 按用户要求固定 I2C1 引脚复用。 */
+#define MPR121_I2C_SDA_PIN               GPIO_15
+#define MPR121_I2C_SCL_PIN               GPIO_16
+#define MPR121_I2C_PIN_MODE              2
+
+/* 按用户确认：IRQ 走 GPIO5，低电平有效。 */
+#define MPR121_IRQ_PIN                   GPIO_05
+#define MPR121_IRQ_PIN_MODE              HAL_PIO_FUNC_GPIO
+
+/* 触摸状态寄存器：低字节 0x00，高字节 0x01。 */
+#define MPR121_REG_TOUCH_STATUS_L        0x00U
+#define MPR121_REG_TOUCH_STATUS_H        0x01U
+
+/* 仅低 12 位有效，对应 ELE0~ELE11。 */
+#define MPR121_TOUCH_VALID_MASK          0x0FFFU
+
+/* 任务参数：与 mine 现有模块保持一致的优先级区间。 */
+#define MPR121_TASK_PRIO                 26
+#define MPR121_TASK_STACK_SIZE           0x1000
+#define MPR121_TASK_POLL_MS              10U
+#define MPR121_BOOT_DELAY_MS             100U
+
+/* MPR121 共有 12 路电极。 */
+#define MPR121_ELECTRODE_COUNT           12U
+
+/* IRQ 回调与任务线程之间的事件标志。 */
+static volatile uint8_t g_mpr121_irq_pending = 0U;
+
+/*
+ * 直接沿用原 Arduino 示例中的电极映射：
+ * STAR=0, SEVEN=1, FOUR=2, ONE=3, ZERO=4, EIGHT=5,
+ * FIVE=6, TWO=7, POUND=8, NINE=9, SIX=10, THREE=11。
+ */
+static const char g_mpr121_key_map[MPR121_ELECTRODE_COUNT] = {
+    '*', '7', '4', '1', '0', '8', '5', '2', '#', '9', '6', '3'
+};
+
+/* 记录上次状态用于边沿检测，避免长按重复刷屏。 */
+static uint16_t g_mpr121_last_status = 0U;
+
+/**
+ * @brief GPIO5 中断回调。
+ *
+ * 中断上下文中只置位事件，I2C 读取放在线程中执行，避免中断里阻塞。
+ */
+static void mpr121_irq_callback(pin_t pin, uintptr_t param)
+{
+    (void)param;
+
+    if (pin != MPR121_IRQ_PIN) {
+        return;
+    }
+
+    g_mpr121_irq_pending = 1U;
+}
+
+/**
+ * @brief 向 MPR121 写单个寄存器。
+ *
+ * @param reg_addr 寄存器地址。
+ * @param reg_val 写入值。
+ * @return errcode_t ERRCODE_SUCC 表示成功。
+ */
+static errcode_t mpr121_write_reg(uint8_t reg_addr, uint8_t reg_val)
+{
+    uint8_t tx_buf[2] = {reg_addr, reg_val};
+    i2c_data_t data = {0};
+
+    data.send_buf = tx_buf;
+    data.send_len = sizeof(tx_buf);
+    data.receive_buf = NULL;
+    data.receive_len = 0;
+
+    return uapi_i2c_master_write(I2C_BUS_1, MPR121_I2C_ADDR, &data);
+}
+
+/**
+ * @brief 读取 MPR121 单个寄存器。
+ *
+ * @param reg_addr 寄存器地址。
+ * @param reg_val 输出参数，返回寄存器值。
+ * @return errcode_t ERRCODE_SUCC 表示成功。
+ */
+static errcode_t mpr121_read_reg(uint8_t reg_addr, uint8_t *reg_val)
+{
+    i2c_data_t data = {0};
+
+    if (reg_val == NULL) {
+        return ERRCODE_INVALID_PARAM;
+    }
+
+    data.send_buf = &reg_addr;
+    data.send_len = 1U;
+    data.receive_buf = reg_val;
+    data.receive_len = 1U;
+
+    return uapi_i2c_master_writeread(I2C_BUS_1, MPR121_I2C_ADDR, &data);
+}
+
+/**
+ * @brief 下发原示例中的 MPR121 快速配置序列。
+ *
+ * 该序列复用示例的 A/B/C/D/E 段寄存器配置，目标是快速稳定拉起 12 路触摸检测。
+ *
+ * @return errcode_t ERRCODE_SUCC 表示成功。
+ */
+static errcode_t mpr121_quick_config(void)
+{
+    errcode_t ret;
+
+    /* Section A: data > baseline 时的滤波参数。 */
+    ret = mpr121_write_reg(MHD_R, 0x01U);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+    ret = mpr121_write_reg(NHD_R, 0x01U);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+    ret = mpr121_write_reg(NCL_R, 0x00U);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+    ret = mpr121_write_reg(FDL_R, 0x00U);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+
+    /* Section B: data < baseline 时的滤波参数。 */
+    ret = mpr121_write_reg(MHD_F, 0x01U);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+    ret = mpr121_write_reg(NHD_F, 0x01U);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+    ret = mpr121_write_reg(NCL_F, 0xFFU);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+    ret = mpr121_write_reg(FDL_F, 0x02U);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+
+    /* Section C: 每路电极触摸/释放阈值。 */
+    ret = mpr121_write_reg(ELE0_T, TOU_THRESH);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+    ret = mpr121_write_reg(ELE0_R, REL_THRESH);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+    ret = mpr121_write_reg(ELE1_T, TOU_THRESH);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+    ret = mpr121_write_reg(ELE1_R, REL_THRESH);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+    ret = mpr121_write_reg(ELE2_T, TOU_THRESH);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+    ret = mpr121_write_reg(ELE2_R, REL_THRESH);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+    ret = mpr121_write_reg(ELE3_T, TOU_THRESH);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+    ret = mpr121_write_reg(ELE3_R, REL_THRESH);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+    ret = mpr121_write_reg(ELE4_T, TOU_THRESH);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+    ret = mpr121_write_reg(ELE4_R, REL_THRESH);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+    ret = mpr121_write_reg(ELE5_T, TOU_THRESH);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+    ret = mpr121_write_reg(ELE5_R, REL_THRESH);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+    ret = mpr121_write_reg(ELE6_T, TOU_THRESH);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+    ret = mpr121_write_reg(ELE6_R, REL_THRESH);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+    ret = mpr121_write_reg(ELE7_T, TOU_THRESH);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+    ret = mpr121_write_reg(ELE7_R, REL_THRESH);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+    ret = mpr121_write_reg(ELE8_T, TOU_THRESH);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+    ret = mpr121_write_reg(ELE8_R, REL_THRESH);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+    ret = mpr121_write_reg(ELE9_T, TOU_THRESH);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+    ret = mpr121_write_reg(ELE9_R, REL_THRESH);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+    ret = mpr121_write_reg(ELE10_T, TOU_THRESH);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+    ret = mpr121_write_reg(ELE10_R, REL_THRESH);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+    ret = mpr121_write_reg(ELE11_T, TOU_THRESH);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+    ret = mpr121_write_reg(ELE11_R, REL_THRESH);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+
+    /* Section D: Filter Configuration。 */
+    ret = mpr121_write_reg(FIL_CFG, 0x04U);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+
+    /* Section E: 使能 12 路电极，切到 run 模式。 */
+    ret = mpr121_write_reg(ELE_CFG, 0x0CU);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+
+    return ERRCODE_SUCC;
+}
+
+/**
+ * @brief 读取 MPR121 触摸状态位图。
+ *
+ * @param touch_status 输出参数，bit0~bit11 对应 12 路电极。
+ * @return errcode_t ERRCODE_SUCC 表示读取成功。
+ */
+static errcode_t mpr121_read_touch_status(uint16_t *touch_status)
+{
+    errcode_t ret;
+    uint8_t status_l;
+    uint8_t status_h;
+
+    if (touch_status == NULL) {
+        return ERRCODE_INVALID_PARAM;
+    }
+
+    ret = mpr121_read_reg(MPR121_REG_TOUCH_STATUS_L, &status_l);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+
+    ret = mpr121_read_reg(MPR121_REG_TOUCH_STATUS_H, &status_h);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+
+    *touch_status = (((uint16_t)status_h << 8U) | (uint16_t)status_l) & MPR121_TOUCH_VALID_MASK;
+    return ERRCODE_SUCC;
+}
+
+/**
+ * @brief 初始化 I2C1 与 pinmux。
+ *
+ * @return errcode_t ERRCODE_SUCC 表示成功。
+ */
+static errcode_t mpr121_i2c_bus_init(void)
+{
+    errcode_t ret;
+
+    ret = uapi_pin_set_mode(MPR121_I2C_SCL_PIN, MPR121_I2C_PIN_MODE);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+
+    ret = uapi_pin_set_mode(MPR121_I2C_SDA_PIN, MPR121_I2C_PIN_MODE);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+
+    ret = uapi_pin_set_pull(MPR121_I2C_SCL_PIN, PIN_PULL_TYPE_UP);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+
+    ret = uapi_pin_set_pull(MPR121_I2C_SDA_PIN, PIN_PULL_TYPE_UP);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+
+    return uapi_i2c_master_init(I2C_BUS_1, MPR121_I2C_SPEED, MPR121_I2C_HIGH_SPEED_CODE);
+}
+
+/**
+ * @brief 初始化 MPR121 的 IRQ 引脚。
+ *
+ * @return errcode_t ERRCODE_SUCC 表示成功。
+ */
+static errcode_t mpr121_irq_pin_init(void)
+{
+    errcode_t ret;
+
+    ret = uapi_pin_set_mode(MPR121_IRQ_PIN, MPR121_IRQ_PIN_MODE);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+
+    ret = uapi_pin_set_pull(MPR121_IRQ_PIN, PIN_PULL_TYPE_UP);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+
+    ret = uapi_gpio_set_dir(MPR121_IRQ_PIN, GPIO_DIRECTION_INPUT);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+
+    ret = uapi_gpio_register_isr_func(MPR121_IRQ_PIN, GPIO_INTERRUPT_FALLING_EDGE, mpr121_irq_callback);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+
+    return uapi_gpio_enable_interrupt(MPR121_IRQ_PIN);
+}
+
+/**
+ * @brief 初始化 MPR121 驱动。
+ *
+ * @return errcode_t ERRCODE_SUCC 表示成功。
+ */
+static errcode_t mpr121_init(void)
+{
+    errcode_t ret;
+
+    uapi_gpio_init();
+
+    ret = mpr121_i2c_bus_init();
+    if (ret != ERRCODE_SUCC) {
+        osal_printk("[mpr121] i2c bus init failed, ret=0x%x\r\n", (unsigned int)ret);
+        return ret;
+    }
+
+    ret = mpr121_irq_pin_init();
+    if (ret != ERRCODE_SUCC) {
+        osal_printk("[mpr121] irq pin init failed, ret=0x%x\r\n", (unsigned int)ret);
+        return ret;
+    }
+
+    ret = mpr121_quick_config();
+    if (ret != ERRCODE_SUCC) {
+        osal_printk("[mpr121] quick config failed, ret=0x%x\r\n", (unsigned int)ret);
+        return ret;
+    }
+
+    /* 若上电瞬间已经有触摸，确保线程能在下一轮读取到状态。 */
+    if (uapi_gpio_get_val(MPR121_IRQ_PIN) == GPIO_LEVEL_LOW) {
+        g_mpr121_irq_pending = 1U;
+    }
+
+    osal_printk("[mpr121] init ok: I2C1 SDA=GPIO15(mode2), SCL=GPIO16(mode2), IRQ=GPIO5\r\n");
+    return ERRCODE_SUCC;
+}
+
+/**
+ * @brief 计算 16bit 位图中置位数量。
+ *
+ * @param value 输入位图。
+ * @return uint8_t 置位 bit 数。
+ */
+static uint8_t mpr121_count_set_bits(uint16_t value)
+{
+    uint8_t cnt = 0U;
+
+    while (value != 0U) {
+        if ((value & 0x1U) != 0U) {
+            cnt++;
+        }
+        value >>= 1U;
+    }
+
+    return cnt;
+}
+
+/**
+ * @brief 从“新按下位图”中解析单个按键字符。
+ *
+ * @param new_pressed 本轮新按下位图（仅保留边沿新增位）。
+ * @param key 输出按键字符。
+ * @return true  解析成功。
+ * @return false 非单键或参数非法。
+ */
+static bool mpr121_parse_single_key(uint16_t new_pressed, char *key)
+{
+    uint8_t idx;
+
+    if (key == NULL) {
+        return false;
+    }
+
+    if (mpr121_count_set_bits(new_pressed) != 1U) {
+        return false;
+    }
+
+    for (idx = 0U; idx < MPR121_ELECTRODE_COUNT; idx++) {
+        if ((new_pressed & ((uint16_t)1U << idx)) != 0U) {
+            *key = g_mpr121_key_map[idx];
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/**
+ * @brief 处理一次触摸状态采样并输出键值。
+ *
+ * 关键策略：
+ * 1) 仅在状态变化时处理，抑制重复日志；
+ * 2) 仅接受“单键新按下”事件，多键同时按下仅告警；
+ * 3) 松开动作只更新状态，不输出字符。
+ */
+static void mpr121_process_touch_once(void)
+{
+    errcode_t ret;
+    uint16_t curr_status;
+    uint16_t new_pressed;
+    char key;
+
+    ret = mpr121_read_touch_status(&curr_status);
+    if (ret != ERRCODE_SUCC) {
+        osal_printk("[mpr121] read touch status failed, ret=0x%x\r\n", (unsigned int)ret);
+        return;
+    }
+
+    if (curr_status == g_mpr121_last_status) {
+        return;
+    }
+
+    if (curr_status == 0U) {
+        /* 全部松开：只更新状态，不输出字符。 */
+        g_mpr121_last_status = curr_status;
+        return;
+    }
+
+    new_pressed = curr_status & (uint16_t)(~g_mpr121_last_status);
+
+    /* 多键场景直接告警，避免误判成单键输入。 */
+    if (mpr121_count_set_bits(curr_status) > 1U) {
+        osal_printk("[mpr121] warning: multi-touch status=0x%03x\r\n", (unsigned int)curr_status);
+        g_mpr121_last_status = curr_status;
+        return;
+    }
+
+    if (mpr121_parse_single_key(new_pressed, &key)) {
+        osal_printk("[mpr121] key=%c (status=0x%03x)\r\n", key, (unsigned int)curr_status);
+    }
+
+    g_mpr121_last_status = curr_status;
+}
+
+/**
+ * @brief MPR121 演示任务。
+ *
+ * @param arg 任务参数。
+ * @return void* 固定返回 NULL。
+ */
+static void *mpr121_keypad_task(const char *arg)
+{
+    errcode_t ret;
+
+    (void)arg;
+
+    (void)osal_msleep(MPR121_BOOT_DELAY_MS);
+
+    ret = mpr121_init();
+    if (ret != ERRCODE_SUCC) {
+        osal_printk("[mpr121] init failed, task exit, ret=0x%x\r\n", (unsigned int)ret);
+        return NULL;
+    }
+
+    osal_printk("[mpr121] keypad task started, output mode=real-time single key\r\n");
+
+    while (1) {
+        /* IRQ 事件优先，IRQ 线低电平作为兜底，防止极端场景漏中断。 */
+        if ((g_mpr121_irq_pending != 0U) || (uapi_gpio_get_val(MPR121_IRQ_PIN) == GPIO_LEVEL_LOW)) {
+            g_mpr121_irq_pending = 0U;
+            mpr121_process_touch_once();
+        }
+
+        (void)osal_msleep(MPR121_TASK_POLL_MS);
+    }
+
+    return NULL;
+}
+
+/**
+ * @brief 应用入口：创建 MPR121 任务。
+ */
+static void mpr121_keypad_entry(void)
+{
+    osal_task *task_handle = NULL;
+
+    osal_kthread_lock();
+    task_handle = osal_kthread_create((osal_kthread_handler)mpr121_keypad_task,
+        0,
+        "Mpr121Task",
+        MPR121_TASK_STACK_SIZE);
+    if (task_handle != NULL) {
+        osal_kthread_set_priority(task_handle, MPR121_TASK_PRIO);
+        osal_kfree(task_handle);
+    }
+    osal_kthread_unlock();
+}
+
+/* 注册到系统启动流程。 */
+app_run(mpr121_keypad_entry);
