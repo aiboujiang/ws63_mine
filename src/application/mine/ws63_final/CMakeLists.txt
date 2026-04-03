@@ -12,6 +12,7 @@ set(SOURCES
     "Driver/zw101.c"
     "Driver/ws63_rgb_ws2812.c"
     "Middleware/ws63_final_osal.c"
+    "Middleware/ws63_final_sle.c"
     "App/Task/ws63_final_task.c"
     "App/Main/ws63_final_main.c"
 )

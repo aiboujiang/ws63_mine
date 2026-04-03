@@ -78,6 +78,56 @@ extern "C" {
 /* 调试输出节流周期。 */
 #define WS63_LOG_GAP_MS         1000U
 
+/* ----------------------------- SLE 从机桥接配置 ----------------------------- */
+/*
+ * SLE 模块采用“双层开关”策略：
+ * 1) Kconfig 控制是否编译/使能；
+ * 2) 本配置头对外暴露统一宏，供 App/Middleware 直接判断。
+ */
+#ifdef CONFIG_MINE_WS63_FINAL_SLE_SLAVE_CORE
+#define WS63_SLE_CORE_ENABLE            1U
+#else
+#define WS63_SLE_CORE_ENABLE            0U
+#endif
+
+#ifdef CONFIG_MINE_WS63_FINAL_SLE_LD2402
+#define WS63_SLE_LD2402_ENABLE          1U
+#else
+#define WS63_SLE_LD2402_ENABLE          0U
+#endif
+
+#ifdef CONFIG_MINE_WS63_FINAL_SLE_ZW101
+#define WS63_SLE_ZW101_ENABLE           1U
+#else
+#define WS63_SLE_ZW101_ENABLE           0U
+#endif
+
+#ifdef CONFIG_MINE_WS63_FINAL_SLE_CAMERA
+#define WS63_SLE_CAMERA_ENABLE          1U
+#else
+#define WS63_SLE_CAMERA_ENABLE          0U
+#endif
+
+/* SLE 模块与 WK2114 子口映射。 */
+#define WS63_SLE_ZW101_SUBPORT          ZW101_SUBPORT
+#define WS63_SLE_LD2402_SUBPORT         LD2402_SUBPORT
+#define WS63_SLE_CAMERA_SUBPORT         3U
+
+/* SLE 服务/特征与广播名配置。 */
+#define WS63_SLE_SERVICE_UUID           0xABCDU
+#define WS63_SLE_PROPERTY_UUID          0xBCDEU
+#define WS63_SLE_HOST_NAME              "mine_sle_host"
+#define WS63_SLE_LOCAL_NAME             "mine_sle_slave_final"
+
+/* SLE 传输参数。 */
+#define WS63_SLE_DEFAULT_MTU_SIZE       512U
+#define WS63_SLE_SAFE_CHUNK_LEN         200U
+#define WS63_SLE_SEEK_INTERVAL          100U
+#define WS63_SLE_SEEK_WINDOW            100U
+
+/* SLE 地址兜底值：系统地址不可用时使用。 */
+#define WS63_SLE_FALLBACK_MAC           {0xE2, 0x00, 0x73, 0xC8, 0x11, 0x02}
+
 /* RGB WS2812 演示开关：0=关闭，1=开启。 */
 #define WS63_RGB_ENABLE                 1U
 

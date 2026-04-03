@@ -14,6 +14,7 @@
 #include "zw101.h"
 #include "ws63_rgb_ws2812.h"
 #include "ws63_final_osal.h"
+#include "ws63_final_sle.h"
 #include "watchdog.h"
 
 #define WS63_SUBPORT_MAX 4U
@@ -33,6 +34,76 @@ static const ws63_rgb_color_t g_ws63_rgb_demo_colors[] = {
 static uint8_t g_ws63_rgb_ready = 0U;
 static uint8_t g_ws63_rgb_color_index = 0U;
 static uint32_t g_ws63_rgb_last_switch_ms = 0U;
+
+/**
+ * @brief 处理 SLE 下行数据：按模块开关分发到对应子口。
+ *
+ * 设计说明：
+ * 1) 只向“已启用模块 + 已启用子口”发送，避免误写其它业务口；
+ * 2) 使用驱动层统一写接口，应用层不触碰寄存器与底层 UART 细节。
+ */
+#if (WS63_SLE_CORE_ENABLE == 1U)
+static errcode_t ws63_sle_downlink_handler(const uint8_t *data, uint16_t len)
+{
+    errcode_t ret = ERRCODE_FAIL;
+    uint8_t sent_count = 0U;
+
+    if ((data == NULL) || (len == 0U)) {
+        return ERRCODE_INVALID_PARAM;
+    }
+
+#if (WS63_SLE_LD2402_ENABLE == 1U)
+    if (ws63_is_subport_enabled(WS63_SLE_LD2402_SUBPORT)) {
+        ret = wk2114_subport_write(WS63_SLE_LD2402_SUBPORT, data, len);
+        if (ret == ERRCODE_SUCC) {
+            sent_count++;
+        }
+    }
+#endif
+
+#if (WS63_SLE_ZW101_ENABLE == 1U)
+    if (ws63_is_subport_enabled(WS63_SLE_ZW101_SUBPORT)) {
+        ret = wk2114_subport_write(WS63_SLE_ZW101_SUBPORT, data, len);
+        if (ret == ERRCODE_SUCC) {
+            sent_count++;
+        }
+    }
+#endif
+
+#if (WS63_SLE_CAMERA_ENABLE == 1U)
+    if (ws63_is_subport_enabled(WS63_SLE_CAMERA_SUBPORT)) {
+        ret = wk2114_subport_write(WS63_SLE_CAMERA_SUBPORT, data, len);
+        if (ret == ERRCODE_SUCC) {
+            sent_count++;
+        }
+    }
+#endif
+
+    if (sent_count == 0U) {
+        return ERRCODE_FAIL;
+    }
+
+    return ERRCODE_SUCC;
+}
+#endif
+
+/**
+ * @brief 初始化 SLE 从机桥接。
+ */
+static void ws63_sle_bridge_init(void)
+{
+#if (WS63_SLE_CORE_ENABLE == 1U)
+    errcode_t ret;
+
+    ret = ws63_sle_init(ws63_sle_downlink_handler);
+    if (ret != ERRCODE_SUCC) {
+        osal_printk("[wk2114 final task] sle bridge init fail, ret=0x%x\r\n", (unsigned int)ret);
+        return;
+    }
+
+    osal_printk("[wk2114 final task] sle bridge init ok\r\n");
+#endif
+}
 
 /**
  * @brief 默认接收回调。
@@ -82,13 +153,13 @@ static errcode_t ws63_init_enabled_subports(void)
         }
 
         /* 针对不同外设进行初始化和回调绑定 */
-        if (sub_port == ZW101_SUBPORT) {
+        if ((sub_port == ZW101_SUBPORT) && (WS63_SLE_ZW101_ENABLE == 1U)) {
             if (zw101_init(sub_port) == ERRCODE_SUCC) {
                 g_ws63_rx_cb[sub_port] = zw101_process_data;
             } else {
                 osal_printk("[wk2114 final task] ZW101 init fail\r\n");
             }
-        } else if (sub_port == LD2402_SUBPORT) {
+        } else if ((sub_port == LD2402_SUBPORT) && (WS63_SLE_LD2402_ENABLE == 1U)) {
             if (ld2402_init(sub_port) == ERRCODE_SUCC) {
                 g_ws63_rx_cb[sub_port] = ld2402_process_data;
             } else {
@@ -121,6 +192,11 @@ static void ws63_poll_and_dispatch(void)
         len = wk2114_subport_read(sub_port, rx_buf, sizeof(rx_buf));
         if ((len > 0U) && (g_ws63_rx_cb[sub_port] != NULL)) {
             g_ws63_rx_cb[sub_port](sub_port, rx_buf, len);
+
+#if (WS63_SLE_CORE_ENABLE == 1U)
+            /* 上行到 SLE 的模块由中间件按子口映射和模块开关再次过滤。 */
+            (void)ws63_sle_send_subport_data(sub_port, rx_buf, len);
+#endif
         }
     }
 }
@@ -231,6 +307,7 @@ void *ws63_task_entry(const char *arg)
     }
 
     ws63_rgb_demo_init();
+    ws63_sle_bridge_init();
 
     while (1) {
         uint32_t now_ms;
@@ -238,6 +315,10 @@ void *ws63_task_entry(const char *arg)
         ws63_poll_and_dispatch();
         now_ms = ws63_os_tick_ms();
         ws63_rgb_demo_process(now_ms);
+
+#if (WS63_SLE_CORE_ENABLE == 1U)
+        ws63_sle_process();
+#endif
 
         /* 与 RGB 演示并行时持续喂狗，避免任务轮询窗口过长触发复位。 */
         wdt_ret = uapi_watchdog_kick();

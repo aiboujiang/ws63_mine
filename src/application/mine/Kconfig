@@ -34,6 +34,39 @@ config MINE_SUPPORT_WS63_FINAL_LAYERED
         In this framework, WS63 is the main controller and WK2114 is treated
         as an external expansion chip in Driver layer.
 
+if MINE_SUPPORT_WS63_FINAL_LAYERED
+
+config MINE_WS63_FINAL_SLE_SLAVE_CORE
+    bool "WS63 final: enable SLE slave core bridge."
+    default y
+    help
+        Enable SLE slave core bridge in ws63_final.
+        This module handles scan/connect/discovery and provides
+        UART-subport uplink/downlink channel to SLE host.
+
+config MINE_WS63_FINAL_SLE_LD2402
+    bool "WS63 final: enable LD2402 module uplink."
+    default n
+    help
+        Enable LD2402 data path in ws63_final SLE bridge.
+        If disabled, LD2402 sub-port data will not be forwarded to SLE host.
+
+config MINE_WS63_FINAL_SLE_ZW101
+    bool "WS63 final: enable ZW101 module uplink."
+    default n
+    help
+        Enable ZW101 data path in ws63_final SLE bridge.
+        If disabled, ZW101 sub-port data will not be forwarded to SLE host.
+
+config MINE_WS63_FINAL_SLE_CAMERA
+    bool "WS63 final: enable CAMERA module uplink."
+    default n
+    help
+        Enable CAMERA sub-port data path in ws63_final SLE bridge.
+        If disabled, CAMERA sub-port data will not be forwarded to SLE host.
+
+endif
+
 config MINE_SUPPORT_RGB_LED_DEMO
     bool "Support Mine RGB LED Demo (WS2812/GPIO9)."
     default n
