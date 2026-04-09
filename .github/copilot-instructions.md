@@ -17,3 +17,15 @@ Rules:
 - The script force-updates rotating backup tags on remote.
 
 If sync fails (network or auth), report the failure and retry after the issue is fixed.
+
+## Markdown Maintenance Rule (Mandatory)
+
+Use skill `task-md-maintenance` at the end of every completed task unless user explicitly says to skip doc maintenance.
+
+Required behavior before task closure:
+1. Update at least one relevant `.md` file.
+2. Include: change summary, affected files, verification command/result, and risk/follow-up (if any).
+3. For ws63_final related tasks, prefer maintaining `src/application/mine/ws63_final/README.md` under section `任务维护记录`.
+
+Skill location in this repository:
+- `.github/skills/task-md-maintenance/SKILL.md`

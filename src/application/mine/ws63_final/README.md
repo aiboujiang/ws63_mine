@@ -49,7 +49,11 @@ ws63_final/
 
 你后续只需要在 `App/Task` 层扩展业务逻辑，即可完成多模块统一整合。
 
-## 7. 任务维护记录
+## 7. 调试命令文档
+
+- 串口在线控测命令与日志说明请查看：`DEBUG_COMMANDS.md`
+
+## 8. 任务维护记录
 
 ### 2026-04-09: 电机驱动与编码器测速接入
 
@@ -96,3 +100,39 @@ ws63_final/
 
 后续事项：
 - 若现场日志口已占用 UART0，可在配置中切换 `WS63_DEBUG_UART_BUS` 与对应引脚。
+
+### 2026-04-09: 任务收尾文档维护 Skill 落地
+
+变更摘要：
+- 新建 `task-md-maintenance` Skill，约束每次任务完成时必须维护至少一个 Markdown 文档。
+- 在仓库级 copilot 指令中加入强制文档维护规则，并指定 ws63_final 默认维护文档。
+- 明确文档维护条目最小字段：变更摘要、影响文件、验证结果、后续事项。
+
+影响文件：
+- `.github/skills/task-md-maintenance/SKILL.md`
+- `.github/copilot-instructions.md`
+- `src/application/mine/ws63_final/README.md`
+
+验证结果：
+- 命令：`cd /home/xixi/code/fbb_ws63_20260114 && git status --short`
+- 结果：目标文件均有变更并可追踪，规则已落盘。
+
+后续事项：
+- 后续每次任务收尾继续在本节追加记录，形成可审计变更轨迹。
+
+### 2026-04-09: 串口调试命令独立文档新增
+
+变更摘要：
+- 新增独立文档 `DEBUG_COMMANDS.md`，集中维护串口调试命令、日志格式与联调流程。
+- 在主 README 增加文档入口，避免调试命令分散在代码与历史记录中。
+
+影响文件：
+- `src/application/mine/ws63_final/DEBUG_COMMANDS.md`
+- `src/application/mine/ws63_final/README.md`
+
+验证结果：
+- 命令：`cd /home/xixi/code/fbb_ws63_20260114 && git status --short`
+- 结果：文档新增与索引更新均已生效。
+
+后续事项：
+- 每次新增/调整串口命令时同步更新 `DEBUG_COMMANDS.md`，保持联调口径一致。
