@@ -149,6 +149,39 @@ extern "C" {
 /* 日志开关：调试阶段建议开启，稳定后可关闭降低串口开销。 */
 #define WS63_RGB_LOG_ENABLE             1U
 
+/* ----------------------------- 电机与编码器配置 ---------------------------- */
+/* 电机控制引脚：IA=GPIO2，IB=GPIO3。 */
+#define WS63_MOTOR_IA_PIN               GPIO_02
+#define WS63_MOTOR_IB_PIN               GPIO_03
+
+/* 引脚模式：0=GPIO，1=PWM。 */
+#define WS63_MOTOR_IA_GPIO_MODE         0
+#define WS63_MOTOR_IB_GPIO_MODE         0
+#define WS63_MOTOR_IA_PWM_MODE          1
+#define WS63_MOTOR_IB_PWM_MODE          1
+
+/* PWM 资源映射：默认按 GPIO2->PWM2，GPIO3->PWM3。 */
+#define WS63_MOTOR_IA_PWM_CHANNEL       2U
+#define WS63_MOTOR_IB_PWM_CHANNEL       3U
+#define WS63_MOTOR_IA_PWM_GROUP         2U
+#define WS63_MOTOR_IB_PWM_GROUP         3U
+
+/* PWM 周期与默认占空比（百分比）。 */
+#define WS63_MOTOR_PWM_PERIOD_TICKS     40000U
+#define WS63_MOTOR_DEFAULT_DUTY_PERCENT 40U
+
+/* 编码器引脚：A 相=GPIO11，B 相=GPIO12。 */
+#define WS63_ENCODER_A_PIN              GPIO_11
+#define WS63_ENCODER_B_PIN              GPIO_12
+
+/* 编码器输入模式与上下拉（3 对应 PIN_PULL_TYPE_UP）。 */
+#define WS63_ENCODER_PIN_MODE           0
+#define WS63_ENCODER_PULL_MODE          3
+
+/* 测速采样窗口与编码器参数。 */
+#define WS63_ENCODER_SAMPLE_MS          100U
+#define WS63_ENCODER_PPR                7U
+
 #ifdef __cplusplus
 #if __cplusplus
 }

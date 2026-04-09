@@ -12,6 +12,8 @@
 #include "wk2114.h"
 #include "ld2402.h"
 #include "zw101.h"
+#include "ws63_motor.h"
+#include "ws63_encoder.h"
 #if (WS63_RGB_ENABLE == 1U)
 #include "ws63_rgb_ws2812.h"
 #endif
@@ -24,6 +26,7 @@
 /* 各子串口回调表，下标与子串口号一一对应（0 号位保留不用）。 */
 static ws63_rx_callback_t g_ws63_rx_cb[WS63_SUBPORT_MAX + 1U] = {0};
 static uint32_t g_ws63_last_log_ms[WS63_SUBPORT_MAX + 1U] = {0};
+static uint8_t g_ws63_motor_encoder_ready = 0U;
 
 #if (WS63_RGB_ENABLE == 1U)
 /* RGB 演示颜色表：固定红绿蓝循环。 */
@@ -256,6 +259,31 @@ static void ws63_rgb_demo_process(uint32_t now_ms)
 }
 
 /**
+ * @brief 初始化电机与编码器能力。
+ */
+static void ws63_motor_encoder_init(void)
+{
+    errcode_t ret;
+
+    g_ws63_motor_encoder_ready = 0U;
+
+    ret = ws63_motor_init();
+    if (ret != ERRCODE_SUCC) {
+        osal_printk("[wk2114 final task] motor init fail, ret=0x%x\r\n", (unsigned int)ret);
+        return;
+    }
+
+    ret = ws63_encoder_init();
+    if (ret != ERRCODE_SUCC) {
+        osal_printk("[wk2114 final task] encoder init fail, ret=0x%x\r\n", (unsigned int)ret);
+        return;
+    }
+
+    g_ws63_motor_encoder_ready = 1U;
+    osal_printk("[wk2114 final task] motor+encoder init ok (IA=GPIO2 IB=GPIO3 ENC=GPIO11/12)\r\n");
+}
+
+/**
  * @brief 注册子串口回调。
  */
 errcode_t ws63_task_register_rx_callback(uint8_t sub_port,
@@ -278,6 +306,90 @@ errcode_t ws63_task_send(uint8_t sub_port, const uint8_t *data, uint16_t len)
 }
 
 /**
+ * @brief 控制电机正转（IA=0，IB=PWM）。
+ */
+errcode_t ws63_task_motor_forward(uint8_t duty_percent)
+{
+    if (g_ws63_motor_encoder_ready == 0U) {
+        return ERRCODE_FAIL;
+    }
+
+    return ws63_motor_forward(duty_percent);
+}
+
+/**
+ * @brief 控制电机反转（IA=PWM，IB=0）。
+ */
+errcode_t ws63_task_motor_reverse(uint8_t duty_percent)
+{
+    if (g_ws63_motor_encoder_ready == 0U) {
+        return ERRCODE_FAIL;
+    }
+
+    return ws63_motor_reverse(duty_percent);
+}
+
+/**
+ * @brief 电机停止（滑行，IA=0，IB=0）。
+ */
+errcode_t ws63_task_motor_coast_stop(void)
+{
+    if (g_ws63_motor_encoder_ready == 0U) {
+        return ERRCODE_FAIL;
+    }
+
+    return ws63_motor_coast_stop();
+}
+
+/**
+ * @brief 电机刹车（急停，IA=1，IB=1）。
+ */
+errcode_t ws63_task_motor_brake_stop(void)
+{
+    if (g_ws63_motor_encoder_ready == 0U) {
+        return ERRCODE_FAIL;
+    }
+
+    return ws63_motor_brake_stop();
+}
+
+/**
+ * @brief 动态调整当前运行方向占空比。
+ */
+errcode_t ws63_task_motor_set_duty(uint8_t duty_percent)
+{
+    if (g_ws63_motor_encoder_ready == 0U) {
+        return ERRCODE_FAIL;
+    }
+
+    return ws63_motor_set_duty(duty_percent);
+}
+
+/**
+ * @brief 获取编码器最新 RPM。
+ */
+int32_t ws63_task_get_motor_rpm(void)
+{
+    if (g_ws63_motor_encoder_ready == 0U) {
+        return 0;
+    }
+
+    return ws63_encoder_get_rpm();
+}
+
+/**
+ * @brief 获取编码器累计计数值。
+ */
+int32_t ws63_task_get_encoder_total_count(void)
+{
+    if (g_ws63_motor_encoder_ready == 0U) {
+        return 0;
+    }
+
+    return ws63_encoder_get_total_count();
+}
+
+/**
  * @brief WK2114 最终版业务任务入口。
  */
 void *ws63_task_entry(const char *arg)
@@ -289,6 +401,9 @@ void *ws63_task_entry(const char *arg)
 
     (void)arg;
     ws63_os_sleep_ms(WS63_BOOT_DELAY_MS);
+
+    /* 电机/编码器初始化独立于 WK2114 链路，失败仅记录日志，不阻断任务。 */
+    ws63_motor_encoder_init();
 
     /* 先启动 SLE 桥接：即使 WK2114 链路异常，也能保留无线侧诊断日志。 */
     ws63_sle_bridge_init();
@@ -323,6 +438,9 @@ void *ws63_task_entry(const char *arg)
             ws63_poll_and_dispatch();
         }
         now_ms = ws63_os_tick_ms();
+        if (g_ws63_motor_encoder_ready == 1U) {
+            ws63_encoder_sample(now_ms);
+        }
         ws63_rgb_demo_process(now_ms);
 
 #if (WS63_SLE_CORE_ENABLE == 1U)

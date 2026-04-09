@@ -11,6 +11,8 @@ set(SOURCES
     "Driver/ld2402.c"
     "Driver/zw101.c"
     "Driver/ws63_rgb_ws2812.c"
+    "Driver/ws63_motor.c"
+    "Driver/ws63_encoder.c"
     "Middleware/ws63_final_osal.c"
     "Middleware/ws63_final_sle.c"
     "App/Task/ws63_final_task.c"

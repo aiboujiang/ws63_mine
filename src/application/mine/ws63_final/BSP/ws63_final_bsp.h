@@ -13,6 +13,7 @@
 #include <stdint.h>
 
 #include "errcode.h"
+#include "platform_core.h"
 
 #ifdef __cplusplus
 #if __cplusplus
@@ -103,6 +104,72 @@ errcode_t ws63_bsp_rgb_spi_init(void);
  * @return errcode_t ERRCODE_SUCC 成功，其他失败。
  */
 errcode_t ws63_bsp_rgb_spi_write(const uint8_t *tx_buf, uint32_t tx_bytes, uint32_t timeout_ms);
+
+/**
+ * @brief GPIO 中断回调类型。
+ */
+typedef void (*ws63_bsp_gpio_callback_t)(pin_t pin, uintptr_t param);
+
+/**
+ * @brief 初始化电机底层资源（GPIO/PWM）。
+ *
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_bsp_motor_init(void);
+
+/**
+ * @brief 关闭电机 PWM 输出并恢复 IA/IB 为 GPIO 模式。
+ *
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_bsp_motor_disable_pwm(void);
+
+/**
+ * @brief 设置电机 IA/IB GPIO 电平。
+ *
+ * @param ia_high IA 目标电平（1=高，0=低）。
+ * @param ib_high IB 目标电平（1=高，0=低）。
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_bsp_motor_set_level(uint8_t ia_high, uint8_t ib_high);
+
+/**
+ * @brief 使能 IA 通道 PWM 输出。
+ *
+ * @param duty_percent 占空比百分比（0~100）。
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_bsp_motor_enable_pwm_ia(uint8_t duty_percent);
+
+/**
+ * @brief 使能 IB 通道 PWM 输出。
+ *
+ * @param duty_percent 占空比百分比（0~100）。
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_bsp_motor_enable_pwm_ib(uint8_t duty_percent);
+
+/**
+ * @brief 初始化编码器 IO。
+ *
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_bsp_encoder_init(void);
+
+/**
+ * @brief 注册编码器 A 相上升沿中断回调。
+ *
+ * @param callback A 相中断回调函数。
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_bsp_encoder_register_a_isr(ws63_bsp_gpio_callback_t callback);
+
+/**
+ * @brief 读取编码器 B 相电平。
+ *
+ * @return uint8_t 1=高电平，0=低电平。
+ */
+uint8_t ws63_bsp_encoder_get_b_level(void);
 
 #ifdef __cplusplus
 #if __cplusplus
