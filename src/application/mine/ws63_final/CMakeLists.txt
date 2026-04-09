@@ -22,6 +22,9 @@ set(SOURCES
     "Middleware/ws63_final_osal.c"
     "Middleware/ws63_final_sle.c"
     "App/Task/ws63_final_task.c"
+    "App/Task/ws63_final_task_rgb.c"
+    "App/Task/ws63_final_task_device_ctrl.c"
+    "App/Task/ws63_final_task_sensor_bridge.c"
     "App/Task/ws63_final_task_debug.c"
     "App/Main/ws63_final_main.c"
 )

@@ -1,0 +1,229 @@
+/**
+ * @file ws63_final_task_sensor_bridge.c
+ * @brief Task 层传感器桥接子模块（LD2402/ZW101）。
+ */
+
+#include "ws63_final_task.h"
+
+#include <stddef.h>
+
+#include "ws63_final_common.h"
+#include "ws63_final_config.h"
+#include "wk2114.h"
+#include "ld2402.h"
+#include "zw101.h"
+
+/**
+ * @brief 重新初始化 LD2402（兼容命令别名 LD2401）。
+ */
+errcode_t ws63_task_ld2402_reinit(void)
+{
+    if (!ws63_is_subport_enabled(LD2402_SUBPORT)) {
+        return ERRCODE_FAIL;
+    }
+
+    return ld2402_init(LD2402_SUBPORT);
+}
+
+/**
+ * @brief 向 LD2402 发送原始命令帧。
+ */
+errcode_t ws63_task_ld2402_send_raw(const uint8_t *data, uint16_t len)
+{
+    if ((data == NULL) || (len == 0U)) {
+        return ERRCODE_INVALID_PARAM;
+    }
+
+    if (!ws63_is_subport_enabled(LD2402_SUBPORT)) {
+        return ERRCODE_FAIL;
+    }
+
+    return wk2114_subport_write(LD2402_SUBPORT, data, len);
+}
+
+/**
+ * @brief 重新初始化 ZW101（触发握手检测）。
+ */
+errcode_t ws63_task_zw101_reinit(void)
+{
+    if (!ws63_is_subport_enabled(ZW101_SUBPORT)) {
+        return ERRCODE_FAIL;
+    }
+
+    return zw101_init(ZW101_SUBPORT);
+}
+
+/**
+ * @brief 向 ZW101 发送原始命令帧。
+ */
+errcode_t ws63_task_zw101_send_raw(const uint8_t *data, uint16_t len)
+{
+    if ((data == NULL) || (len == 0U)) {
+        return ERRCODE_INVALID_PARAM;
+    }
+
+    if (!ws63_is_subport_enabled(ZW101_SUBPORT)) {
+        return ERRCODE_FAIL;
+    }
+
+    return zw101_send_raw(data, len);
+}
+
+/**
+ * @brief 执行 ZW101 ZA 握手（GetEcho）。
+ */
+errcode_t ws63_task_zw101_za_get_echo(uint8_t *ack_out)
+{
+    if (!ws63_is_subport_enabled(ZW101_SUBPORT)) {
+        return ERRCODE_FAIL;
+    }
+
+    return zw101_za_get_echo(ack_out);
+}
+
+/**
+ * @brief 执行 ZW101 ZA 自动登记（AutoLogin）。
+ */
+errcode_t ws63_task_zw101_za_auto_login(uint8_t wait_time,
+    uint8_t sample_interval_code,
+    uint8_t press_times,
+    uint16_t page_id,
+    uint8_t allow_dup,
+    uint8_t *ack_out)
+{
+    if (!ws63_is_subport_enabled(ZW101_SUBPORT)) {
+        return ERRCODE_FAIL;
+    }
+
+    return zw101_za_auto_login(wait_time,
+        sample_interval_code,
+        press_times,
+        page_id,
+        allow_dup,
+        ack_out);
+}
+
+/**
+ * @brief 执行 ZW101 ZA 自动搜索（AutoSearch）。
+ */
+errcode_t ws63_task_zw101_za_auto_search(uint8_t wait_time,
+    uint16_t start_page,
+    uint16_t page_num,
+    uint16_t *page_id_out,
+    uint16_t *score_out,
+    uint8_t *ack_out)
+{
+    errcode_t ret;
+    zw101_ack_result_t result;
+
+    if (!ws63_is_subport_enabled(ZW101_SUBPORT)) {
+        return ERRCODE_FAIL;
+    }
+
+    ret = zw101_za_auto_search(wait_time, start_page, page_num, &result);
+    if (ack_out != NULL) {
+        *ack_out = result.ack_code;
+    }
+    if ((page_id_out != NULL) && (result.payload_len >= 5U)) {
+        *page_id_out = (uint16_t)(((uint16_t)result.payload[1] << 8) | result.payload[2]);
+    }
+    if ((score_out != NULL) && (result.payload_len >= 5U)) {
+        *score_out = (uint16_t)(((uint16_t)result.payload[3] << 8) | result.payload[4]);
+    }
+
+    return ret;
+}
+
+/**
+ * @brief 执行 ZW101 ZA 搜索指纹（带残留判断）。
+ */
+errcode_t ws63_task_zw101_za_search_res_back(uint8_t buffer_id,
+    uint16_t start_page,
+    uint16_t page_num,
+    uint16_t *page_id_out,
+    uint16_t *score_out,
+    uint8_t *ack_out)
+{
+    errcode_t ret;
+    zw101_ack_result_t result;
+
+    if (!ws63_is_subport_enabled(ZW101_SUBPORT)) {
+        return ERRCODE_FAIL;
+    }
+
+    ret = zw101_za_search_res_back(buffer_id, start_page, page_num, &result);
+    if (ack_out != NULL) {
+        *ack_out = result.ack_code;
+    }
+    if ((page_id_out != NULL) && (result.payload_len >= 5U)) {
+        *page_id_out = (uint16_t)(((uint16_t)result.payload[1] << 8) | result.payload[2]);
+    }
+    if ((score_out != NULL) && (result.payload_len >= 5U)) {
+        *score_out = (uint16_t)(((uint16_t)result.payload[3] << 8) | result.payload[4]);
+    }
+
+    return ret;
+}
+
+/**
+ * @brief 执行 ZW101 ZA 自动登记（灯常亮）。
+ */
+errcode_t ws63_task_zw101_za_auto_login_stab(uint8_t wait_time,
+    uint8_t press_times,
+    uint16_t page_id,
+    uint8_t allow_dup,
+    uint8_t *ack_out)
+{
+    if (!ws63_is_subport_enabled(ZW101_SUBPORT)) {
+        return ERRCODE_FAIL;
+    }
+
+    return zw101_za_auto_login_stab_light(wait_time,
+        press_times,
+        page_id,
+        allow_dup,
+        ack_out);
+}
+
+/**
+ * @brief 执行 ZW101 ZA 自动搜索（搜前提示）。
+ */
+errcode_t ws63_task_zw101_za_auto_search_echo(uint8_t wait_time,
+    uint16_t start_page,
+    uint16_t page_num,
+    uint16_t *page_id_out,
+    uint16_t *score_out,
+    uint8_t *ack_out)
+{
+    errcode_t ret;
+    zw101_ack_result_t result;
+
+    if (!ws63_is_subport_enabled(ZW101_SUBPORT)) {
+        return ERRCODE_FAIL;
+    }
+
+    ret = zw101_za_auto_search_with_echo(wait_time, start_page, page_num, &result);
+    if (ack_out != NULL) {
+        *ack_out = result.ack_code;
+    }
+    if ((page_id_out != NULL) && (result.payload_len >= 5U)) {
+        *page_id_out = (uint16_t)(((uint16_t)result.payload[1] << 8) | result.payload[2]);
+    }
+    if ((score_out != NULL) && (result.payload_len >= 5U)) {
+        *score_out = (uint16_t)(((uint16_t)result.payload[3] << 8) | result.payload[4]);
+    }
+
+    return ret;
+}
+
+/**
+ * @brief 执行 ZW101 ZA 过程终止。
+ */
+errcode_t ws63_task_zw101_za_terminate(uint8_t *ack_out)
+{
+    if (!ws63_is_subport_enabled(ZW101_SUBPORT)) {
+        return ERRCODE_FAIL;
+    }
+
+    return zw101_za_process_terminate(ack_out);
+}

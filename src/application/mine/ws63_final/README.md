@@ -340,3 +340,32 @@ ws63_final/
 
 后续事项：
 - 若需对本次改动做“真实编译链路”验证，请先在 menuconfig 中重新启用 `CONFIG_MINE_SUPPORT_WS63_FINAL_LAYERED` 后再构建。
+
+### 2026-04-09: Task 主文件按功能拆分（核心调度/设备控制/RGB/传感器桥接）
+
+变更摘要：
+- 将 `ws63_final_task.c` 收敛为“核心调度 + 子口初始化 + 主循环”，移除电机/蜂鸣器、RGB、传感器桥接等实现细节。
+- 新增 `ws63_final_task_internal.h` 作为 Task 内部模块共享接口，统一声明内部能力初始化与状态查询接口。
+- 新增 `ws63_final_task_device_ctrl.c`，集中承载电机/编码器/蜂鸣器初始化与控制 API。
+- 新增 `ws63_final_task_rgb.c`，独立维护 RGB 演示状态机与周期驱动逻辑。
+- 新增 `ws63_final_task_sensor_bridge.c`，独立维护 LD2402/ZW101 调试桥接接口。
+- 更新 `CMakeLists.txt` 源清单，将拆分文件纳入 `mine_ws63_final` 组件编译。
+
+影响文件：
+- `src/application/mine/ws63_final/App/Task/ws63_final_task.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_internal.h`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_device_ctrl.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_rgb.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_sensor_bridge.c`
+- `src/application/mine/ws63_final/CMakeLists.txt`
+- `src/application/mine/ws63_final/README.md`
+
+验证结果：
+- 命令：`cd /home/xixi/code/fbb_ws63_20260114/src && python3 build.py ws63-liteos-app`
+- 结果：构建通过（`Build target:ws63_liteos_app success`）。
+- 命令：`cd /home/xixi/code/fbb_ws63_20260114/src && python3 build.py -c ws63-liteos-app`
+- 结果：clean+全量构建通过（`Build target:ws63_liteos_app success`），并生成拆分对象文件：
+	`ws63_final_task.c.obj`、`ws63_final_task_device_ctrl.c.obj`、`ws63_final_task_rgb.c.obj`、`ws63_final_task_sensor_bridge.c.obj`。
+
+后续事项：
+- 若后续继续扩展业务，请优先在对应子模块文件中新增逻辑，避免再次回流到主任务文件。
