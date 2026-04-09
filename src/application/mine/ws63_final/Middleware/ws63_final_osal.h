@@ -48,6 +48,31 @@ void ws63_os_sleep_ms(uint32_t ms);
  */
 uint32_t ws63_os_tick_ms(void);
 
+/**
+ * @brief 进入 OSAL 临界区。
+ *
+ * @return unsigned int 中断状态快照，需原样传回 ws63_os_irq_unlock。
+ */
+unsigned int ws63_os_irq_lock(void);
+
+/**
+ * @brief 退出 OSAL 临界区。
+ *
+ * @param irq_status ws63_os_irq_lock 返回的中断状态快照。
+ */
+void ws63_os_irq_unlock(unsigned int irq_status);
+
+/**
+ * @brief 喂狗适配接口。
+ *
+ * 说明：
+ * 1) 应用层通过本接口喂狗，避免直接依赖 watchdog HAL 头文件；
+ * 2) 便于后续替换为不同平台/看门狗实现。
+ *
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_os_feed_watchdog(void);
+
 #ifdef __cplusplus
 #if __cplusplus
 }

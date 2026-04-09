@@ -210,6 +210,32 @@ extern "C" {
 /* 外部减速齿轮减速比：输出轴转速 = 电机轴转速 / WS63_MOTOR_GEAR_RATIO。 */
 #define WS63_MOTOR_GEAR_RATIO           150U
 
+/* ----------------------------- 蜂鸣器配置 ----------------------------- */
+/* 蜂鸣器开关：0=关闭，1=开启。 */
+#define WS63_BEEP_ENABLE                1U
+
+/* 默认采用无源蜂鸣器接 GPIO9（复用 mode1 对应 PWM1）。 */
+#define WS63_BEEP_GPIO_PIN              GPIO_09
+#define WS63_BEEP_GPIO_MODE             0
+#define WS63_BEEP_PWM_PIN_MODE          1
+
+/* PWM 通道与分组：与电机 PWM2/PWM3 资源隔离。 */
+#define WS63_BEEP_PWM_CHANNEL           1U
+#define WS63_BEEP_PWM_GROUP             1U
+
+/* 蜂鸣器频率边界与默认频率（Hz）。 */
+#define WS63_BEEP_MIN_FREQ_HZ           100U
+#define WS63_BEEP_MAX_FREQ_HZ           5000U
+#define WS63_BEEP_DEFAULT_FREQ_HZ       2000U
+
+/* 蜂鸣器音量边界与默认值（本质为 PWM 占空比百分比）。 */
+#define WS63_BEEP_MIN_VOLUME_PERCENT    0U
+#define WS63_BEEP_MAX_VOLUME_PERCENT    95U
+#define WS63_BEEP_DEFAULT_VOLUME_PERCENT 50U
+
+/* PWM v151 计数位宽上限（16bit）。 */
+#define WS63_BEEP_PWM_PERIOD_TICKS_MAX  0xFFFFU
+
 #ifdef __cplusplus
 #if __cplusplus
 }

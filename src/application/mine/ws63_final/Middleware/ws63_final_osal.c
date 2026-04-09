@@ -8,8 +8,10 @@
 #include <stddef.h>
 
 #include "osal_addr.h"
+#include "soc_osal.h"
 #include "osal_task.h"
 #include "systick.h"
+#include "watchdog.h"
 
 /**
  * @brief 创建并启动线程任务。
@@ -57,4 +59,28 @@ void ws63_os_sleep_ms(uint32_t ms)
 uint32_t ws63_os_tick_ms(void)
 {
     return (uint32_t)uapi_systick_get_ms();
+}
+
+/**
+ * @brief 进入 OSAL 临界区。
+ */
+unsigned int ws63_os_irq_lock(void)
+{
+    return osal_irq_lock();
+}
+
+/**
+ * @brief 退出 OSAL 临界区。
+ */
+void ws63_os_irq_unlock(unsigned int irq_status)
+{
+    osal_irq_restore(irq_status);
+}
+
+/**
+ * @brief 喂狗适配接口。
+ */
+errcode_t ws63_os_feed_watchdog(void)
+{
+    return uapi_watchdog_kick();
 }

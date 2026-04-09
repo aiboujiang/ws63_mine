@@ -16,15 +16,15 @@
 #define RGB_LED_TASK_STACK_SIZE          0x1000
 
 /* WS2812 数据脚使用 GPIO9，复用为 SPI0_OUT。 */
-#define WS2812_DATA_PIN                  GPIO_09
+#define WS2812_DATA_PIN                  GPIO_01
 #define WS2812_SPI_DO_PIN_MODE           PIN_MODE_3
 
 /* SPI0_SCK 在 GPIO7 的复用信号 3。 */
-#define WS2812_SPI_CLK_PIN               GPIO_07
+#define WS2812_SPI_CLK_PIN               GPIO_06
 #define WS2812_SPI_CLK_PIN_MODE          PIN_MODE_3
 
 /* SPI+DMA 发送配置：4MHz + 5bit 符号，满足 WS2812 单 bit 1.25us。 */
-#define WS2812_SPI_BUS_ID                SPI_BUS_0
+#define WS2812_SPI_BUS_ID                SPI_BUS_1
 #define WS2812_SPI_FREQ_MHZ              4U
 #define WS2812_SPI_TIMEOUT_MS            0xFFFFFFFFU
 
@@ -57,9 +57,9 @@ typedef struct {
 } ws2812_color_t;
 
 static const ws2812_color_t g_ws2812_demo_colors[] = {
-    {255U, 0U, 0U},
-    {0U, 255U, 0U},
-    {0U, 0U, 255U}
+    {10U, 0U, 0U},
+    {0U, 10U, 0U},
+    {0U, 0U, 10U}
 };
 
 static uint8_t g_ws2812_spi_tx_buf[WS2812_SPI_TX_BYTES] = {0};

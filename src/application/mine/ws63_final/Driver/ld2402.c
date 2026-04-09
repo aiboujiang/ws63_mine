@@ -8,7 +8,7 @@
  */
 #include "ld2402.h"
 #include "wk2114.h"
-#include "ws63_final_osal.h"
+#include "ws63_final_bsp.h"
 #include "osal_debug.h"
 #include <stdbool.h>
 #include <stddef.h>
@@ -148,7 +148,7 @@ errcode_t ld2402_init(uint8_t sub_port)
             if (wk2114_subport_read(sub_port, rx_buf, sizeof(rx_buf)) == 0U) {
                 break;
             }
-            ws63_os_sleep_ms(2);
+            ws63_bsp_sleep_ms(2);
         }
 
         if (drain_round >= LD2402_DRAIN_MAX_ROUND) {
@@ -178,7 +178,7 @@ errcode_t ld2402_init(uint8_t sub_port)
                 }
             }
 
-            ws63_os_sleep_ms(LD2402_INIT_POLL_GAP_MS);
+            ws63_bsp_sleep_ms(LD2402_INIT_POLL_GAP_MS);
         }
 
         if (has_valid_frame) {
@@ -190,14 +190,14 @@ errcode_t ld2402_init(uint8_t sub_port)
 
             // 通信正常后发送结束配置，恢复工作模式
             wk2114_subport_write(sub_port, g_ld2402_cmd_disable, sizeof(g_ld2402_cmd_disable));
-            ws63_os_sleep_ms(20);
+            ws63_bsp_sleep_ms(20);
 
             ret = ERRCODE_SUCC;
             break;
         }
 
         osal_printk("[ld2402] init retry...\r\n");
-        ws63_os_sleep_ms(100);
+        ws63_bsp_sleep_ms(100);
     }
 
     if (ret != ERRCODE_SUCC) {

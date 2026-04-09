@@ -2,11 +2,14 @@
 
 ## 1. 适用范围
 
-本手册适用于 `ws63_final` 模块中的电机与编码器在线控测命令。
+本手册适用于 `ws63_final` 模块中的电机、编码器、蜂鸣器、LD2401（兼容 LD2402）与 ZW101 在线控测命令。
 
 目标：
 - 通过串口实时控制电机正反转、停止、刹车与占空比。
 - 通过串口实时查看编码器 RPM、窗口增量与累计计数。
+- 通过串口实时控制蜂鸣器开关与频率。
+- 通过串口在线触发 LD2401/ZW101 初始化握手及发送原始调试帧。
+- 通过串口在线验证 ZW101 ZA 兼容命令链路（回显/自动登录/自动搜索/终止）。
 - 通过统一日志格式快速定位指令执行状态。
 
 ## 2. 默认串口配置
@@ -80,6 +83,92 @@
 - `MOTOR WATCH OFF`
   - 功能：关闭周期状态日志输出。
 
+### 3.5 蜂鸣器控制命令
+
+- `BEEP ON`
+  - 功能：以默认频率开启蜂鸣器连续发声。
+
+- `BEEP ON <100-5000>`
+  - 功能：以指定频率开启蜂鸣器连续发声。
+  - 示例：`BEEP ON 2000`
+
+- `BEEP FREQ <100-5000>`
+  - 功能：调整蜂鸣器发声频率（未开启时会自动开启）。
+  - 示例：`BEEP FREQ 1500`
+
+- `BEEP VOL <0-100>`
+  - 功能：调整蜂鸣器音量（映射为 PWM 占空比百分比）。
+  - 说明：当音量设为 `0` 时会立即静音。
+  - 示例：`BEEP VOL 30`
+
+- `BEEP OFF`
+  - 功能：关闭蜂鸣器并拉低引脚静音。
+
+- `BEEP STAT`
+  - 功能：查询蜂鸣器当前状态与频率。
+
+### 3.6 LD2401（兼容 LD2402）调试命令
+
+- `LD2401 INIT`（或 `LD2402 INIT`）
+  - 功能：重新初始化 LD2401/LD2402 模块并执行握手检测。
+
+- `LD2401 RAW <HEX...>`（或 `LD2402 RAW <HEX...>`）
+  - 功能：向 LD2401/LD2402 子口发送原始十六进制命令帧。
+  - 示例：`LD2401 RAW FD FC FB FA 02 00 FE 00 04 03 02 01`
+
+- `LD2401 STAT`（或 `LD2402 STAT`）
+  - 功能：输出当前命令映射的子串口信息。
+
+### 3.7 ZW101 调试命令
+
+- `ZW101 INIT`
+  - 功能：重新初始化 ZW101 模块并执行握手检测。
+
+- `ZW101 HANDSHAKE`
+  - 功能：`ZW101 INIT` 别名。
+
+- `ZW101 RAW <HEX...>`
+  - 功能：向 ZW101 子口发送原始十六进制命令帧。
+  - 示例：`ZW101 RAW EF 01 FF FF FF FF 01 00 03 35 00 39`
+
+- `ZW101 STAT`
+  - 功能：输出当前 ZW101 命令映射的子串口信息。
+
+- `ZW101 ZA HELP`
+  - 功能：打印 ZA 兼容命令帮助。
+
+- `ZW101 ZA ECHO`
+  - 功能：发送 `GetEcho(0x53)`，用于确认基础通信链路正常。
+
+- `ZW101 ZA LOGIN <wait> <interval0-15> <press2|3> <id> <dup0|1>`
+  - 功能：发送 `AutoLogin(0x54)`。
+  - 示例：`ZW101 ZA LOGIN 10 3 2 1 0`
+
+- `ZW101 ZA SEARCH <wait> <start> <count>`
+  - 功能：发送 `AutoSearch(0x55)`，并打印返回的 `ack/id/score`。
+  - 示例：`ZW101 ZA SEARCH 20 0 10`
+
+- `ZW101 ZA SEARCHRES <buf1|2> <start> <count>`
+  - 功能：发送 `SearchResBack(0x56)`，并打印返回的 `ack/id/score`。
+  - 示例：`ZW101 ZA SEARCHRES 1 0 10`
+
+- `ZW101 ZA LOGINLIGHT <wait> <press2|3> <id> <dup0|1>`
+  - 功能：发送 `AutoLoginStabLight(0x57)`。
+  - 示例：`ZW101 ZA LOGINLIGHT 10 2 1 0`
+
+- `ZW101 ZA SEARCHECHO <wait> <start> <count>`
+  - 功能：发送 `AutoSearchWithEcho(0x58)`，并打印返回的 `ack/id/score`。
+  - 示例：`ZW101 ZA SEARCHECHO 20 0 10`
+
+- `ZW101 ZA TERM`
+  - 功能：发送 `ProcessTerminateCmd(0xAA)`，终止当前流程。
+
+参数说明：
+- `wait`：驱动等待应答的周期参数（单位 10ms，传入 `uint8`）。
+- `id/start/count`：按协议使用 16 位无符号整数。
+- `press2|3`：手指按压次数，当前仅允许 `2` 或 `3`。
+- `dup0|1`：重复录入标志，`0` 关闭、`1` 开启。
+
 ## 4. 日志格式说明
 
 ### 4.1 命令输入日志
@@ -114,6 +203,9 @@
 5. 发送 `MOTOR REV 30`，确认方向切换与 RPM 符号变化。
 6. 发送 `MOTOR STOP` 或 `MOTOR BRAKE`，确认停止行为。
 7. 发送 `MOTOR WATCH OFF` 结束监控。
+8. 发送 `BEEP ON 2000` + `BEEP VOL 30`，验证蜂鸣器频率与音量调节。
+9. 发送 `LD2401 INIT`、`ZW101 HANDSHAKE`，验证两类模块调试链路。
+10. 发送 `ZW101 ZA ECHO`、`ZW101 ZA SEARCH 20 0 10`，验证 ZA 兼容命令通信链路。
 
 ## 6. 常见问题
 
@@ -136,8 +228,23 @@
 - 现象：转速读数不稳定。
   - 排查：检查编码器 A/B 接线与地线；必要时调大采样窗口 `WS63_ENCODER_SAMPLE_MS`。
 
+- 现象：`BEEP ON` 命令返回成功但无声音。
+  - 排查：确认蜂鸣器接线为 `GPIO9`，且板卡 IO 复用允许 `GPIO9 mode1 -> PWM1`。
+  - 排查：确认未占用同一 PWM 通道；默认蜂鸣器使用 `PWM1`，电机使用 `PWM2/PWM3`。
+
+- 现象：`LD2401 RAW` / `ZW101 RAW` 返回参数错误。
+  - 排查：确保使用两位十六进制字节并用空格分隔，例如 `AA 55 01 0F`。
+  - 排查：避免输入奇数字符数（例如 `A B2`），解析器会直接判定为非法。
+
+- 现象：`ZW101 ZA *` 返回 `invalid ... args`。
+  - 排查：确认参数个数与顺序匹配帮助信息；`press` 仅支持 `2/3`，`dup` 仅支持 `0/1`。
+  - 排查：`id/start/count` 必须在 `0~65535`。
+
 ## 7. 关联文件
 
 - `src/application/mine/ws63_final/App/Task/ws63_final_task.c`
 - `src/application/mine/ws63_final/Config/ws63_final_config.h`
 - `src/application/mine/ws63_final/BSP/ws63_final_bsp.c`
+- `src/application/mine/ws63_final/BSP/ws63_final_bsp_beep.c`
+- `src/application/mine/ws63_final/Driver/ws63_buzzer.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_debug.c`

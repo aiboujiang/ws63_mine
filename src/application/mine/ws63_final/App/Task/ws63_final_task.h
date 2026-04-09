@@ -84,6 +84,152 @@ errcode_t ws63_task_motor_brake_stop(void);
 errcode_t ws63_task_motor_set_duty(uint8_t duty_percent);
 
 /**
+ * @brief 打开蜂鸣器并设置频率。
+ *
+ * @param freq_hz 目标频率（Hz）。
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_task_buzzer_on(uint16_t freq_hz);
+
+/**
+ * @brief 关闭蜂鸣器。
+ *
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_task_buzzer_off(void);
+
+/**
+ * @brief 查询蜂鸣器是否正在发声。
+ *
+ * @return uint8_t 1=正在发声，0=静音。
+ */
+uint8_t ws63_task_buzzer_is_on(void);
+
+/**
+ * @brief 获取蜂鸣器当前频率。
+ *
+ * @return uint16_t 当前频率（Hz）。
+ */
+uint16_t ws63_task_buzzer_get_freq_hz(void);
+
+/**
+ * @brief 设置蜂鸣器音量。
+ *
+ * @param volume_percent 音量百分比（0~100）。
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_task_buzzer_set_volume(uint8_t volume_percent);
+
+/**
+ * @brief 获取蜂鸣器当前音量。
+ *
+ * @return uint8_t 当前音量百分比。
+ */
+uint8_t ws63_task_buzzer_get_volume(void);
+
+/**
+ * @brief 重新初始化 LD2402（兼容命令别名 LD2401）。
+ *
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_task_ld2402_reinit(void);
+
+/**
+ * @brief 向 LD2402 发送原始命令帧。
+ *
+ * @param data 命令缓冲区。
+ * @param len  命令长度。
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_task_ld2402_send_raw(const uint8_t *data, uint16_t len);
+
+/**
+ * @brief 重新初始化 ZW101（触发握手检测）。
+ *
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_task_zw101_reinit(void);
+
+/**
+ * @brief 向 ZW101 发送原始命令帧。
+ *
+ * @param data 命令缓冲区。
+ * @param len  命令长度。
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_task_zw101_send_raw(const uint8_t *data, uint16_t len);
+
+/**
+ * @brief 执行 ZW101 ZA 握手（GetEcho）。
+ *
+ * @param ack_out 输出确认码，可为 NULL。
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_task_zw101_za_get_echo(uint8_t *ack_out);
+
+/**
+ * @brief 执行 ZW101 ZA 自动登记（AutoLogin）。
+ */
+errcode_t ws63_task_zw101_za_auto_login(uint8_t wait_time,
+    uint8_t sample_interval_code,
+    uint8_t press_times,
+    uint16_t page_id,
+    uint8_t allow_dup,
+    uint8_t *ack_out);
+
+/**
+ * @brief 执行 ZW101 ZA 自动搜索（AutoSearch）。
+ *
+ * @param wait_time 待指时长。
+ * @param start_page 起始页。
+ * @param page_num 搜索页数。
+ * @param page_id_out 输出匹配页码，可为 NULL。
+ * @param score_out 输出匹配得分，可为 NULL。
+ * @param ack_out 输出确认码，可为 NULL。
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_task_zw101_za_auto_search(uint8_t wait_time,
+    uint16_t start_page,
+    uint16_t page_num,
+    uint16_t *page_id_out,
+    uint16_t *score_out,
+    uint8_t *ack_out);
+
+/**
+ * @brief 执行 ZW101 ZA 搜索指纹（带残留判断，SearchResBack）。
+ */
+errcode_t ws63_task_zw101_za_search_res_back(uint8_t buffer_id,
+    uint16_t start_page,
+    uint16_t page_num,
+    uint16_t *page_id_out,
+    uint16_t *score_out,
+    uint8_t *ack_out);
+
+/**
+ * @brief 执行 ZW101 ZA 自动登记（灯常亮，AutoLoginStabLight）。
+ */
+errcode_t ws63_task_zw101_za_auto_login_stab(uint8_t wait_time,
+    uint8_t press_times,
+    uint16_t page_id,
+    uint8_t allow_dup,
+    uint8_t *ack_out);
+
+/**
+ * @brief 执行 ZW101 ZA 自动搜索（搜前提示，AutoSearchWithEcho）。
+ */
+errcode_t ws63_task_zw101_za_auto_search_echo(uint8_t wait_time,
+    uint16_t start_page,
+    uint16_t page_num,
+    uint16_t *page_id_out,
+    uint16_t *score_out,
+    uint8_t *ack_out);
+
+/**
+ * @brief 执行 ZW101 ZA 过程终止（ProcessTerminateCmd）。
+ */
+errcode_t ws63_task_zw101_za_terminate(uint8_t *ack_out);
+
+/**
  * @brief 获取编码器最新 RPM。
  *
  * @return int32_t 有符号 RPM。

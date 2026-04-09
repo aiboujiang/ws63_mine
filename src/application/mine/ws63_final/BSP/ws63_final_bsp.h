@@ -219,6 +219,29 @@ int32_t ws63_bsp_debug_uart_read(uint8_t *data, uint16_t len, uint32_t timeout_m
  */
 errcode_t ws63_bsp_debug_uart_register_rx_callback(ws63_bsp_uart_rx_callback_t callback, uint16_t min_len);
 
+/**
+ * @brief 初始化蜂鸣器底层资源（GPIO/PWM）。
+ *
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_bsp_beep_init(void);
+
+/**
+ * @brief 使能蜂鸣器连续发声。
+ *
+ * @param freq_hz 目标频率（Hz）。
+ * @param volume_percent 音量百分比（映射为 PWM 占空比）。
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_bsp_beep_start(uint16_t freq_hz, uint8_t volume_percent);
+
+/**
+ * @brief 停止蜂鸣器并将引脚拉低静音。
+ *
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_bsp_beep_stop(void);
+
 #ifdef __cplusplus
 #if __cplusplus
 }

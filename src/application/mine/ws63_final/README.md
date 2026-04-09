@@ -25,6 +25,10 @@ ws63_final/
 1. `ws63_start()`：启动最终版业务任务。
 2. `ws63_task_register_rx_callback(sub_port, cb)`：注册子串口接收回调。
 3. `ws63_task_send(sub_port, data, len)`：通过指定子串口发送数据。
+4. `ws63_task_buzzer_on(freq_hz)` / `ws63_task_buzzer_off()`：控制蜂鸣器开关与频率。
+5. `ws63_task_buzzer_set_volume(volume_percent)`：设置蜂鸣器音量（占空比映射）。
+6. `ws63_task_ld2402_reinit()` / `ws63_task_zw101_reinit()`：触发模块调试握手重初始化。
+7. `ws63_task_zw101_za_*`：ZW101 ZA 兼容命令桥接接口（回显/自动登录/自动搜索/终止）。
 
 ## 4. 后续模块整合建议
 
@@ -54,6 +58,87 @@ ws63_final/
 - 串口在线控测命令与日志说明请查看：`DEBUG_COMMANDS.md`
 
 ## 8. 任务维护记录
+
+### 2026-04-09: ZW101 ZA 兼容命令调试接入 + 指令族函数补齐
+
+变更摘要：
+- 基于 `mine/lib/指纹模组产品用户手册_V1.5.1.pdf` 的基础通信流程，实现 ZW101 协议帧组包、收包提帧、应答等待与校验路径。
+- 驱动层补齐 ZA 兼容命令函数：`GetEcho(0x53)`、`AutoLogin(0x54)`、`AutoSearch(0x55)`、`SearchResBack(0x56)`、`AutoLoginStabLight(0x57)`、`AutoSearchWithEcho(0x58)`、`ProcessTerminateCmd(0xAA)`。
+- 按手册补齐业务类/维护类/定制类命令函数实现（当前阶段先实现函数，不在任务主流程默认调用）。
+- 调试命令新增 `ZW101 ZA` 子命令入口，支持在线联调并打印关键返回字段（ack/id/score）。
+
+影响文件：
+- `src/application/mine/ws63_final/Driver/zw101.h`
+- `src/application/mine/ws63_final/Driver/zw101.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task.h`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_debug.c`
+- `src/application/mine/ws63_final/DEBUG_COMMANDS.md`
+- `src/application/mine/ws63_final/README.md`
+
+验证结果：
+- 命令：`cd /home/xixi/code/fbb_ws63_20260114/src && python3 build.py ws63-liteos-app`
+- 结果：构建通过（`Build target:ws63_liteos_app success`）。
+
+后续事项：
+- 上板优先执行 `ZW101 ZA ECHO` 与 `ZW101 ZA SEARCH`，确认回包时序与 ACK 码和手册一致，再逐步联调业务类/维护类命令。
+
+### 2026-04-09: 蜂鸣器音量调节 + LD2401/ZW101 调试命令扩展
+
+变更摘要：
+- 蜂鸣器新增音量能力，音量参数映射为 PWM 占空比，支持 `0~100%` 调节。
+- 调试串口新增 `BEEP VOL <0-100>` 命令，状态日志增加 `vol` 字段。
+- 新增 LD2401（兼容 LD2402）调试命令：`INIT/RAW/STAT`，支持在线下发十六进制原始帧。
+- 新增 ZW101 调试命令：`INIT(HANDSHAKE)/RAW/STAT`，支持握手复测与原始帧联调。
+- 任务层新增模块调试桥接接口，统一由 App/Task 层调用 Driver，维持分层边界。
+
+影响文件：
+- `src/application/mine/ws63_final/Config/ws63_final_config.h`
+- `src/application/mine/ws63_final/BSP/ws63_final_bsp.h`
+- `src/application/mine/ws63_final/BSP/ws63_final_bsp_beep.c`
+- `src/application/mine/ws63_final/Driver/ws63_buzzer.h`
+- `src/application/mine/ws63_final/Driver/ws63_buzzer.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task.h`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_debug.c`
+- `src/application/mine/ws63_final/DEBUG_COMMANDS.md`
+- `src/application/mine/ws63_final/README.md`
+
+验证结果：
+- 命令：`cd /home/xixi/code/fbb_ws63_20260114/src && python3 build.py ws63-liteos-app`
+- 结果：构建通过（`Build target:ws63_liteos_app success`）。
+
+后续事项：
+- 若现场板卡蜂鸣器输出偏弱，可优先提高 `BEEP VOL`，再结合 `BEEP FREQ` 微调听感。
+
+### 2026-04-09: 蜂鸣器（beep）移植到 ws63_final
+
+变更摘要：
+- 新增蜂鸣器 BSP 子模块，封装 GPIO9/PWM1 底层初始化、发声与静音控制。
+- 新增蜂鸣器 Driver 层，提供开关与频率语义接口，并缓存当前状态。
+- 任务层新增蜂鸣器初始化与任务接口，支持应用层统一调用。
+- 调试串口命令新增 `BEEP ON/OFF/FREQ/STAT`，可在线控测蜂鸣器。
+- 同步更新调试命令手册，补充蜂鸣器联调与排障说明。
+
+影响文件：
+- `src/application/mine/ws63_final/Config/ws63_final_config.h`
+- `src/application/mine/ws63_final/BSP/ws63_final_bsp.h`
+- `src/application/mine/ws63_final/BSP/ws63_final_bsp_beep.c`
+- `src/application/mine/ws63_final/Driver/ws63_buzzer.h`
+- `src/application/mine/ws63_final/Driver/ws63_buzzer.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task.h`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_debug.c`
+- `src/application/mine/ws63_final/CMakeLists.txt`
+- `src/application/mine/ws63_final/DEBUG_COMMANDS.md`
+- `src/application/mine/ws63_final/README.md`
+
+验证结果：
+- 命令：`cd /home/xixi/code/fbb_ws63_20260114/src && python3 build.py ws63-liteos-app`
+- 结果：构建通过（`Build target:ws63_liteos_app success`）。
+
+后续事项：
+- 若板卡蜂鸣器非 GPIO9，请仅调整 `WS63_BEEP_*` 配置宏，不要改 Driver/App 逻辑。
 
 ### 2026-04-09: 电机驱动与编码器测速接入
 
@@ -225,3 +310,33 @@ ws63_final/
 
 后续事项：
 - 若后续继续扩展调试命令，优先修改 `App/Task/ws63_final_task_debug.c`，避免主任务文件再次膨胀。
+
+### 2026-04-09: 分层边界整改（App 越层与 Driver 反向依赖收口）
+
+变更摘要：
+- 新增调试 UART 驱动门面 `ws63_debug_uart`，由 Driver 层承接调试串口初始化/发送/回调注册，App 不再直接调用 BSP 调试 UART 接口。
+- Middleware OSAL 新增 `ws63_os_irq_lock/ws63_os_irq_unlock/ws63_os_feed_watchdog`，用于承接 App 的临界区与喂狗需求，避免 App 直连 RTOS/HAL 原语。
+- App 主任务将 `uapi_watchdog_kick` 替换为 `ws63_os_feed_watchdog`，并移除对 `watchdog.h` 与 `ws63_final_bsp.h` 的直接依赖。
+- `zw101`、`ld2402` 驱动去除对 `ws63_final_osal` 的反向依赖，延时调用统一改为 `ws63_bsp_sleep_ms`，恢复 Driver -> BSP 单向依赖。
+- 更新 `CMakeLists.txt`，将新驱动源文件纳入编译。
+
+影响文件：
+- `src/application/mine/ws63_final/Driver/ws63_debug_uart.h`
+- `src/application/mine/ws63_final/Driver/ws63_debug_uart.c`
+- `src/application/mine/ws63_final/Middleware/ws63_final_osal.h`
+- `src/application/mine/ws63_final/Middleware/ws63_final_osal.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_debug.c`
+- `src/application/mine/ws63_final/Driver/zw101.c`
+- `src/application/mine/ws63_final/Driver/ld2402.c`
+- `src/application/mine/ws63_final/CMakeLists.txt`
+- `src/application/mine/ws63_final/README.md`
+
+验证结果：
+- 命令：`cd /home/xixi/code/fbb_ws63_20260114/src && python3 build.py ws63-liteos-app`
+- 结果：构建通过（`Build target:ws63_liteos_app success`）。
+- 命令：`cd /home/xixi/code/fbb_ws63_20260114/src && find output/ws63 -type f \( -name 'ws63_final_task.c.obj' -o -name 'ws63_final_task_debug.c.obj' -o -name 'ws63_debug_uart.c.obj' \)`
+- 结果：当前输出目录未命中上述对象文件；结合当前 menuconfig 状态，`ws63_final` 模块未被纳入本次目标镜像编译链路。
+
+后续事项：
+- 若需对本次改动做“真实编译链路”验证，请先在 menuconfig 中重新启用 `CONFIG_MINE_SUPPORT_WS63_FINAL_LAYERED` 后再构建。

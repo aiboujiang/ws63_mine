@@ -9,19 +9,18 @@
 
 #include "ws63_final_common.h"
 #include "ws63_final_config.h"
-#include "ws63_final_bsp.h"
 #include "wk2114.h"
 #include "ld2402.h"
 #include "zw101.h"
 #include "ws63_motor.h"
 #include "ws63_encoder.h"
+#include "ws63_buzzer.h"
 #if (WS63_RGB_ENABLE == 1U)
 #include "ws63_rgb_ws2812.h"
 #endif
 #include "ws63_final_osal.h"
 #include "ws63_final_sle.h"
 #include "ws63_final_task_debug.h"
-#include "watchdog.h"
 
 #define WS63_SUBPORT_MAX 4U
 
@@ -29,6 +28,7 @@
 static ws63_rx_callback_t g_ws63_rx_cb[WS63_SUBPORT_MAX + 1U] = {0};
 static uint32_t g_ws63_last_log_ms[WS63_SUBPORT_MAX + 1U] = {0};
 static uint8_t g_ws63_motor_encoder_ready = 0U;
+static uint8_t g_ws63_buzzer_ready = 0U;
 
 #if (WS63_RGB_ENABLE == 1U)
 /* RGB 演示颜色表：固定红绿蓝循环。 */
@@ -286,6 +286,28 @@ static void ws63_motor_encoder_init(void)
 }
 
 /**
+ * @brief 初始化蜂鸣器能力。
+ */
+static void ws63_task_buzzer_init(void)
+{
+#if (WS63_BEEP_ENABLE == 1U)
+    errcode_t ret;
+
+    g_ws63_buzzer_ready = 0U;
+    ret = ws63_buzzer_init();
+    if (ret != ERRCODE_SUCC) {
+        osal_printk("[wk2114 final task] buzzer init fail, ret=0x%x\r\n", (unsigned int)ret);
+        return;
+    }
+
+    g_ws63_buzzer_ready = 1U;
+    osal_printk("[wk2114 final task] buzzer init ok (GPIO9/PWM1)\r\n");
+#else
+    g_ws63_buzzer_ready = 0U;
+#endif
+}
+
+/**
  * @brief 注册子串口回调。
  */
 errcode_t ws63_task_register_rx_callback(uint8_t sub_port,
@@ -368,6 +390,319 @@ errcode_t ws63_task_motor_set_duty(uint8_t duty_percent)
 }
 
 /**
+ * @brief 打开蜂鸣器并设置频率。
+ */
+errcode_t ws63_task_buzzer_on(uint16_t freq_hz)
+{
+#if (WS63_BEEP_ENABLE != 1U)
+    (void)freq_hz;
+    return ERRCODE_FAIL;
+#else
+    if (g_ws63_buzzer_ready == 0U) {
+        return ERRCODE_FAIL;
+    }
+
+    return ws63_buzzer_start(freq_hz);
+#endif
+}
+
+/**
+ * @brief 设置蜂鸣器音量。
+ */
+errcode_t ws63_task_buzzer_set_volume(uint8_t volume_percent)
+{
+#if (WS63_BEEP_ENABLE != 1U)
+    (void)volume_percent;
+    return ERRCODE_FAIL;
+#else
+    if (g_ws63_buzzer_ready == 0U) {
+        return ERRCODE_FAIL;
+    }
+
+    return ws63_buzzer_set_volume(volume_percent);
+#endif
+}
+
+/**
+ * @brief 关闭蜂鸣器。
+ */
+errcode_t ws63_task_buzzer_off(void)
+{
+#if (WS63_BEEP_ENABLE != 1U)
+    return ERRCODE_FAIL;
+#else
+    if (g_ws63_buzzer_ready == 0U) {
+        return ERRCODE_FAIL;
+    }
+
+    return ws63_buzzer_stop();
+#endif
+}
+
+/**
+ * @brief 查询蜂鸣器是否正在发声。
+ */
+uint8_t ws63_task_buzzer_is_on(void)
+{
+#if (WS63_BEEP_ENABLE != 1U)
+    return 0U;
+#else
+    if (g_ws63_buzzer_ready == 0U) {
+        return 0U;
+    }
+
+    return ws63_buzzer_is_on();
+#endif
+}
+
+/**
+ * @brief 获取蜂鸣器当前频率。
+ */
+uint16_t ws63_task_buzzer_get_freq_hz(void)
+{
+#if (WS63_BEEP_ENABLE != 1U)
+    return 0U;
+#else
+    if (g_ws63_buzzer_ready == 0U) {
+        return 0U;
+    }
+
+    return ws63_buzzer_get_freq_hz();
+#endif
+}
+
+/**
+ * @brief 获取蜂鸣器当前音量。
+ */
+uint8_t ws63_task_buzzer_get_volume(void)
+{
+#if (WS63_BEEP_ENABLE != 1U)
+    return 0U;
+#else
+    if (g_ws63_buzzer_ready == 0U) {
+        return 0U;
+    }
+
+    return ws63_buzzer_get_volume();
+#endif
+}
+
+/**
+ * @brief 重新初始化 LD2402（兼容命令别名 LD2401）。
+ */
+errcode_t ws63_task_ld2402_reinit(void)
+{
+    if (!ws63_is_subport_enabled(LD2402_SUBPORT)) {
+        return ERRCODE_FAIL;
+    }
+
+    return ld2402_init(LD2402_SUBPORT);
+}
+
+/**
+ * @brief 向 LD2402 发送原始命令帧。
+ */
+errcode_t ws63_task_ld2402_send_raw(const uint8_t *data, uint16_t len)
+{
+    if ((data == NULL) || (len == 0U)) {
+        return ERRCODE_INVALID_PARAM;
+    }
+
+    if (!ws63_is_subport_enabled(LD2402_SUBPORT)) {
+        return ERRCODE_FAIL;
+    }
+
+    return wk2114_subport_write(LD2402_SUBPORT, data, len);
+}
+
+/**
+ * @brief 重新初始化 ZW101（触发握手检测）。
+ */
+errcode_t ws63_task_zw101_reinit(void)
+{
+    if (!ws63_is_subport_enabled(ZW101_SUBPORT)) {
+        return ERRCODE_FAIL;
+    }
+
+    return zw101_init(ZW101_SUBPORT);
+}
+
+/**
+ * @brief 向 ZW101 发送原始命令帧。
+ */
+errcode_t ws63_task_zw101_send_raw(const uint8_t *data, uint16_t len)
+{
+    if ((data == NULL) || (len == 0U)) {
+        return ERRCODE_INVALID_PARAM;
+    }
+
+    if (!ws63_is_subport_enabled(ZW101_SUBPORT)) {
+        return ERRCODE_FAIL;
+    }
+
+    return zw101_send_raw(data, len);
+}
+
+/**
+ * @brief 执行 ZW101 ZA 握手（GetEcho）。
+ */
+errcode_t ws63_task_zw101_za_get_echo(uint8_t *ack_out)
+{
+    if (!ws63_is_subport_enabled(ZW101_SUBPORT)) {
+        return ERRCODE_FAIL;
+    }
+
+    return zw101_za_get_echo(ack_out);
+}
+
+/**
+ * @brief 执行 ZW101 ZA 自动登记（AutoLogin）。
+ */
+errcode_t ws63_task_zw101_za_auto_login(uint8_t wait_time,
+    uint8_t sample_interval_code,
+    uint8_t press_times,
+    uint16_t page_id,
+    uint8_t allow_dup,
+    uint8_t *ack_out)
+{
+    if (!ws63_is_subport_enabled(ZW101_SUBPORT)) {
+        return ERRCODE_FAIL;
+    }
+
+    return zw101_za_auto_login(wait_time,
+        sample_interval_code,
+        press_times,
+        page_id,
+        allow_dup,
+        ack_out);
+}
+
+/**
+ * @brief 执行 ZW101 ZA 自动搜索（AutoSearch）。
+ */
+errcode_t ws63_task_zw101_za_auto_search(uint8_t wait_time,
+    uint16_t start_page,
+    uint16_t page_num,
+    uint16_t *page_id_out,
+    uint16_t *score_out,
+    uint8_t *ack_out)
+{
+    errcode_t ret;
+    zw101_ack_result_t result;
+
+    if (!ws63_is_subport_enabled(ZW101_SUBPORT)) {
+        return ERRCODE_FAIL;
+    }
+
+    ret = zw101_za_auto_search(wait_time, start_page, page_num, &result);
+    if (ack_out != NULL) {
+        *ack_out = result.ack_code;
+    }
+    if ((page_id_out != NULL) && (result.payload_len >= 5U)) {
+        *page_id_out = (uint16_t)(((uint16_t)result.payload[1] << 8) | result.payload[2]);
+    }
+    if ((score_out != NULL) && (result.payload_len >= 5U)) {
+        *score_out = (uint16_t)(((uint16_t)result.payload[3] << 8) | result.payload[4]);
+    }
+
+    return ret;
+}
+
+/**
+ * @brief 执行 ZW101 ZA 搜索指纹（带残留判断）。
+ */
+errcode_t ws63_task_zw101_za_search_res_back(uint8_t buffer_id,
+    uint16_t start_page,
+    uint16_t page_num,
+    uint16_t *page_id_out,
+    uint16_t *score_out,
+    uint8_t *ack_out)
+{
+    errcode_t ret;
+    zw101_ack_result_t result;
+
+    if (!ws63_is_subport_enabled(ZW101_SUBPORT)) {
+        return ERRCODE_FAIL;
+    }
+
+    ret = zw101_za_search_res_back(buffer_id, start_page, page_num, &result);
+    if (ack_out != NULL) {
+        *ack_out = result.ack_code;
+    }
+    if ((page_id_out != NULL) && (result.payload_len >= 5U)) {
+        *page_id_out = (uint16_t)(((uint16_t)result.payload[1] << 8) | result.payload[2]);
+    }
+    if ((score_out != NULL) && (result.payload_len >= 5U)) {
+        *score_out = (uint16_t)(((uint16_t)result.payload[3] << 8) | result.payload[4]);
+    }
+
+    return ret;
+}
+
+/**
+ * @brief 执行 ZW101 ZA 自动登记（灯常亮）。
+ */
+errcode_t ws63_task_zw101_za_auto_login_stab(uint8_t wait_time,
+    uint8_t press_times,
+    uint16_t page_id,
+    uint8_t allow_dup,
+    uint8_t *ack_out)
+{
+    if (!ws63_is_subport_enabled(ZW101_SUBPORT)) {
+        return ERRCODE_FAIL;
+    }
+
+    return zw101_za_auto_login_stab_light(wait_time,
+        press_times,
+        page_id,
+        allow_dup,
+        ack_out);
+}
+
+/**
+ * @brief 执行 ZW101 ZA 自动搜索（搜前提示）。
+ */
+errcode_t ws63_task_zw101_za_auto_search_echo(uint8_t wait_time,
+    uint16_t start_page,
+    uint16_t page_num,
+    uint16_t *page_id_out,
+    uint16_t *score_out,
+    uint8_t *ack_out)
+{
+    errcode_t ret;
+    zw101_ack_result_t result;
+
+    if (!ws63_is_subport_enabled(ZW101_SUBPORT)) {
+        return ERRCODE_FAIL;
+    }
+
+    ret = zw101_za_auto_search_with_echo(wait_time, start_page, page_num, &result);
+    if (ack_out != NULL) {
+        *ack_out = result.ack_code;
+    }
+    if ((page_id_out != NULL) && (result.payload_len >= 5U)) {
+        *page_id_out = (uint16_t)(((uint16_t)result.payload[1] << 8) | result.payload[2]);
+    }
+    if ((score_out != NULL) && (result.payload_len >= 5U)) {
+        *score_out = (uint16_t)(((uint16_t)result.payload[3] << 8) | result.payload[4]);
+    }
+
+    return ret;
+}
+
+/**
+ * @brief 执行 ZW101 ZA 过程终止。
+ */
+errcode_t ws63_task_zw101_za_terminate(uint8_t *ack_out)
+{
+    if (!ws63_is_subport_enabled(ZW101_SUBPORT)) {
+        return ERRCODE_FAIL;
+    }
+
+    return zw101_za_process_terminate(ack_out);
+}
+
+/**
  * @brief 获取编码器最新 RPM。
  */
 int32_t ws63_task_get_motor_rpm(void)
@@ -406,6 +741,9 @@ void *ws63_task_entry(const char *arg)
 
     /* 电机/编码器初始化独立于 WK2114 链路，失败仅记录日志，不阻断任务。 */
     ws63_motor_encoder_init();
+
+    /* 蜂鸣器初始化独立于 WK2114 链路，便于离线串口命令直接控测。 */
+    ws63_task_buzzer_init();
 
     /* 在线调试串口：用于电机命令控测与状态日志输出。 */
     ws63_task_debug_init();
@@ -454,7 +792,7 @@ void *ws63_task_entry(const char *arg)
 #endif
 
         /* 与 RGB 演示并行时持续喂狗，避免任务轮询窗口过长触发复位。 */
-        wdt_ret = uapi_watchdog_kick();
+        wdt_ret = ws63_os_feed_watchdog();
         if (wdt_ret != ERRCODE_SUCC) {
 #if (WS63_RGB_LOG_ENABLE == 1U)
             osal_printk("[wk2114 final task] watchdog kick fail, ret=0x%x\r\n", (unsigned int)wdt_ret);

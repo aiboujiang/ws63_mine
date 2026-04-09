@@ -1,28 +1,195 @@
 /**
  * @file zw101.h
- * @brief ZW101 æŒ‡çº¹æ¨¡ç»„é©±åŠ¨ã€‚
+ * @brief ZW101 Ö¸ÎÆÄ£×éÇı¶¯²ã½Ó¿Ú£¨»ùÓÚ¡¶Ö¸ÎÆÄ£×é²úÆ·ÓÃ»§ÊÖ²á_V1.5.1¡·£©¡£
+ *
+ * ËµÃ÷£º
+ * 1) ±¾ÎÄ¼ş½ö¶¨Òå Driver ²ãĞ­ÒéÓïÒå½Ó¿Ú£»
+ * 2) App/Task ²ãÍ¨¹ı·â×°½Ó¿Úµ÷ÓÃ£¬²»Ö±½Ó´¦ÀíĞ­ÒéÖ¡Ï¸½Ú£»
+ * 3) ±¾´ÎÖØµãÊµÏÖ ZA Ğ­Òé¼æÈİÃüÁîÓÃÓÚÔÚÏßµ÷ÊÔ£¬ÒµÎñ/Î¬»¤/¶¨ÖÆÃüÁîÏÈÌá¹©º¯ÊıÊµÏÖ¡£
  */
+
 #ifndef ZW101_H
 #define ZW101_H
 
-#include "errcode.h"
 #include <stdint.h>
 
+#include "errcode.h"
+
+#ifdef __cplusplus
+#if __cplusplus
+extern "C" {
+#endif
+#endif
+
 /**
- * @brief åˆå§‹åŒ–ZW101æŒ‡çº¹æ¨¡å—å¹¶è¿›è¡Œé€šä¿¡(æ¡æ‰‹)æµ‹è¯•
+ * @brief ZW101 Ó¦´ğ½á¹û¡£
+ */
+typedef struct {
+    uint8_t ack_code;
+    uint8_t payload[64];
+    uint16_t payload_len;
+} zw101_ack_result_t;
+
+/**
+ * @brief ³õÊ¼»¯ ZW101 Çı¶¯²¢Ö´ĞĞÍ¨ĞÅÌ½²â¡£
  *
- * @param sub_port å¯¹åº”çš„ä¸²å£å·
- * @return errcode_t æˆåŠŸè¿”å›ERRCODE_SUCCï¼Œå¦åˆ™è¿”å›å¤±è´¥ä»£ç 
+ * @param sub_port ¶ÔÓ¦µÄ WK2114 ×Ó´®¿ÚºÅ¡£
+ * @return errcode_t ERRCODE_SUCC ³É¹¦£¬ÆäËûÊ§°Ü¡£
  */
 errcode_t zw101_init(uint8_t sub_port);
 
 /**
- * @brief å¤„ç†ZW101æŒ‡çº¹æ¨¡å—æ¥æ”¶åˆ°çš„æ•°æ®
+ * @brief Î¹Èë ZW101 ½ÓÊÕÊı¾İÁ÷¡£
  *
- * @param sub_port å¯¹åº”ä¸²å£å·
- * @param data æ¥æ”¶åˆ°çš„æ•°æ®ç¼“å†²åŒº
- * @param len æ¥æ”¶åˆ°çš„æ•°æ®é•¿åº¦
+ * @param sub_port ×Ó´®¿ÚºÅ¡£
+ * @param data ½ÓÊÕ»º³åÇø¡£
+ * @param len ½ÓÊÕ³¤¶È¡£
  */
 void zw101_process_data(uint8_t sub_port, const uint8_t *data, uint16_t len);
+
+/**
+ * @brief ·¢ËÍ ZW101 Ô­Ê¼ÃüÁîÖ¡£¨Ê®Áù½øÖÆ×Ö½ÚÁ÷£©¡£
+ *
+ * @param data ÃüÁîÖ¡Êı¾İ¡£
+ * @param len  ÃüÁîÖ¡³¤¶È¡£
+ * @return errcode_t ERRCODE_SUCC ³É¹¦£¬ÆäËûÊ§°Ü¡£
+ */
+errcode_t zw101_send_raw(const uint8_t *data, uint16_t len);
+
+/* ------------------------- ZA Ğ­Òé¼æÈİÃüÁî£¨µ÷ÊÔÖØµã£© ------------------------- */
+
+/**
+ * @brief ZA ¼æÈİÎÕÊÖ GetEcho£¨0x53£©¡£
+ *
+ * @param ack_out Êä³öÈ·ÈÏÂë£¬¿ÉÎª NULL¡£
+ * @return errcode_t ERRCODE_SUCC ³É¹¦£¬ÆäËûÊ§°Ü¡£
+ */
+errcode_t zw101_za_get_echo(uint8_t *ack_out);
+
+/**
+ * @brief ZA ×Ô¶¯µÇ¼Ç AutoLogin£¨0x54£©¡£
+ *
+ * @param wait_time ´ıÖ¸Ê±³¤£¨1~255£©¡£
+ * @param sample_interval_code ²ÉÑù¼ä¸ô±àÂë£¨0~15£¬¶ÔÓ¦¸ß 4bit£©¡£
+ * @param press_times °´Ö¸´ÎÊı£¨2 »ò 3£¬¶ÔÓ¦µÍ 4bit£©¡£
+ * @param page_id ´æ´¢ĞòºÅ¡£
+ * @param allow_dup ÖØ¸´µÇ¼Ç±êÖ¾£¨0=²»ÔÊĞí£¬1=ÔÊĞí£©¡£
+ * @param ack_out Êä³öÈ·ÈÏÂë£¬¿ÉÎª NULL¡£
+ * @return errcode_t ERRCODE_SUCC ³É¹¦£¬ÆäËûÊ§°Ü¡£
+ */
+errcode_t zw101_za_auto_login(uint8_t wait_time,
+    uint8_t sample_interval_code,
+    uint8_t press_times,
+    uint16_t page_id,
+    uint8_t allow_dup,
+    uint8_t *ack_out);
+
+/**
+ * @brief ZA ×Ô¶¯ËÑË÷ AutoSearch£¨0x55£©¡£
+ */
+errcode_t zw101_za_auto_search(uint8_t wait_time,
+    uint16_t start_page,
+    uint16_t page_num,
+    zw101_ack_result_t *result_out);
+
+/**
+ * @brief ZA ËÑË÷Ö¸ÎÆ£¨´ø²ĞÁôÅĞ¶Ï£©SearchResBack£¨0x56£©¡£
+ */
+errcode_t zw101_za_search_res_back(uint8_t buffer_id,
+    uint16_t start_page,
+    uint16_t page_num,
+    zw101_ack_result_t *result_out);
+
+/**
+ * @brief ZA ×Ô¶¯µÇ¼Ç£¨µÆ³£ÁÁ£©AutoLoginStabLight£¨0x57£©¡£
+ */
+errcode_t zw101_za_auto_login_stab_light(uint8_t wait_time,
+    uint8_t press_times,
+    uint16_t page_id,
+    uint8_t allow_dup,
+    uint8_t *ack_out);
+
+/**
+ * @brief ZA ×Ô¶¯ËÑË÷£¨ËÑÇ°ÌáÊ¾£©AutoSearchWithEcho£¨0x58£©¡£
+ */
+errcode_t zw101_za_auto_search_with_echo(uint8_t wait_time,
+    uint16_t start_page,
+    uint16_t page_num,
+    zw101_ack_result_t *result_out);
+
+/**
+ * @brief ZA ¹ı³ÌÖÕÖ¹ ProcessTerminateCmd£¨0xAA£©¡£
+ */
+errcode_t zw101_za_process_terminate(uint8_t *ack_out);
+
+/* ------------------------- ÒµÎñÀàÖ¸Áî¼¯£¨ÏÈÊµÏÖ£¬Ôİ²»Ö÷¶¯µ÷ÓÃ£© ------------------------- */
+
+errcode_t zw101_business_get_image(void);
+errcode_t zw101_business_gen_char(uint8_t buffer_id);
+errcode_t zw101_business_match(uint16_t *score_out);
+errcode_t zw101_business_search(uint8_t buffer_id,
+    uint16_t start_page,
+    uint16_t page_num,
+    uint16_t *page_id_out,
+    uint16_t *score_out);
+errcode_t zw101_business_reg_model(void);
+errcode_t zw101_business_store_char(uint8_t buffer_id, uint16_t page_id);
+errcode_t zw101_business_load_char(uint8_t buffer_id, uint16_t page_id);
+errcode_t zw101_business_up_char(uint8_t buffer_id);
+errcode_t zw101_business_down_char(uint8_t buffer_id);
+errcode_t zw101_business_delete_char(uint16_t page_id, uint16_t count);
+errcode_t zw101_business_empty(void);
+errcode_t zw101_business_write_reg(uint8_t reg_index, uint8_t reg_value);
+errcode_t zw101_business_read_syspara(uint8_t *syspara_out, uint16_t *out_len);
+errcode_t zw101_business_read_infpage(void);
+errcode_t zw101_business_read_valid_template_num(uint16_t *valid_num_out);
+errcode_t zw101_business_read_index_table(uint8_t table_index);
+errcode_t zw101_business_get_enroll_image(void);
+errcode_t zw101_business_read_add_para(uint8_t *add_para_out, uint16_t *out_len);
+errcode_t zw101_business_sleep(void);
+errcode_t zw101_business_write_empara(uint16_t em_para);
+errcode_t zw101_business_cancel(void);
+errcode_t zw101_business_auto_enroll(uint16_t page_id, uint8_t enroll_times, uint16_t param_flags);
+errcode_t zw101_business_auto_identify(uint8_t score_level,
+    uint16_t target_id,
+    uint16_t param_flags,
+    uint16_t *match_id_out,
+    uint16_t *score_out);
+
+/* ------------------------- Î¬»¤ÀàÖ¸Áî¼¯£¨ÏÈÊµÏÖ£¬Ôİ²»Ö÷¶¯µ÷ÓÃ£© ------------------------- */
+
+errcode_t zw101_maint_up_image_4bit(void);
+errcode_t zw101_maint_up_image_8bit(void);
+errcode_t zw101_maint_down_image_4bit(void);
+errcode_t zw101_maint_down_image_8bit(void);
+errcode_t zw101_maint_get_chip_sn(uint8_t *chip_sn_out, uint16_t *out_len);
+errcode_t zw101_maint_handshake(uint8_t *ack_out);
+errcode_t zw101_maint_check_sensor(uint8_t *ack_out);
+errcode_t zw101_maint_reset_setting(void);
+
+/* ------------------------- ¶¨ÖÆÀàÖ¸Áî¼¯£¨ÏÈÊµÏÖ£¬Ôİ²»Ö÷¶¯µ÷ÓÃ£© ------------------------- */
+
+errcode_t zw101_custom_set_pwd(uint32_t pwd);
+errcode_t zw101_custom_verify_pwd(uint32_t pwd);
+errcode_t zw101_custom_set_chip_addr(uint32_t chip_addr);
+errcode_t zw101_custom_write_notepad(uint8_t page_id, const uint8_t *data, uint8_t data_len);
+errcode_t zw101_custom_read_notepad(uint8_t page_id, uint8_t *data_out, uint16_t *out_len);
+errcode_t zw101_custom_bln_auto_manual_switch(uint8_t mode);
+errcode_t zw101_custom_control_bln(uint8_t func_code,
+    uint8_t start_color,
+    uint8_t end_color_or_duty,
+    uint8_t loop_times,
+    uint8_t cycle);
+errcode_t zw101_custom_get_image_info(uint8_t *area_out, uint8_t *quality_out);
+errcode_t zw101_custom_search_now(uint16_t start_page,
+    uint16_t page_num,
+    uint16_t *page_id_out,
+    uint16_t *score_out);
+
+#ifdef __cplusplus
+#if __cplusplus
+}
+#endif
+#endif
 
 #endif
