@@ -34,10 +34,6 @@ if(DEFINED CONFIG_MINE_SUPPORT_BEEP_DEMO)
     add_subdirectory_if_exist(beep)
 endif()
 
-if(NOT (${APPLICATION} STREQUAL "loaderboot"))
-    add_subdirectory_if_exist(MPR121_Keypad_Example)
-endif()
-
 set(PRIVATE_HEADER
 )
 
