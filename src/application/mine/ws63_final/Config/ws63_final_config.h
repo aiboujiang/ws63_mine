@@ -89,6 +89,13 @@ extern "C" {
 #define WS63_DEBUG_UART_PIN_MODE        1
 #define WS63_DEBUG_UART_BAUD            115200U
 
+/*
+ * 调试日志镜像开关：
+ * 0=仅输出到调试串口；1=同时输出到系统日志（osal_printk）。
+ * 默认关闭可避免“同一物理串口双写”引发的重复日志。
+ */
+#define WS63_DEBUG_LOG_MIRROR_SYS       0U
+
 /* 调试串口接收缓存与命令长度限制。 */
 #define WS63_DEBUG_UART_RX_BUF_SIZE     256U
 #define WS63_DEBUG_CMD_MAX_LEN          96U

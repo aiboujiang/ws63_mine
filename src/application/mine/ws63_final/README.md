@@ -136,3 +136,25 @@ ws63_final/
 
 后续事项：
 - 每次新增/调整串口命令时同步更新 `DEBUG_COMMANDS.md`，保持联调口径一致。
+
+### 2026-04-09: 串口调试命令稳定性修复（重复日志/偶发 ERROR）
+
+变更摘要：
+- 修复命令换行兼容：解析器同时支持 `CR`、`LF`、`CRLF`，避免“只回显不执行、后续批量执行”。
+- 修复日志重复：调试日志默认仅输出到调试串口，避免同一物理口被 `osal_printk` 与调试口双写。
+- 修复 UART 竞争：调试串口初始化前先 `uapi_uart_deinit`，降低与 AT 等已有 UART 用户并发抢读风险。
+- 更新调试手册，补充串口冲突规避和日志镜像开关说明。
+
+影响文件：
+- `src/application/mine/ws63_final/Config/ws63_final_config.h`
+- `src/application/mine/ws63_final/BSP/ws63_final_bsp.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task.c`
+- `src/application/mine/ws63_final/DEBUG_COMMANDS.md`
+- `src/application/mine/ws63_final/README.md`
+
+验证结果：
+- 命令：`cd /home/xixi/code/fbb_ws63_20260114/src && python3 build.py ws63-liteos-app`
+- 结果：构建通过（`Build target:ws63_liteos_app success`）。
+
+后续事项：
+- 若现场仍需与 AT 命令并行，建议将调试命令口切换到独立 UART 总线并单独接线。

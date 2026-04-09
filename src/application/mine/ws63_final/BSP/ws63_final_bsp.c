@@ -593,6 +593,12 @@ errcode_t ws63_bsp_debug_uart_init(uint8_t *rx_buffer, uint16_t rx_buffer_len)
     rx_cfg.rx_buffer = rx_buffer;
     rx_cfg.rx_buffer_size = rx_buffer_len;
 
+    /*
+     * 先 deinit 再 init：
+     * 避免调试命令口与系统其他 UART 用户（如 AT）共享同一总线时发生并发抢读。
+     */
+    (void)uapi_uart_deinit(WS63_DEBUG_UART_BUS);
+
     if (uapi_uart_init(WS63_DEBUG_UART_BUS, &pin_cfg, &attr, NULL, &rx_cfg) != ERRCODE_SUCC) {
         return ERRCODE_FAIL;
     }

@@ -45,6 +45,8 @@ static uint32_t g_ws63_debug_last_watch_ms = 0U;
 static uint8_t g_ws63_debug_uart_rx_buf[WS63_DEBUG_UART_RX_BUF_SIZE] = {0};
 static char g_ws63_debug_cmd_line[WS63_DEBUG_CMD_MAX_LEN] = {0};
 static uint16_t g_ws63_debug_cmd_line_len = 0U;
+/* 记录上一字符是否为 '\r'，用于兼容 CRLF，避免一条命令被执行两次。 */
+static uint8_t g_ws63_debug_last_char_cr = 0U;
 #endif
 
 #if (WS63_RGB_ENABLE == 1U)
@@ -341,7 +343,9 @@ static void ws63_debug_uart_send_text(const char *text)
 }
 
 /**
- * @brief 同时输出到系统日志与调试串口日志。
+ * @brief 输出调试日志。
+ *
+ * 默认仅发往调试串口，避免与系统日志复用同一物理口时出现重复日志。
  */
 static void ws63_debug_log(const char *fmt, ...)
 {
@@ -360,7 +364,9 @@ static void ws63_debug_log(const char *fmt, ...)
         return;
     }
 
+#if (WS63_DEBUG_LOG_MIRROR_SYS == 1U)
     osal_printk("%s", log_buf);
+#endif
     ws63_debug_uart_send_text(log_buf);
 }
 
@@ -579,6 +585,7 @@ static void ws63_debug_uart_cmd_init(void)
     g_ws63_debug_watch_enable = 0U;
     g_ws63_debug_cmd_line_len = 0U;
     g_ws63_debug_last_watch_ms = 0U;
+    g_ws63_debug_last_char_cr = 0U;
 
     ret = ws63_bsp_debug_uart_init(g_ws63_debug_uart_rx_buf, sizeof(g_ws63_debug_uart_rx_buf));
     if (ret != ERRCODE_SUCC) {
@@ -613,11 +620,24 @@ static void ws63_debug_uart_cmd_process(uint32_t now_ms)
     if (rx_len > 0) {
         for (i = 0U; i < (uint8_t)rx_len; i++) {
             ch = rx_buf[i];
+
+            /* '\r' 与 '\n' 都视为行结束，兼容常见串口工具的 CR/CRLF/LF 三种发送方式。 */
             if (ch == '\r') {
+                if (g_ws63_debug_cmd_line_len > 0U) {
+                    g_ws63_debug_cmd_line[g_ws63_debug_cmd_line_len] = '\0';
+                    ws63_debug_exec_command(g_ws63_debug_cmd_line);
+                    g_ws63_debug_cmd_line_len = 0U;
+                }
+                g_ws63_debug_last_char_cr = 1U;
                 continue;
             }
 
             if (ch == '\n') {
+                /* 若前一字符已是 '\r'，说明是 CRLF，此处跳过避免重复执行。 */
+                if (g_ws63_debug_last_char_cr == 1U) {
+                    g_ws63_debug_last_char_cr = 0U;
+                    continue;
+                }
                 if (g_ws63_debug_cmd_line_len > 0U) {
                     g_ws63_debug_cmd_line[g_ws63_debug_cmd_line_len] = '\0';
                     ws63_debug_exec_command(g_ws63_debug_cmd_line);
@@ -625,6 +645,8 @@ static void ws63_debug_uart_cmd_process(uint32_t now_ms)
                 }
                 continue;
             }
+
+            g_ws63_debug_last_char_cr = 0U;
 
             if ((ch == 0x08U) || (ch == 0x7FU)) {
                 if (g_ws63_debug_cmd_line_len > 0U) {
