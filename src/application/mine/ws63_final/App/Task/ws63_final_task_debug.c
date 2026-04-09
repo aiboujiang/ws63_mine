@@ -563,6 +563,22 @@ static void ws63_debug_dump_beep_status(const char *tag)
 }
 
 /**
+ * @brief Êä³öµ±Ç° RGB ×´Ì¬¡£
+ */
+static void ws63_debug_dump_rgb_status(const char *tag)
+{
+#if (WS63_RGB_ENABLE == 1U)
+    ws63_debug_log("[ws63 dbg] %s rgb=%s demo=%s\r\n",
+        (tag == NULL) ? "rgb" : tag,
+        (ws63_task_rgb_is_ready() == 1U) ? "READY" : "NOT_READY",
+        (ws63_task_rgb_is_demo_enable() == 1U) ? "ON" : "OFF");
+#else
+    ws63_debug_log("[ws63 dbg] %s rgb=DISABLED\r\n",
+        (tag == NULL) ? "rgb" : tag);
+#endif
+}
+
+/**
  * @brief ´òÓ¡µ÷ÊÔÃüÁî°ïÖú¡£
  */
 static void ws63_debug_print_help(void)
@@ -583,6 +599,11 @@ static void ws63_debug_print_help(void)
     ws63_debug_log("[ws63 dbg]   BEEP VOL <0-100>\\r\\n");
     ws63_debug_log("[ws63 dbg]   BEEP OFF\\r\\n");
     ws63_debug_log("[ws63 dbg]   BEEP STAT\\r\\n");
+    ws63_debug_log("[ws63 dbg]   RGB INIT\\r\\n");
+    ws63_debug_log("[ws63 dbg]   RGB SET <R0-255> <G0-255> <B0-255>\\r\\n");
+    ws63_debug_log("[ws63 dbg]   RGB OFF\\r\\n");
+    ws63_debug_log("[ws63 dbg]   RGB DEMO ON|OFF\\r\\n");
+    ws63_debug_log("[ws63 dbg]   RGB STAT\\r\\n");
     ws63_debug_log("[ws63 dbg]   LD2401 INIT (alias LD2402)\\r\\n");
     ws63_debug_log("[ws63 dbg]   LD2401 RAW <HEX...>\\r\\n");
     ws63_debug_log("[ws63 dbg]   LD2401 STAT\\r\\n");
@@ -611,8 +632,10 @@ static void ws63_debug_exec_command(const char *line)
     uint16_t za_score;
     uint8_t za_ack;
     uint8_t za_argc;
+    uint8_t rgb_argc;
     uint8_t duty;
     uint32_t za_args[6] = {0};
+    uint32_t rgb_args[4] = {0};
     uint8_t raw_buf[WS63_DEBUG_RAW_CMD_MAX_BYTES] = {0};
     errcode_t ret;
     char cmd_buf[WS63_DEBUG_CMD_MAX_LEN] = {0};
@@ -751,6 +774,59 @@ static void ws63_debug_exec_command(const char *line)
             (unsigned int)duty,
             (unsigned int)ret);
         ws63_debug_dump_beep_status("beep-vol");
+        return;
+    }
+
+    if (strcmp(cmd, "RGB STAT") == 0) {
+        ws63_debug_dump_rgb_status("rgb-query");
+        return;
+    }
+
+    if (strcmp(cmd, "RGB INIT") == 0) {
+        ret = ws63_task_rgb_reinit();
+        ws63_debug_log("[ws63 dbg] RGB INIT ret=0x%x\\r\\n", (unsigned int)ret);
+        ws63_debug_dump_rgb_status("rgb-init");
+        return;
+    }
+
+    if (strcmp(cmd, "RGB OFF") == 0) {
+        ret = ws63_task_rgb_off();
+        ws63_debug_log("[ws63 dbg] RGB OFF ret=0x%x\\r\\n", (unsigned int)ret);
+        ws63_debug_dump_rgb_status("rgb-off");
+        return;
+    }
+
+    if (strcmp(cmd, "RGB DEMO ON") == 0) {
+        ret = ws63_task_rgb_set_demo_enable(1U);
+        ws63_debug_log("[ws63 dbg] RGB DEMO ON ret=0x%x\\r\\n", (unsigned int)ret);
+        ws63_debug_dump_rgb_status("rgb-demo");
+        return;
+    }
+
+    if (strcmp(cmd, "RGB DEMO OFF") == 0) {
+        ret = ws63_task_rgb_set_demo_enable(0U);
+        ws63_debug_log("[ws63 dbg] RGB DEMO OFF ret=0x%x\\r\\n", (unsigned int)ret);
+        ws63_debug_dump_rgb_status("rgb-demo");
+        return;
+    }
+
+    if (strncmp(cmd, "RGB SET ", 8) == 0) {
+        if (!ws63_debug_parse_u32_tokens(cmd + 8, rgb_args, 4U, &rgb_argc) || (rgb_argc != 3U)) {
+            ws63_debug_log("[ws63 dbg] usage: RGB SET <R0-255> <G0-255> <B0-255>\\r\\n");
+            return;
+        }
+        if ((rgb_args[0] > 255U) || (rgb_args[1] > 255U) || (rgb_args[2] > 255U)) {
+            ws63_debug_log("[ws63 dbg] invalid rgb range, expect 0~255\\r\\n");
+            return;
+        }
+
+        ret = ws63_task_rgb_set_color((uint8_t)rgb_args[0], (uint8_t)rgb_args[1], (uint8_t)rgb_args[2]);
+        ws63_debug_log("[ws63 dbg] RGB SET (%u,%u,%u) ret=0x%x\\r\\n",
+            (unsigned int)rgb_args[0],
+            (unsigned int)rgb_args[1],
+            (unsigned int)rgb_args[2],
+            (unsigned int)ret);
+        ws63_debug_dump_rgb_status("rgb-set");
         return;
     }
 

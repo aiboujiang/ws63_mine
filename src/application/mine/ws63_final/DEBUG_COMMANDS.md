@@ -2,12 +2,13 @@
 
 ## 1. 适用范围
 
-本手册适用于 `ws63_final` 模块中的电机、编码器、蜂鸣器、LD2401（兼容 LD2402）与 ZW101 在线控测命令。
+本手册适用于 `ws63_final` 模块中的电机、编码器、蜂鸣器、RGB、LD2401（兼容 LD2402）与 ZW101 在线控测命令。
 
 目标：
 - 通过串口实时控制电机正反转、停止、刹车与占空比。
 - 通过串口实时查看编码器 RPM、窗口增量与累计计数。
 - 通过串口实时控制蜂鸣器开关与频率。
+- 通过串口实时控制 RGB 颜色、开关与演示模式。
 - 通过串口在线触发 LD2401/ZW101 初始化握手及发送原始调试帧。
 - 通过串口在线验证 ZW101 ZA 兼容命令链路（回显/自动登录/自动搜索/终止）。
 - 通过统一日志格式快速定位指令执行状态。
@@ -107,7 +108,29 @@
 - `BEEP STAT`
   - 功能：查询蜂鸣器当前状态与频率。
 
-### 3.6 LD2401（兼容 LD2402）调试命令
+### 3.6 RGB 控制命令
+
+- `RGB INIT`
+  - 功能：重新初始化 RGB 驱动，并恢复演示模式。
+
+- `RGB SET <R0-255> <G0-255> <B0-255>`
+  - 功能：设置 RGB 固定颜色。
+  - 说明：执行后会自动关闭演示模式，避免颜色被轮询演示覆盖。
+  - 示例：`RGB SET 255 80 0`
+
+- `RGB OFF`
+  - 功能：关闭 RGB（输出黑色）。
+
+- `RGB DEMO ON`
+  - 功能：开启 RGB 演示模式（红绿蓝循环）。
+
+- `RGB DEMO OFF`
+  - 功能：关闭 RGB 演示模式。
+
+- `RGB STAT`
+  - 功能：查询 RGB 驱动就绪状态与演示模式状态。
+
+### 3.7 LD2401（兼容 LD2402）调试命令
 
 - `LD2401 INIT`（或 `LD2402 INIT`）
   - 功能：重新初始化 LD2401/LD2402 模块并执行握手检测。
@@ -119,7 +142,7 @@
 - `LD2401 STAT`（或 `LD2402 STAT`）
   - 功能：输出当前命令映射的子串口信息。
 
-### 3.7 ZW101 调试命令
+### 3.8 ZW101 调试命令
 
 - `ZW101 INIT`
   - 功能：重新初始化 ZW101 模块并执行握手检测。
@@ -204,8 +227,9 @@
 6. 发送 `MOTOR STOP` 或 `MOTOR BRAKE`，确认停止行为。
 7. 发送 `MOTOR WATCH OFF` 结束监控。
 8. 发送 `BEEP ON 2000` + `BEEP VOL 30`，验证蜂鸣器频率与音量调节。
-9. 发送 `LD2401 INIT`、`ZW101 HANDSHAKE`，验证两类模块调试链路。
-10. 发送 `ZW101 ZA ECHO`、`ZW101 ZA SEARCH 20 0 10`，验证 ZA 兼容命令通信链路。
+9. 发送 `RGB INIT`、`RGB SET 255 0 0`、`RGB DEMO ON`，验证 RGB 固定色与演示模式切换。
+10. 发送 `LD2401 INIT`、`ZW101 HANDSHAKE`，验证两类模块调试链路。
+11. 发送 `ZW101 ZA ECHO`、`ZW101 ZA SEARCH 20 0 10`，验证 ZA 兼容命令通信链路。
 
 ## 6. 常见问题
 
@@ -232,6 +256,10 @@
   - 排查：确认蜂鸣器接线为 `GPIO9`，且板卡 IO 复用允许 `GPIO9 mode1 -> PWM1`。
   - 排查：确认未占用同一 PWM 通道；默认蜂鸣器使用 `PWM1`，电机使用 `PWM2/PWM3`。
 
+- 现象：`RGB SET` 返回成功但颜色很快变化。
+  - 说明：通常是演示模式仍处于开启状态；可先执行 `RGB DEMO OFF` 再设置固定颜色。
+  - 排查：若命令返回失败，检查 `WS63_RGB_ENABLE` 是否开启并确认 SPI1 引脚连接。
+
 - 现象：`LD2401 RAW` / `ZW101 RAW` 返回参数错误。
   - 排查：确保使用两位十六进制字节并用空格分隔，例如 `AA 55 01 0F`。
   - 排查：避免输入奇数字符数（例如 `A B2`），解析器会直接判定为非法。
@@ -247,4 +275,5 @@
 - `src/application/mine/ws63_final/BSP/ws63_final_bsp.c`
 - `src/application/mine/ws63_final/BSP/ws63_final_bsp_beep.c`
 - `src/application/mine/ws63_final/Driver/ws63_buzzer.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_rgb.c`
 - `src/application/mine/ws63_final/App/Task/ws63_final_task_debug.c`

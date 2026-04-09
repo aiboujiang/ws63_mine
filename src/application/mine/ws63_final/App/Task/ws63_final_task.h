@@ -128,6 +128,52 @@ errcode_t ws63_task_buzzer_set_volume(uint8_t volume_percent);
 uint8_t ws63_task_buzzer_get_volume(void);
 
 /**
+ * @brief 重新初始化 RGB 驱动并恢复演示模式。
+ *
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_task_rgb_reinit(void);
+
+/**
+ * @brief 设置 RGB 颜色（8bit 通道）。
+ *
+ * @param r 红色分量（0~255）。
+ * @param g 绿色分量（0~255）。
+ * @param b 蓝色分量（0~255）。
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_task_rgb_set_color(uint8_t r, uint8_t g, uint8_t b);
+
+/**
+ * @brief 关闭 RGB（输出黑色）。
+ *
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_task_rgb_off(void);
+
+/**
+ * @brief 设置 RGB 演示模式开关。
+ *
+ * @param enable 1=开启演示，0=关闭演示。
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_task_rgb_set_demo_enable(uint8_t enable);
+
+/**
+ * @brief 查询 RGB 驱动是否已就绪。
+ *
+ * @return uint8_t 1=就绪，0=未就绪。
+ */
+uint8_t ws63_task_rgb_is_ready(void);
+
+/**
+ * @brief 查询 RGB 演示模式是否开启。
+ *
+ * @return uint8_t 1=开启，0=关闭。
+ */
+uint8_t ws63_task_rgb_is_demo_enable(void);
+
+/**
  * @brief 重新初始化 LD2402（兼容命令别名 LD2401）。
  *
  * @return errcode_t ERRCODE_SUCC 成功，其他失败。

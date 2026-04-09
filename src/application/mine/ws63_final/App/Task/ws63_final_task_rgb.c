@@ -25,6 +25,8 @@ static const ws63_rgb_color_t g_ws63_rgb_demo_colors[] = {
 static uint8_t g_ws63_rgb_ready = 0U;
 static uint8_t g_ws63_rgb_color_index = 0U;
 static uint32_t g_ws63_rgb_last_switch_ms = 0U;
+/* 演示模式开关：命令手动设色时会自动关闭，避免颜色被周期任务覆盖。 */
+static uint8_t g_ws63_rgb_demo_enable = 0U;
 #endif
 
 /**
@@ -43,6 +45,7 @@ void ws63_rgb_demo_init(void)
     }
 
     g_ws63_rgb_ready = 1U;
+    g_ws63_rgb_demo_enable = 1U;
     g_ws63_rgb_color_index = 0U;
     g_ws63_rgb_last_switch_ms = ws63_os_tick_ms() - WS63_RGB_DEMO_INTERVAL_MS;
     osal_printk("[wk2114 final task] rgb demo start (SPI1/GPIO1+GPIO6)\r\n");
@@ -58,6 +61,10 @@ void ws63_rgb_demo_process(uint32_t now_ms)
     errcode_t ret;
 
     if (g_ws63_rgb_ready == 0U) {
+        return;
+    }
+
+    if (g_ws63_rgb_demo_enable == 0U) {
         return;
     }
 
@@ -78,5 +85,98 @@ void ws63_rgb_demo_process(uint32_t now_ms)
     }
 #else
     (void)now_ms;
+#endif
+}
+
+/**
+ * @brief 重新初始化 RGB 驱动并恢复演示模式。
+ */
+errcode_t ws63_task_rgb_reinit(void)
+{
+#if (WS63_RGB_ENABLE != 1U)
+    return ERRCODE_FAIL;
+#else
+    ws63_rgb_demo_init();
+    return (g_ws63_rgb_ready == 1U) ? ERRCODE_SUCC : ERRCODE_FAIL;
+#endif
+}
+
+/**
+ * @brief 设置 RGB 颜色，并关闭演示模式避免被周期轮询覆盖。
+ */
+errcode_t ws63_task_rgb_set_color(uint8_t r, uint8_t g, uint8_t b)
+{
+#if (WS63_RGB_ENABLE != 1U)
+    (void)r;
+    (void)g;
+    (void)b;
+    return ERRCODE_FAIL;
+#else
+    errcode_t ret;
+    ws63_rgb_color_t color = {r, g, b};
+
+    if (g_ws63_rgb_ready == 0U) {
+        return ERRCODE_FAIL;
+    }
+
+    ret = ws63_rgb_ws2812_set_color(&color);
+    if (ret == ERRCODE_SUCC) {
+        g_ws63_rgb_demo_enable = 0U;
+    }
+    return ret;
+#endif
+}
+
+/**
+ * @brief 关闭 RGB（输出黑色）。
+ */
+errcode_t ws63_task_rgb_off(void)
+{
+    return ws63_task_rgb_set_color(0U, 0U, 0U);
+}
+
+/**
+ * @brief 设置 RGB 演示模式开关。
+ */
+errcode_t ws63_task_rgb_set_demo_enable(uint8_t enable)
+{
+#if (WS63_RGB_ENABLE != 1U)
+    (void)enable;
+    return ERRCODE_FAIL;
+#else
+    if (g_ws63_rgb_ready == 0U) {
+        return ERRCODE_FAIL;
+    }
+
+    g_ws63_rgb_demo_enable = (enable != 0U) ? 1U : 0U;
+    if (g_ws63_rgb_demo_enable == 1U) {
+        /* 开启演示后立即生效，避免等待一个完整周期。 */
+        g_ws63_rgb_last_switch_ms = ws63_os_tick_ms() - WS63_RGB_DEMO_INTERVAL_MS;
+    }
+    return ERRCODE_SUCC;
+#endif
+}
+
+/**
+ * @brief 查询 RGB 驱动是否已就绪。
+ */
+uint8_t ws63_task_rgb_is_ready(void)
+{
+#if (WS63_RGB_ENABLE != 1U)
+    return 0U;
+#else
+    return g_ws63_rgb_ready;
+#endif
+}
+
+/**
+ * @brief 查询 RGB 演示模式是否开启。
+ */
+uint8_t ws63_task_rgb_is_demo_enable(void)
+{
+#if (WS63_RGB_ENABLE != 1U)
+    return 0U;
+#else
+    return g_ws63_rgb_demo_enable;
 #endif
 }

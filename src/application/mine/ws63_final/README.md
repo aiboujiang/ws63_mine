@@ -369,3 +369,25 @@ ws63_final/
 
 后续事项：
 - 若后续继续扩展业务，请优先在对应子模块文件中新增逻辑，避免再次回流到主任务文件。
+
+### 2026-04-09: 新增 RGB 在线调试命令（INIT/SET/OFF/DEMO/STAT）
+
+变更摘要：
+- Task 层新增 RGB 控制接口：驱动重初始化、手动设色、关灯、演示模式开关、状态查询。
+- RGB 子模块新增演示开关状态管理：手动设色后自动关闭演示，避免颜色被周期任务覆盖。
+- 调试命令新增 `RGB INIT`、`RGB SET <R> <G> <B>`、`RGB OFF`、`RGB DEMO ON|OFF`、`RGB STAT`。
+- `HELP` 输出与调试手册同步补齐 RGB 命令说明与参数约束。
+
+影响文件：
+- `src/application/mine/ws63_final/App/Task/ws63_final_task.h`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_rgb.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_debug.c`
+- `src/application/mine/ws63_final/DEBUG_COMMANDS.md`
+- `src/application/mine/ws63_final/README.md`
+
+验证结果：
+- 命令：`cd /home/xixi/code/fbb_ws63_20260114/src && python3 build.py ws63-liteos-app`
+- 结果：构建通过（`Build target:ws63_liteos_app success`）。
+
+后续事项：
+- 若现场需要“固定色常亮”，建议先执行 `RGB DEMO OFF`，再执行 `RGB SET R G B`。
