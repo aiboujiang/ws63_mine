@@ -48,3 +48,51 @@ ws63_final/
 4. 轮询读取并回调分发。
 
 你后续只需要在 `App/Task` 层扩展业务逻辑，即可完成多模块统一整合。
+
+## 7. 任务维护记录
+
+### 2026-04-09: 电机驱动与编码器测速接入
+
+变更摘要：
+- 新增电机驱动能力：正转、反转、滑行停止、刹车急停、占空比调速。
+- 新增编码器测速能力：A/B 相判向计数，周期采样输出 RPM。
+- 在任务层接入 motor/encoder 初始化与周期采样。
+
+影响文件：
+- `src/application/mine/ws63_final/Config/ws63_final_config.h`
+- `src/application/mine/ws63_final/BSP/ws63_final_bsp.h`
+- `src/application/mine/ws63_final/BSP/ws63_final_bsp.c`
+- `src/application/mine/ws63_final/Driver/ws63_motor.h`
+- `src/application/mine/ws63_final/Driver/ws63_motor.c`
+- `src/application/mine/ws63_final/Driver/ws63_encoder.h`
+- `src/application/mine/ws63_final/Driver/ws63_encoder.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task.h`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task.c`
+- `src/application/mine/ws63_final/CMakeLists.txt`
+
+验证结果：
+- 命令：`cd /home/xixi/code/fbb_ws63_20260114/src && python3 build.py ws63-liteos-app`
+- 结果：构建通过（ws63_liteos_app success）。
+
+后续事项：
+- 上板重点确认 GPIO2 对应 PWM2 的实际复用是否与板卡连线一致。
+
+### 2026-04-09: 在线串口控测命令与日志增强
+
+变更摘要：
+- 新增调试串口命令能力（默认 UART0：GPIO17/18，115200）。
+- 支持命令：`HELP`、`MOTOR FWD/REV/DUTY/STOP/BRAKE/RPM/STAT/WATCH ON|OFF`、`ENCODER RESET`。
+- 新增命令输入、执行结果、周期监控三类日志，支持在线控测追踪。
+
+影响文件：
+- `src/application/mine/ws63_final/Config/ws63_final_config.h`
+- `src/application/mine/ws63_final/BSP/ws63_final_bsp.h`
+- `src/application/mine/ws63_final/BSP/ws63_final_bsp.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task.c`
+
+验证结果：
+- 命令：`cd /home/xixi/code/fbb_ws63_20260114/src && python3 build.py ws63-liteos-app`
+- 结果：构建通过（ws63_liteos_app success）。
+
+后续事项：
+- 若现场日志口已占用 UART0，可在配置中切换 `WS63_DEBUG_UART_BUS` 与对应引脚。
