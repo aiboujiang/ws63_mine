@@ -7,6 +7,9 @@ set(COMPONENT_NAME "mine_ws63_final")
 set(SOURCES
     "Common/ws63_final_common.c"
     "BSP/ws63_final_bsp.c"
+    "BSP/ws63_final_bsp_uart.c"
+    "BSP/ws63_final_bsp_rgb.c"
+    "BSP/ws63_final_bsp_motor_encoder.c"
     "Driver/wk2114.c"
     "Driver/ld2402.c"
     "Driver/zw101.c"
@@ -16,6 +19,7 @@ set(SOURCES
     "Middleware/ws63_final_osal.c"
     "Middleware/ws63_final_sle.c"
     "App/Task/ws63_final_task.c"
+    "App/Task/ws63_final_task_debug.c"
     "App/Main/ws63_final_main.c"
 )
 

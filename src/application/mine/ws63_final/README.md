@@ -201,3 +201,27 @@ ws63_final/
 
 后续事项：
 - 若减速箱规格变化，仅需调整 `WS63_MOTOR_GEAR_RATIO` 即可同步修正 `out_rps`。
+
+### 2026-04-09: Task 与 BSP 按功能模块拆分重构
+
+变更摘要：
+- 将 `ws63_final_task.c` 中串口调试命令实现拆分到独立子模块，主任务仅保留调度与调用入口。
+- 将 `ws63_final_bsp.c` 按功能拆为 UART、RGB/SPI、电机/编码器三个子模块，主 BSP 文件仅保留通用控制能力。
+- 更新 CMake 源文件列表，确保拆分后模块参与统一构建，不改变现有对外接口。
+
+影响文件：
+- `src/application/mine/ws63_final/App/Task/ws63_final_task.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_debug.h`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_debug.c`
+- `src/application/mine/ws63_final/BSP/ws63_final_bsp.c`
+- `src/application/mine/ws63_final/BSP/ws63_final_bsp_uart.c`
+- `src/application/mine/ws63_final/BSP/ws63_final_bsp_rgb.c`
+- `src/application/mine/ws63_final/BSP/ws63_final_bsp_motor_encoder.c`
+- `src/application/mine/ws63_final/CMakeLists.txt`
+
+验证结果：
+- 命令：`cd /home/xixi/code/fbb_ws63_20260114/src && python3 build.py ws63-liteos-app`
+- 结果：构建通过（`Build target:ws63_liteos_app success`）。
+
+后续事项：
+- 若后续继续扩展调试命令，优先修改 `App/Task/ws63_final_task_debug.c`，避免主任务文件再次膨胀。
