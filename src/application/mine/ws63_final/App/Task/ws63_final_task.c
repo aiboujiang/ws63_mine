@@ -5,10 +5,18 @@
 
 #include "ws63_final_task.h"
 
+#include <ctype.h>
+#include <stdarg.h>
+#include <stdlib.h>
+#include <string.h>
+
 #include "osal_debug.h"
+
+#include "securec.h"
 
 #include "ws63_final_common.h"
 #include "ws63_final_config.h"
+#include "ws63_final_bsp.h"
 #include "wk2114.h"
 #include "ld2402.h"
 #include "zw101.h"
@@ -22,11 +30,22 @@
 #include "watchdog.h"
 
 #define WS63_SUBPORT_MAX 4U
+#define WS63_DEBUG_LOG_BUF_MAX 192U
+#define WS63_DEBUG_RX_CHUNK_MAX 32U
 
 /* 各子串口回调表，下标与子串口号一一对应（0 号位保留不用）。 */
 static ws63_rx_callback_t g_ws63_rx_cb[WS63_SUBPORT_MAX + 1U] = {0};
 static uint32_t g_ws63_last_log_ms[WS63_SUBPORT_MAX + 1U] = {0};
 static uint8_t g_ws63_motor_encoder_ready = 0U;
+
+#if (WS63_DEBUG_UART_ENABLE == 1U)
+static uint8_t g_ws63_debug_uart_ready = 0U;
+static uint8_t g_ws63_debug_watch_enable = 0U;
+static uint32_t g_ws63_debug_last_watch_ms = 0U;
+static uint8_t g_ws63_debug_uart_rx_buf[WS63_DEBUG_UART_RX_BUF_SIZE] = {0};
+static char g_ws63_debug_cmd_line[WS63_DEBUG_CMD_MAX_LEN] = {0};
+static uint16_t g_ws63_debug_cmd_line_len = 0U;
+#endif
 
 #if (WS63_RGB_ENABLE == 1U)
 /* RGB 演示颜色表：固定红绿蓝循环。 */
@@ -283,6 +302,371 @@ static void ws63_motor_encoder_init(void)
     osal_printk("[wk2114 final task] motor+encoder init ok (IA=GPIO2 IB=GPIO3 ENC=GPIO11/12)\r\n");
 }
 
+#if (WS63_DEBUG_UART_ENABLE == 1U)
+/**
+ * @brief 把电机状态转换为可读字符串。
+ */
+static const char *ws63_motor_state_to_text(ws63_motor_state_t state)
+{
+    switch (state) {
+        case WS63_MOTOR_STATE_FORWARD:
+            return "FORWARD";
+        case WS63_MOTOR_STATE_REVERSE:
+            return "REVERSE";
+        case WS63_MOTOR_STATE_BRAKE:
+            return "BRAKE";
+        case WS63_MOTOR_STATE_COAST:
+        default:
+            return "COAST";
+    }
+}
+
+/**
+ * @brief 向调试串口发送文本。
+ */
+static void ws63_debug_uart_send_text(const char *text)
+{
+    size_t text_len;
+
+    if ((g_ws63_debug_uart_ready == 0U) || (text == NULL)) {
+        return;
+    }
+
+    text_len = strlen(text);
+    if (text_len == 0U) {
+        return;
+    }
+
+    (void)ws63_bsp_debug_uart_write((const uint8_t *)text, (uint16_t)text_len, 0U);
+}
+
+/**
+ * @brief 同时输出到系统日志与调试串口日志。
+ */
+static void ws63_debug_log(const char *fmt, ...)
+{
+    int32_t ret;
+    va_list args;
+    char log_buf[WS63_DEBUG_LOG_BUF_MAX] = {0};
+
+    if (fmt == NULL) {
+        return;
+    }
+
+    va_start(args, fmt);
+    ret = vsnprintf_s(log_buf, sizeof(log_buf), sizeof(log_buf) - 1U, fmt, args);
+    va_end(args);
+    if (ret < 0) {
+        return;
+    }
+
+    osal_printk("%s", log_buf);
+    ws63_debug_uart_send_text(log_buf);
+}
+
+/**
+ * @brief 去除命令首尾空白。
+ */
+static char *ws63_debug_trim(char *text)
+{
+    char *end;
+
+    if (text == NULL) {
+        return NULL;
+    }
+
+    while ((*text != '\0') && isspace((unsigned char)*text)) {
+        text++;
+    }
+
+    if (*text == '\0') {
+        return text;
+    }
+
+    end = text + strlen(text) - 1;
+    while ((end > text) && isspace((unsigned char)*end)) {
+        *end = '\0';
+        end--;
+    }
+
+    return text;
+}
+
+/**
+ * @brief 解析占空比参数。
+ */
+static uint8_t ws63_debug_parse_duty(const char *text, uint8_t *duty_out)
+{
+    char *end = NULL;
+    unsigned long value;
+
+    if ((text == NULL) || (duty_out == NULL)) {
+        return 0U;
+    }
+
+    value = strtoul(text, &end, 10);
+    if ((end == text) || (*ws63_debug_trim(end) != '\0') || (value > 100UL)) {
+        return 0U;
+    }
+
+    *duty_out = (uint8_t)value;
+    return 1U;
+}
+
+/**
+ * @brief 输出当前电机与编码器状态。
+ */
+static void ws63_debug_dump_motor_status(const char *tag)
+{
+    ws63_motor_state_t state;
+    int32_t rpm;
+    int32_t delta;
+    int32_t total;
+    uint8_t duty;
+
+    state = ws63_motor_get_state();
+    duty = ws63_motor_get_duty();
+    rpm = ws63_task_get_motor_rpm();
+    delta = ws63_encoder_get_last_delta();
+    total = ws63_task_get_encoder_total_count();
+
+    ws63_debug_log("[ws63 dbg] %s state=%s duty=%u rpm=%ld delta=%ld total=%ld\r\n",
+        (tag == NULL) ? "status" : tag,
+        ws63_motor_state_to_text(state),
+        (unsigned int)duty,
+        (long)rpm,
+        (long)delta,
+        (long)total);
+}
+
+/**
+ * @brief 打印调试命令帮助。
+ */
+static void ws63_debug_print_help(void)
+{
+    ws63_debug_log("[ws63 dbg] command list:\r\n");
+    ws63_debug_log("[ws63 dbg]   HELP\r\n");
+    ws63_debug_log("[ws63 dbg]   MOTOR FWD <0-100>\r\n");
+    ws63_debug_log("[ws63 dbg]   MOTOR REV <0-100>\r\n");
+    ws63_debug_log("[ws63 dbg]   MOTOR DUTY <0-100>\r\n");
+    ws63_debug_log("[ws63 dbg]   MOTOR STOP\r\n");
+    ws63_debug_log("[ws63 dbg]   MOTOR BRAKE\r\n");
+    ws63_debug_log("[ws63 dbg]   MOTOR RPM\r\n");
+    ws63_debug_log("[ws63 dbg]   MOTOR STAT\r\n");
+    ws63_debug_log("[ws63 dbg]   MOTOR WATCH ON|OFF\r\n");
+    ws63_debug_log("[ws63 dbg]   ENCODER RESET\r\n");
+}
+
+/**
+ * @brief 执行单条调试命令。
+ */
+static void ws63_debug_exec_command(const char *line)
+{
+    uint16_t i;
+    uint8_t duty;
+    errcode_t ret;
+    char cmd_buf[WS63_DEBUG_CMD_MAX_LEN] = {0};
+    char *cmd;
+
+    if (line == NULL) {
+        return;
+    }
+
+    if (strncpy_s(cmd_buf, sizeof(cmd_buf), line, sizeof(cmd_buf) - 1U) != EOK) {
+        return;
+    }
+
+    cmd = ws63_debug_trim(cmd_buf);
+    for (i = 0U; cmd[i] != '\0'; i++) {
+        cmd[i] = (char)toupper((unsigned char)cmd[i]);
+    }
+
+    if (cmd[0] == '\0') {
+        return;
+    }
+
+    ws63_debug_log("[ws63 dbg] cmd<=%s\r\n", cmd);
+
+    if ((strcmp(cmd, "HELP") == 0) || (strcmp(cmd, "?") == 0)) {
+        ws63_debug_print_help();
+        return;
+    }
+
+    if (strcmp(cmd, "MOTOR STOP") == 0) {
+        ret = ws63_task_motor_coast_stop();
+        ws63_debug_log("[ws63 dbg] MOTOR STOP ret=0x%x\r\n", (unsigned int)ret);
+        ws63_debug_dump_motor_status("stop");
+        return;
+    }
+
+    if (strcmp(cmd, "MOTOR BRAKE") == 0) {
+        ret = ws63_task_motor_brake_stop();
+        ws63_debug_log("[ws63 dbg] MOTOR BRAKE ret=0x%x\r\n", (unsigned int)ret);
+        ws63_debug_dump_motor_status("brake");
+        return;
+    }
+
+    if ((strcmp(cmd, "MOTOR RPM") == 0) || (strcmp(cmd, "MOTOR STAT") == 0)) {
+        ws63_debug_dump_motor_status("query");
+        return;
+    }
+
+    if (strcmp(cmd, "MOTOR WATCH ON") == 0) {
+        g_ws63_debug_watch_enable = 1U;
+        g_ws63_debug_last_watch_ms = 0U;
+        ws63_debug_log("[ws63 dbg] watch enabled\r\n");
+        return;
+    }
+
+    if (strcmp(cmd, "MOTOR WATCH OFF") == 0) {
+        g_ws63_debug_watch_enable = 0U;
+        ws63_debug_log("[ws63 dbg] watch disabled\r\n");
+        return;
+    }
+
+    if (strcmp(cmd, "ENCODER RESET") == 0) {
+        ws63_encoder_reset();
+        ws63_debug_log("[ws63 dbg] encoder counter reset\r\n");
+        ws63_debug_dump_motor_status("encoder-reset");
+        return;
+    }
+
+    if (strncmp(cmd, "MOTOR FWD ", 10) == 0) {
+        if (!ws63_debug_parse_duty(cmd + 10, &duty)) {
+            ws63_debug_log("[ws63 dbg] invalid duty, expect 0~100\r\n");
+            return;
+        }
+        ret = ws63_task_motor_forward(duty);
+        ws63_debug_log("[ws63 dbg] MOTOR FWD %u ret=0x%x\r\n", (unsigned int)duty, (unsigned int)ret);
+        ws63_debug_dump_motor_status("forward");
+        return;
+    }
+
+    if (strncmp(cmd, "MOTOR REV ", 10) == 0) {
+        if (!ws63_debug_parse_duty(cmd + 10, &duty)) {
+            ws63_debug_log("[ws63 dbg] invalid duty, expect 0~100\r\n");
+            return;
+        }
+        ret = ws63_task_motor_reverse(duty);
+        ws63_debug_log("[ws63 dbg] MOTOR REV %u ret=0x%x\r\n", (unsigned int)duty, (unsigned int)ret);
+        ws63_debug_dump_motor_status("reverse");
+        return;
+    }
+
+    if (strncmp(cmd, "MOTOR DUTY ", 11) == 0) {
+        if (!ws63_debug_parse_duty(cmd + 11, &duty)) {
+            ws63_debug_log("[ws63 dbg] invalid duty, expect 0~100\r\n");
+            return;
+        }
+        ret = ws63_task_motor_set_duty(duty);
+        ws63_debug_log("[ws63 dbg] MOTOR DUTY %u ret=0x%x\r\n", (unsigned int)duty, (unsigned int)ret);
+        ws63_debug_dump_motor_status("duty");
+        return;
+    }
+
+    ws63_debug_log("[ws63 dbg] unknown command: %s\r\n", cmd);
+    ws63_debug_log("[ws63 dbg] type HELP for command list\r\n");
+}
+
+/**
+ * @brief 初始化调试串口命令能力。
+ */
+static void ws63_debug_uart_cmd_init(void)
+{
+    errcode_t ret;
+
+    g_ws63_debug_uart_ready = 0U;
+    g_ws63_debug_watch_enable = 0U;
+    g_ws63_debug_cmd_line_len = 0U;
+    g_ws63_debug_last_watch_ms = 0U;
+
+    ret = ws63_bsp_debug_uart_init(g_ws63_debug_uart_rx_buf, sizeof(g_ws63_debug_uart_rx_buf));
+    if (ret != ERRCODE_SUCC) {
+        osal_printk("[wk2114 final task] debug uart init fail, ret=0x%x\r\n", (unsigned int)ret);
+        return;
+    }
+
+    g_ws63_debug_uart_ready = 1U;
+    ws63_debug_log("[ws63 dbg] uart ready bus=%u baud=%u tx=%u rx=%u\r\n",
+        (unsigned int)WS63_DEBUG_UART_BUS,
+        (unsigned int)WS63_DEBUG_UART_BAUD,
+        (unsigned int)WS63_DEBUG_UART_TX_PIN,
+        (unsigned int)WS63_DEBUG_UART_RX_PIN);
+    ws63_debug_print_help();
+}
+
+/**
+ * @brief 轮询调试串口并处理命令。
+ */
+static void ws63_debug_uart_cmd_process(uint32_t now_ms)
+{
+    int32_t rx_len;
+    uint8_t i;
+    uint8_t ch;
+    uint8_t rx_buf[WS63_DEBUG_RX_CHUNK_MAX] = {0};
+
+    if (g_ws63_debug_uart_ready == 0U) {
+        return;
+    }
+
+    rx_len = ws63_bsp_debug_uart_read(rx_buf, sizeof(rx_buf), 0U);
+    if (rx_len > 0) {
+        for (i = 0U; i < (uint8_t)rx_len; i++) {
+            ch = rx_buf[i];
+            if (ch == '\r') {
+                continue;
+            }
+
+            if (ch == '\n') {
+                if (g_ws63_debug_cmd_line_len > 0U) {
+                    g_ws63_debug_cmd_line[g_ws63_debug_cmd_line_len] = '\0';
+                    ws63_debug_exec_command(g_ws63_debug_cmd_line);
+                    g_ws63_debug_cmd_line_len = 0U;
+                }
+                continue;
+            }
+
+            if ((ch == 0x08U) || (ch == 0x7FU)) {
+                if (g_ws63_debug_cmd_line_len > 0U) {
+                    g_ws63_debug_cmd_line_len--;
+                }
+                continue;
+            }
+
+            if (isprint((int)ch)) {
+                if (g_ws63_debug_cmd_line_len < (WS63_DEBUG_CMD_MAX_LEN - 1U)) {
+                    g_ws63_debug_cmd_line[g_ws63_debug_cmd_line_len] = (char)ch;
+                    g_ws63_debug_cmd_line_len++;
+                } else {
+                    g_ws63_debug_cmd_line_len = 0U;
+                    ws63_debug_log("[ws63 dbg] command too long, dropped\r\n");
+                }
+            }
+        }
+    }
+
+    if (g_ws63_debug_watch_enable == 0U) {
+        return;
+    }
+
+    if ((now_ms - g_ws63_debug_last_watch_ms) < WS63_DEBUG_WATCH_PERIOD_MS) {
+        return;
+    }
+
+    g_ws63_debug_last_watch_ms = now_ms;
+    ws63_debug_dump_motor_status("watch");
+}
+#else
+static void ws63_debug_uart_cmd_init(void)
+{
+}
+
+static void ws63_debug_uart_cmd_process(uint32_t now_ms)
+{
+    (void)now_ms;
+}
+#endif
+
 /**
  * @brief 注册子串口回调。
  */
@@ -405,6 +789,9 @@ void *ws63_task_entry(const char *arg)
     /* 电机/编码器初始化独立于 WK2114 链路，失败仅记录日志，不阻断任务。 */
     ws63_motor_encoder_init();
 
+    /* 在线调试串口：用于电机命令控测与状态日志输出。 */
+    ws63_debug_uart_cmd_init();
+
     /* 先启动 SLE 桥接：即使 WK2114 链路异常，也能保留无线侧诊断日志。 */
     ws63_sle_bridge_init();
 
@@ -441,6 +828,7 @@ void *ws63_task_entry(const char *arg)
         if (g_ws63_motor_encoder_ready == 1U) {
             ws63_encoder_sample(now_ms);
         }
+        ws63_debug_uart_cmd_process(now_ms);
         ws63_rgb_demo_process(now_ms);
 
 #if (WS63_SLE_CORE_ENABLE == 1U)

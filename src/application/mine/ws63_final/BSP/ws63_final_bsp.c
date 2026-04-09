@@ -563,3 +563,63 @@ uint8_t ws63_bsp_encoder_get_b_level(void)
 {
     return (uapi_gpio_get_val(WS63_ENCODER_B_PIN) == GPIO_LEVEL_HIGH) ? 1U : 0U;
 }
+
+/**
+ * @brief 初始化调试串口。
+ */
+errcode_t ws63_bsp_debug_uart_init(uint8_t *rx_buffer, uint16_t rx_buffer_len)
+{
+    uart_attr_t attr = {
+        .baud_rate = WS63_DEBUG_UART_BAUD,
+        .data_bits = UART_DATA_BIT_8,
+        .stop_bits = UART_STOP_BIT_1,
+        .parity = UART_PARITY_NONE
+    };
+    uart_pin_config_t pin_cfg = {
+        .tx_pin = WS63_DEBUG_UART_TX_PIN,
+        .rx_pin = WS63_DEBUG_UART_RX_PIN,
+        .cts_pin = PIN_NONE,
+        .rts_pin = PIN_NONE
+    };
+    uart_buffer_config_t rx_cfg;
+
+    if ((rx_buffer == NULL) || (rx_buffer_len == 0U)) {
+        return ERRCODE_INVALID_PARAM;
+    }
+
+    (void)uapi_pin_set_mode(WS63_DEBUG_UART_TX_PIN, WS63_DEBUG_UART_PIN_MODE);
+    (void)uapi_pin_set_mode(WS63_DEBUG_UART_RX_PIN, WS63_DEBUG_UART_PIN_MODE);
+
+    rx_cfg.rx_buffer = rx_buffer;
+    rx_cfg.rx_buffer_size = rx_buffer_len;
+
+    if (uapi_uart_init(WS63_DEBUG_UART_BUS, &pin_cfg, &attr, NULL, &rx_cfg) != ERRCODE_SUCC) {
+        return ERRCODE_FAIL;
+    }
+
+    return ERRCODE_SUCC;
+}
+
+/**
+ * @brief 调试串口写数据。
+ */
+int32_t ws63_bsp_debug_uart_write(const uint8_t *data, uint16_t len, uint32_t timeout_ms)
+{
+    if ((data == NULL) || (len == 0U)) {
+        return -1;
+    }
+
+    return uapi_uart_write(WS63_DEBUG_UART_BUS, data, len, timeout_ms);
+}
+
+/**
+ * @brief 调试串口读数据。
+ */
+int32_t ws63_bsp_debug_uart_read(uint8_t *data, uint16_t len, uint32_t timeout_ms)
+{
+    if ((data == NULL) || (len == 0U)) {
+        return -1;
+    }
+
+    return uapi_uart_read(WS63_DEBUG_UART_BUS, data, len, timeout_ms);
+}

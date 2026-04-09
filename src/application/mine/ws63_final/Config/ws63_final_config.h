@@ -78,6 +78,24 @@ extern "C" {
 /* 调试输出节流周期。 */
 #define WS63_LOG_GAP_MS         1000U
 
+/* ----------------------------- 调试串口命令配置 ---------------------------- */
+/* 在线控测串口开关：0=关闭，1=开启。 */
+#define WS63_DEBUG_UART_ENABLE          1U
+
+/* 默认使用 UART0(GPIO17/18, mode1) 作为在线调试命令口。 */
+#define WS63_DEBUG_UART_BUS             UART_BUS_0
+#define WS63_DEBUG_UART_TX_PIN          GPIO_17
+#define WS63_DEBUG_UART_RX_PIN          GPIO_18
+#define WS63_DEBUG_UART_PIN_MODE        1
+#define WS63_DEBUG_UART_BAUD            115200U
+
+/* 调试串口接收缓存与命令长度限制。 */
+#define WS63_DEBUG_UART_RX_BUF_SIZE     256U
+#define WS63_DEBUG_CMD_MAX_LEN          96U
+
+/* MOTOR WATCH 周期日志间隔。 */
+#define WS63_DEBUG_WATCH_PERIOD_MS      500U
+
 /* ----------------------------- SLE 从机桥接配置 ----------------------------- */
 /*
  * SLE 模块采用“双层开关”策略：

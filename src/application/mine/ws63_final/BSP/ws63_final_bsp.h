@@ -171,6 +171,35 @@ errcode_t ws63_bsp_encoder_register_a_isr(ws63_bsp_gpio_callback_t callback);
  */
 uint8_t ws63_bsp_encoder_get_b_level(void);
 
+/**
+ * @brief 初始化调试串口。
+ *
+ * @param rx_buffer     接收缓冲区。
+ * @param rx_buffer_len 接收缓冲区长度。
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_bsp_debug_uart_init(uint8_t *rx_buffer, uint16_t rx_buffer_len);
+
+/**
+ * @brief 调试串口写数据。
+ *
+ * @param data       数据缓冲区。
+ * @param len        数据长度。
+ * @param timeout_ms 超时时间。
+ * @return int32_t >=0 表示写入字节数，<0 表示失败。
+ */
+int32_t ws63_bsp_debug_uart_write(const uint8_t *data, uint16_t len, uint32_t timeout_ms);
+
+/**
+ * @brief 调试串口读数据。
+ *
+ * @param data       输出缓冲区。
+ * @param len        最大读取长度。
+ * @param timeout_ms 超时时间。
+ * @return int32_t >0 表示读取字节数，<=0 表示无数据或失败。
+ */
+int32_t ws63_bsp_debug_uart_read(uint8_t *data, uint16_t len, uint32_t timeout_ms);
+
 #ifdef __cplusplus
 #if __cplusplus
 }
