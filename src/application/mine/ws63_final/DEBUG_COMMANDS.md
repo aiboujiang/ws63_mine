@@ -95,10 +95,15 @@
 ### 4.3 状态快照日志
 
 - 格式：
-  - `[ws63 dbg] <tag> dir=<DIR> rpm=<rpm>`
+  - `[ws63 dbg] <tag> dir=<DIR> motor_rpm=<rpm> out_rps=<rps>`
 - 字段说明：
   - `dir`：`FWD/REV/STOP`
-  - `rpm`：按当前电机状态规范化后的有符号转速（正转为正，反转为负）
+  - `motor_rpm`：按当前电机状态规范化后的电机轴有符号转速（正转为正，反转为负）
+  - `out_rps`：按减速比换算后的输出轴转速（单位 rps，小数 3 位）
+
+换算说明：
+- `out_rps = motor_rpm / (60 * WS63_MOTOR_GEAR_RATIO)`
+- 默认 `WS63_MOTOR_GEAR_RATIO=150`，可在 `ws63_final_config.h` 中调整。
 
 ## 5. 建议联调流程
 

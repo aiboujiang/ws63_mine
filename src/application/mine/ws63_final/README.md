@@ -180,3 +180,24 @@ ws63_final/
 
 后续事项：
 - 若现场命令与 WATCH 并发很高，建议先 `MOTOR WATCH OFF` 再连续下发控制命令。
+
+### 2026-04-09: 状态日志增加电机轴 RPM 与输出轴 RPS 同时输出
+
+变更摘要：
+- 状态快照日志从单一 `rpm` 扩展为 `motor_rpm` 与 `out_rps` 两个字段，便于同时观察电机轴与输出轴速度。
+- 新增减速比配置宏 `WS63_MOTOR_GEAR_RATIO`（默认 150），输出轴 `rps` 按该参数换算。
+- 修正负小数显示边界，支持 `-0.xxx` 形式的输出轴转速日志。
+- 同步更新 `DEBUG_COMMANDS.md` 的日志格式与换算说明。
+
+影响文件：
+- `src/application/mine/ws63_final/Config/ws63_final_config.h`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task.c`
+- `src/application/mine/ws63_final/DEBUG_COMMANDS.md`
+- `src/application/mine/ws63_final/README.md`
+
+验证结果：
+- 命令：`cd /home/xixi/code/fbb_ws63_20260114/src && python3 build.py ws63-liteos-app`
+- 结果：构建通过（`Build target:ws63_liteos_app success`）。
+
+后续事项：
+- 若减速箱规格变化，仅需调整 `WS63_MOTOR_GEAR_RATIO` 即可同步修正 `out_rps`。

@@ -207,6 +207,9 @@ extern "C" {
 #define WS63_ENCODER_SAMPLE_MS          100U
 #define WS63_ENCODER_PPR                7U
 
+/* 外部减速齿轮减速比：输出轴转速 = 电机轴转速 / WS63_MOTOR_GEAR_RATIO。 */
+#define WS63_MOTOR_GEAR_RATIO           150U
+
 #ifdef __cplusplus
 #if __cplusplus
 }

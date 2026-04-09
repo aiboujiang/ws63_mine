@@ -448,6 +448,31 @@ static int32_t ws63_debug_normalize_rpm(ws63_motor_state_t state, int32_t rpm_ra
 }
 
 /**
+ * @brief 将电机轴 RPM 转换为输出轴 RPS 的千分值。
+ *
+ * 说明：
+ * 1) 输出轴 rps = 电机轴 rpm / (60 * gear_ratio)；
+ * 2) 返回值按 1000 放大，便于在无浮点格式化时输出小数。
+ */
+static int32_t ws63_debug_motor_rpm_to_output_rps_milli(int32_t motor_rpm)
+{
+    int64_t numerator;
+    int64_t denominator;
+
+    if (WS63_MOTOR_GEAR_RATIO == 0U) {
+        return 0;
+    }
+
+    numerator = (int64_t)motor_rpm * 1000LL;
+    denominator = (int64_t)60 * (int64_t)WS63_MOTOR_GEAR_RATIO;
+    if (denominator == 0) {
+        return 0;
+    }
+
+    return (int32_t)(numerator / denominator);
+}
+
+/**
  * @brief 调试串口接收回调：按行组帧后压入命令队列。
  */
 static void ws63_debug_uart_rx_callback(const void *buffer, uint16_t length, bool error)
@@ -617,15 +642,27 @@ static void ws63_debug_dump_motor_status(const char *tag)
     ws63_motor_state_t state;
     int32_t rpm_raw;
     int32_t rpm_show;
+    int32_t out_rps_milli;
+    int32_t out_rps_int;
+    uint32_t out_rps_frac;
+    const char *out_rps_sign;
 
     state = ws63_motor_get_state();
     rpm_raw = ws63_task_get_motor_rpm();
     rpm_show = ws63_debug_normalize_rpm(state, rpm_raw);
+    out_rps_milli = ws63_debug_motor_rpm_to_output_rps_milli(rpm_show);
 
-    ws63_debug_log("[ws63 dbg] %s dir=%s rpm=%ld\r\n",
+    out_rps_int = out_rps_milli / 1000;
+    out_rps_frac = (uint32_t)((out_rps_milli >= 0) ? (out_rps_milli % 1000) : (-out_rps_milli % 1000));
+    out_rps_sign = ((out_rps_milli < 0) && (out_rps_int == 0)) ? "-" : "";
+
+    ws63_debug_log("[ws63 dbg] %s dir=%s motor_rpm=%ld out_rps=%s%ld.%03lu\r\n",
         (tag == NULL) ? "status" : tag,
         ws63_motor_state_to_text(state),
-        (long)rpm_show);
+        (long)rpm_show,
+        out_rps_sign,
+        (long)out_rps_int,
+        (unsigned long)out_rps_frac);
 }
 
 /**
