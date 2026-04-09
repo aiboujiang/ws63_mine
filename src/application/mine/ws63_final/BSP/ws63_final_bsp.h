@@ -11,6 +11,7 @@
 #define WS63_BSP_H
 
 #include <stdint.h>
+#include <stdbool.h>
 
 #include "errcode.h"
 #include "platform_core.h"
@@ -111,6 +112,15 @@ errcode_t ws63_bsp_rgb_spi_write(const uint8_t *tx_buf, uint32_t tx_bytes, uint3
 typedef void (*ws63_bsp_gpio_callback_t)(pin_t pin, uintptr_t param);
 
 /**
+ * @brief UART 接收回调类型。
+ *
+ * @param buffer 接收数据缓冲区。
+ * @param length 本次接收长度。
+ * @param error  是否发生接收错误。
+ */
+typedef void (*ws63_bsp_uart_rx_callback_t)(const void *buffer, uint16_t length, bool error);
+
+/**
  * @brief 初始化电机底层资源（GPIO/PWM）。
  *
  * @return errcode_t ERRCODE_SUCC 成功，其他失败。
@@ -199,6 +209,15 @@ int32_t ws63_bsp_debug_uart_write(const uint8_t *data, uint16_t len, uint32_t ti
  * @return int32_t >0 表示读取字节数，<=0 表示无数据或失败。
  */
 int32_t ws63_bsp_debug_uart_read(uint8_t *data, uint16_t len, uint32_t timeout_ms);
+
+/**
+ * @brief 注册调试串口接收回调。
+ *
+ * @param callback 回调函数。
+ * @param min_len  触发回调的最小长度，传 0 使用默认值 1。
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_bsp_debug_uart_register_rx_callback(ws63_bsp_uart_rx_callback_t callback, uint16_t min_len);
 
 #ifdef __cplusplus
 #if __cplusplus

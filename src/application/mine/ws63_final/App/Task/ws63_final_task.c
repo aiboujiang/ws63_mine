@@ -11,6 +11,7 @@
 #include <string.h>
 
 #include "osal_debug.h"
+#include "soc_osal.h"
 
 #include "securec.h"
 
@@ -31,7 +32,7 @@
 
 #define WS63_SUBPORT_MAX 4U
 #define WS63_DEBUG_LOG_BUF_MAX 192U
-#define WS63_DEBUG_RX_CHUNK_MAX 32U
+#define WS63_DEBUG_CMD_QUEUE_DEPTH 8U
 
 /* 各子串口回调表，下标与子串口号一一对应（0 号位保留不用）。 */
 static ws63_rx_callback_t g_ws63_rx_cb[WS63_SUBPORT_MAX + 1U] = {0};
@@ -45,6 +46,13 @@ static uint32_t g_ws63_debug_last_watch_ms = 0U;
 static uint8_t g_ws63_debug_uart_rx_buf[WS63_DEBUG_UART_RX_BUF_SIZE] = {0};
 static char g_ws63_debug_cmd_line[WS63_DEBUG_CMD_MAX_LEN] = {0};
 static uint16_t g_ws63_debug_cmd_line_len = 0U;
+static char g_ws63_debug_cmd_queue[WS63_DEBUG_CMD_QUEUE_DEPTH][WS63_DEBUG_CMD_MAX_LEN] = {{0}};
+static uint8_t g_ws63_debug_cmd_q_head = 0U;
+static uint8_t g_ws63_debug_cmd_q_tail = 0U;
+static uint8_t g_ws63_debug_cmd_q_count = 0U;
+static uint8_t g_ws63_debug_cmd_overflow = 0U;
+static uint8_t g_ws63_debug_cmd_too_long = 0U;
+static uint8_t g_ws63_debug_uart_rx_error = 0U;
 /* 记录上一字符是否为 '\r'，用于兼容 CRLF，避免一条命令被执行两次。 */
 static uint8_t g_ws63_debug_last_char_cr = 0U;
 #endif
@@ -312,14 +320,196 @@ static const char *ws63_motor_state_to_text(ws63_motor_state_t state)
 {
     switch (state) {
         case WS63_MOTOR_STATE_FORWARD:
-            return "FORWARD";
+            return "FWD";
         case WS63_MOTOR_STATE_REVERSE:
-            return "REVERSE";
+            return "REV";
         case WS63_MOTOR_STATE_BRAKE:
-            return "BRAKE";
         case WS63_MOTOR_STATE_COAST:
         default:
-            return "COAST";
+            return "STOP";
+    }
+}
+
+/**
+ * @brief 调试命令队列临界区加锁。
+ */
+static unsigned int ws63_debug_irq_lock(void)
+{
+    return osal_irq_lock();
+}
+
+/**
+ * @brief 调试命令队列临界区解锁。
+ */
+static void ws63_debug_irq_unlock(unsigned int irq_status)
+{
+    osal_irq_restore(irq_status);
+}
+
+/**
+ * @brief 将完整命令行压入队列。
+ */
+static void ws63_debug_queue_push_line(const char *line)
+{
+    unsigned int irq_status;
+    uint16_t i;
+    uint8_t tail;
+
+    if ((line == NULL) || (line[0] == '\0')) {
+        return;
+    }
+
+    irq_status = ws63_debug_irq_lock();
+    if (g_ws63_debug_cmd_q_count >= WS63_DEBUG_CMD_QUEUE_DEPTH) {
+        g_ws63_debug_cmd_overflow = 1U;
+        ws63_debug_irq_unlock(irq_status);
+        return;
+    }
+
+    tail = g_ws63_debug_cmd_q_tail;
+    for (i = 0U; (i < (WS63_DEBUG_CMD_MAX_LEN - 1U)) && (line[i] != '\0'); i++) {
+        g_ws63_debug_cmd_queue[tail][i] = line[i];
+    }
+    g_ws63_debug_cmd_queue[tail][i] = '\0';
+
+    g_ws63_debug_cmd_q_tail = (uint8_t)((tail + 1U) % WS63_DEBUG_CMD_QUEUE_DEPTH);
+    g_ws63_debug_cmd_q_count++;
+    ws63_debug_irq_unlock(irq_status);
+}
+
+/**
+ * @brief 从命令队列弹出一条完整命令。
+ */
+static uint8_t ws63_debug_queue_pop_line(char *out, uint16_t out_size)
+{
+    unsigned int irq_status;
+    uint16_t i;
+    uint8_t head;
+
+    if ((out == NULL) || (out_size < 2U)) {
+        return 0U;
+    }
+
+    irq_status = ws63_debug_irq_lock();
+    if (g_ws63_debug_cmd_q_count == 0U) {
+        ws63_debug_irq_unlock(irq_status);
+        return 0U;
+    }
+
+    head = g_ws63_debug_cmd_q_head;
+    for (i = 0U; (i < (out_size - 1U)) && (g_ws63_debug_cmd_queue[head][i] != '\0'); i++) {
+        out[i] = g_ws63_debug_cmd_queue[head][i];
+    }
+    out[i] = '\0';
+
+    g_ws63_debug_cmd_q_head = (uint8_t)((head + 1U) % WS63_DEBUG_CMD_QUEUE_DEPTH);
+    g_ws63_debug_cmd_q_count--;
+    ws63_debug_irq_unlock(irq_status);
+    return 1U;
+}
+
+/**
+ * @brief 获取并清空异步接收告警标记。
+ */
+static void ws63_debug_take_async_flags(uint8_t *rx_error, uint8_t *too_long, uint8_t *overflow)
+{
+    unsigned int irq_status;
+
+    if ((rx_error == NULL) || (too_long == NULL) || (overflow == NULL)) {
+        return;
+    }
+
+    irq_status = ws63_debug_irq_lock();
+    *rx_error = g_ws63_debug_uart_rx_error;
+    *too_long = g_ws63_debug_cmd_too_long;
+    *overflow = g_ws63_debug_cmd_overflow;
+    g_ws63_debug_uart_rx_error = 0U;
+    g_ws63_debug_cmd_too_long = 0U;
+    g_ws63_debug_cmd_overflow = 0U;
+    ws63_debug_irq_unlock(irq_status);
+}
+
+/**
+ * @brief 根据电机状态统一 RPM 方向符号。
+ */
+static int32_t ws63_debug_normalize_rpm(ws63_motor_state_t state, int32_t rpm_raw)
+{
+    int32_t rpm_abs;
+
+    rpm_abs = (rpm_raw >= 0) ? rpm_raw : -rpm_raw;
+    if (state == WS63_MOTOR_STATE_FORWARD) {
+        return rpm_abs;
+    }
+    if (state == WS63_MOTOR_STATE_REVERSE) {
+        return -rpm_abs;
+    }
+
+    return rpm_abs;
+}
+
+/**
+ * @brief 调试串口接收回调：按行组帧后压入命令队列。
+ */
+static void ws63_debug_uart_rx_callback(const void *buffer, uint16_t length, bool error)
+{
+    const uint8_t *rx_data;
+    uint16_t i;
+    uint8_t ch;
+
+    if (error) {
+        g_ws63_debug_uart_rx_error = 1U;
+    }
+
+    if ((buffer == NULL) || (length == 0U)) {
+        return;
+    }
+
+    rx_data = (const uint8_t *)buffer;
+    for (i = 0U; i < length; i++) {
+        ch = rx_data[i];
+
+        if (ch == '\r') {
+            if (g_ws63_debug_cmd_line_len > 0U) {
+                g_ws63_debug_cmd_line[g_ws63_debug_cmd_line_len] = '\0';
+                ws63_debug_queue_push_line(g_ws63_debug_cmd_line);
+                g_ws63_debug_cmd_line_len = 0U;
+            }
+            g_ws63_debug_last_char_cr = 1U;
+            continue;
+        }
+
+        if (ch == '\n') {
+            if (g_ws63_debug_last_char_cr == 1U) {
+                g_ws63_debug_last_char_cr = 0U;
+                continue;
+            }
+
+            if (g_ws63_debug_cmd_line_len > 0U) {
+                g_ws63_debug_cmd_line[g_ws63_debug_cmd_line_len] = '\0';
+                ws63_debug_queue_push_line(g_ws63_debug_cmd_line);
+                g_ws63_debug_cmd_line_len = 0U;
+            }
+            continue;
+        }
+
+        g_ws63_debug_last_char_cr = 0U;
+
+        if ((ch == 0x08U) || (ch == 0x7FU)) {
+            if (g_ws63_debug_cmd_line_len > 0U) {
+                g_ws63_debug_cmd_line_len--;
+            }
+            continue;
+        }
+
+        if (isprint((int)ch)) {
+            if (g_ws63_debug_cmd_line_len < (WS63_DEBUG_CMD_MAX_LEN - 1U)) {
+                g_ws63_debug_cmd_line[g_ws63_debug_cmd_line_len] = (char)ch;
+                g_ws63_debug_cmd_line_len++;
+            } else {
+                g_ws63_debug_cmd_line_len = 0U;
+                g_ws63_debug_cmd_too_long = 1U;
+            }
+        }
     }
 }
 
@@ -425,24 +615,17 @@ static uint8_t ws63_debug_parse_duty(const char *text, uint8_t *duty_out)
 static void ws63_debug_dump_motor_status(const char *tag)
 {
     ws63_motor_state_t state;
-    int32_t rpm;
-    int32_t delta;
-    int32_t total;
-    uint8_t duty;
+    int32_t rpm_raw;
+    int32_t rpm_show;
 
     state = ws63_motor_get_state();
-    duty = ws63_motor_get_duty();
-    rpm = ws63_task_get_motor_rpm();
-    delta = ws63_encoder_get_last_delta();
-    total = ws63_task_get_encoder_total_count();
+    rpm_raw = ws63_task_get_motor_rpm();
+    rpm_show = ws63_debug_normalize_rpm(state, rpm_raw);
 
-    ws63_debug_log("[ws63 dbg] %s state=%s duty=%u rpm=%ld delta=%ld total=%ld\r\n",
+    ws63_debug_log("[ws63 dbg] %s dir=%s rpm=%ld\r\n",
         (tag == NULL) ? "status" : tag,
         ws63_motor_state_to_text(state),
-        (unsigned int)duty,
-        (long)rpm,
-        (long)delta,
-        (long)total);
+        (long)rpm_show);
 }
 
 /**
@@ -585,11 +768,23 @@ static void ws63_debug_uart_cmd_init(void)
     g_ws63_debug_watch_enable = 0U;
     g_ws63_debug_cmd_line_len = 0U;
     g_ws63_debug_last_watch_ms = 0U;
+    g_ws63_debug_cmd_q_head = 0U;
+    g_ws63_debug_cmd_q_tail = 0U;
+    g_ws63_debug_cmd_q_count = 0U;
+    g_ws63_debug_cmd_overflow = 0U;
+    g_ws63_debug_cmd_too_long = 0U;
+    g_ws63_debug_uart_rx_error = 0U;
     g_ws63_debug_last_char_cr = 0U;
 
     ret = ws63_bsp_debug_uart_init(g_ws63_debug_uart_rx_buf, sizeof(g_ws63_debug_uart_rx_buf));
     if (ret != ERRCODE_SUCC) {
         osal_printk("[wk2114 final task] debug uart init fail, ret=0x%x\r\n", (unsigned int)ret);
+        return;
+    }
+
+    ret = ws63_bsp_debug_uart_register_rx_callback(ws63_debug_uart_rx_callback, 1U);
+    if (ret != ERRCODE_SUCC) {
+        osal_printk("[wk2114 final task] debug uart cb reg fail, ret=0x%x\r\n", (unsigned int)ret);
         return;
     }
 
@@ -607,64 +802,28 @@ static void ws63_debug_uart_cmd_init(void)
  */
 static void ws63_debug_uart_cmd_process(uint32_t now_ms)
 {
-    int32_t rx_len;
-    uint8_t i;
-    uint8_t ch;
-    uint8_t rx_buf[WS63_DEBUG_RX_CHUNK_MAX] = {0};
+    uint8_t rx_error;
+    uint8_t too_long;
+    uint8_t overflow;
+    char cmd_line[WS63_DEBUG_CMD_MAX_LEN] = {0};
 
     if (g_ws63_debug_uart_ready == 0U) {
         return;
     }
 
-    rx_len = ws63_bsp_debug_uart_read(rx_buf, sizeof(rx_buf), 0U);
-    if (rx_len > 0) {
-        for (i = 0U; i < (uint8_t)rx_len; i++) {
-            ch = rx_buf[i];
+    ws63_debug_take_async_flags(&rx_error, &too_long, &overflow);
+    if (rx_error == 1U) {
+        ws63_debug_log("[ws63 dbg] uart rx error\r\n");
+    }
+    if (too_long == 1U) {
+        ws63_debug_log("[ws63 dbg] command too long, dropped\r\n");
+    }
+    if (overflow == 1U) {
+        ws63_debug_log("[ws63 dbg] command queue overflow, dropped\r\n");
+    }
 
-            /* '\r' 与 '\n' 都视为行结束，兼容常见串口工具的 CR/CRLF/LF 三种发送方式。 */
-            if (ch == '\r') {
-                if (g_ws63_debug_cmd_line_len > 0U) {
-                    g_ws63_debug_cmd_line[g_ws63_debug_cmd_line_len] = '\0';
-                    ws63_debug_exec_command(g_ws63_debug_cmd_line);
-                    g_ws63_debug_cmd_line_len = 0U;
-                }
-                g_ws63_debug_last_char_cr = 1U;
-                continue;
-            }
-
-            if (ch == '\n') {
-                /* 若前一字符已是 '\r'，说明是 CRLF，此处跳过避免重复执行。 */
-                if (g_ws63_debug_last_char_cr == 1U) {
-                    g_ws63_debug_last_char_cr = 0U;
-                    continue;
-                }
-                if (g_ws63_debug_cmd_line_len > 0U) {
-                    g_ws63_debug_cmd_line[g_ws63_debug_cmd_line_len] = '\0';
-                    ws63_debug_exec_command(g_ws63_debug_cmd_line);
-                    g_ws63_debug_cmd_line_len = 0U;
-                }
-                continue;
-            }
-
-            g_ws63_debug_last_char_cr = 0U;
-
-            if ((ch == 0x08U) || (ch == 0x7FU)) {
-                if (g_ws63_debug_cmd_line_len > 0U) {
-                    g_ws63_debug_cmd_line_len--;
-                }
-                continue;
-            }
-
-            if (isprint((int)ch)) {
-                if (g_ws63_debug_cmd_line_len < (WS63_DEBUG_CMD_MAX_LEN - 1U)) {
-                    g_ws63_debug_cmd_line[g_ws63_debug_cmd_line_len] = (char)ch;
-                    g_ws63_debug_cmd_line_len++;
-                } else {
-                    g_ws63_debug_cmd_line_len = 0U;
-                    ws63_debug_log("[ws63 dbg] command too long, dropped\r\n");
-                }
-            }
-        }
+    while (ws63_debug_queue_pop_line(cmd_line, sizeof(cmd_line)) == 1U) {
+        ws63_debug_exec_command(cmd_line);
     }
 
     if (g_ws63_debug_watch_enable == 0U) {

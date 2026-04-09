@@ -158,3 +158,25 @@ ws63_final/
 
 后续事项：
 - 若现场仍需与 AT 命令并行，建议将调试命令口切换到独立 UART 总线并单独接线。
+
+### 2026-04-09: 调试命令接收改为 UART 回调+行队列，状态日志简化
+
+变更摘要：
+- 调试命令接收从“主循环轮询 read”改为“UART 中断回调组帧 + 行缓冲队列出队执行”，降低命令丢失与延迟。
+- 新增队列溢出/命令超长/接收错误告警，避免高日志负载场景下静默丢命令。
+- 状态快照日志改为仅输出方向与转速（`dir` + `rpm`），并按当前电机状态规范化 RPM 符号。
+- 同步更新 `DEBUG_COMMANDS.md` 的接收机制与日志格式说明。
+
+影响文件：
+- `src/application/mine/ws63_final/BSP/ws63_final_bsp.h`
+- `src/application/mine/ws63_final/BSP/ws63_final_bsp.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task.c`
+- `src/application/mine/ws63_final/DEBUG_COMMANDS.md`
+- `src/application/mine/ws63_final/README.md`
+
+验证结果：
+- 命令：`cd /home/xixi/code/fbb_ws63_20260114/src && python3 build.py ws63-liteos-app`
+- 结果：构建通过（`Build target:ws63_liteos_app success`）。
+
+后续事项：
+- 若现场命令与 WATCH 并发很高，建议先 `MOTOR WATCH OFF` 再连续下发控制命令。

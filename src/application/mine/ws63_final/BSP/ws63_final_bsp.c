@@ -629,3 +629,25 @@ int32_t ws63_bsp_debug_uart_read(uint8_t *data, uint16_t len, uint32_t timeout_m
 
     return uapi_uart_read(WS63_DEBUG_UART_BUS, data, len, timeout_ms);
 }
+
+/**
+ * @brief 注册调试串口接收回调。
+ */
+errcode_t ws63_bsp_debug_uart_register_rx_callback(ws63_bsp_uart_rx_callback_t callback, uint16_t min_len)
+{
+    uint16_t threshold;
+
+    if (callback == NULL) {
+        return ERRCODE_INVALID_PARAM;
+    }
+
+    threshold = (min_len == 0U) ? 1U : min_len;
+    if (uapi_uart_register_rx_callback(WS63_DEBUG_UART_BUS,
+        UART_RX_CONDITION_FULL_OR_SUFFICIENT_DATA_OR_IDLE,
+        threshold,
+        callback) != ERRCODE_SUCC) {
+        return ERRCODE_FAIL;
+    }
+
+    return ERRCODE_SUCC;
+}
