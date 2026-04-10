@@ -537,7 +537,7 @@ static void ws63_debug_dump_motor_status(const char *tag)
     out_rps_frac = (uint32_t)((out_rps_milli >= 0) ? (out_rps_milli % 1000) : (-out_rps_milli % 1000));
     out_rps_sign = ((out_rps_milli < 0) && (out_rps_int == 0)) ? "-" : "";
 
-    ws63_debug_log("[ws63 dbg] %s dir=%s motor_rpm=%ld out_rps=%s%ld.%03lu\\r\\n",
+    ws63_debug_log("[ws63 dbg] %s dir=%s motor_rpm=%ld out_rps=%s%ld.%03lu\r\n",
         (tag == NULL) ? "status" : tag,
         ws63_motor_state_to_text(state),
         (long)rpm_show,
@@ -584,43 +584,43 @@ static void ws63_debug_dump_rgb_status(const char *tag)
  */
 static void ws63_debug_print_help(void)
 {
-    ws63_debug_log("[ws63 dbg] command list:\\r\\n");
-    ws63_debug_log("[ws63 dbg]   HELP\\r\\n");
-    ws63_debug_log("[ws63 dbg]   MOTOR FWD <0-100>\\r\\n");
-    ws63_debug_log("[ws63 dbg]   MOTOR REV <0-100>\\r\\n");
-    ws63_debug_log("[ws63 dbg]   MOTOR DUTY <0-100>\\r\\n");
-    ws63_debug_log("[ws63 dbg]   MOTOR STOP\\r\\n");
-    ws63_debug_log("[ws63 dbg]   MOTOR BRAKE\\r\\n");
-    ws63_debug_log("[ws63 dbg]   MOTOR RPM\\r\\n");
-    ws63_debug_log("[ws63 dbg]   MOTOR STAT\\r\\n");
-    ws63_debug_log("[ws63 dbg]   MOTOR WATCH ON|OFF\\r\\n");
-    ws63_debug_log("[ws63 dbg]   ENCODER RESET\\r\\n");
-    ws63_debug_log("[ws63 dbg]   BEEP ON [100-5000]\\r\\n");
-    ws63_debug_log("[ws63 dbg]   BEEP FREQ <100-5000>\\r\\n");
-    ws63_debug_log("[ws63 dbg]   BEEP VOL <0-100>\\r\\n");
-    ws63_debug_log("[ws63 dbg]   BEEP OFF\\r\\n");
-    ws63_debug_log("[ws63 dbg]   BEEP STAT\\r\\n");
-    ws63_debug_log("[ws63 dbg]   RGB INIT\\r\\n");
-    ws63_debug_log("[ws63 dbg]   RGB SET <R0-255> <G0-255> <B0-255>\\r\\n");
-    ws63_debug_log("[ws63 dbg]   RGB OFF\\r\\n");
-    ws63_debug_log("[ws63 dbg]   RGB DEMO ON|OFF\\r\\n");
-    ws63_debug_log("[ws63 dbg]   RGB STAT\\r\\n");
-    ws63_debug_log("[ws63 dbg]   LD2401 INIT (alias LD2402)\\r\\n");
-    ws63_debug_log("[ws63 dbg]   LD2401 RAW <HEX...>\\r\\n");
-    ws63_debug_log("[ws63 dbg]   LD2401 STAT\\r\\n");
-    ws63_debug_log("[ws63 dbg]   ZW101 INIT\\r\\n");
-    ws63_debug_log("[ws63 dbg]   ZW101 HANDSHAKE\\r\\n");
-    ws63_debug_log("[ws63 dbg]   ZW101 CHECKSENSOR\\r\\n");
-    ws63_debug_log("[ws63 dbg]   ZW101 RAW <HEX...>\\r\\n");
-    ws63_debug_log("[ws63 dbg]   ZW101 STAT\\r\\n");
-    ws63_debug_log("[ws63 dbg]   ZW101 ZA HELP\\r\\n");
-    ws63_debug_log("[ws63 dbg]   ZW101 ZA ECHO\\r\\n");
-    ws63_debug_log("[ws63 dbg]   ZW101 ZA LOGIN <wait> <interval0-15> <press2|3> <id> <dup0|1>\\r\\n");
-    ws63_debug_log("[ws63 dbg]   ZW101 ZA SEARCH <wait> <start> <count>\\r\\n");
-    ws63_debug_log("[ws63 dbg]   ZW101 ZA SEARCHRES <buf1|2> <start> <count>\\r\\n");
-    ws63_debug_log("[ws63 dbg]   ZW101 ZA LOGINLIGHT <wait> <press2|3> <id> <dup0|1>\\r\\n");
-    ws63_debug_log("[ws63 dbg]   ZW101 ZA SEARCHECHO <wait> <start> <count>\\r\\n");
-    ws63_debug_log("[ws63 dbg]   ZW101 ZA TERM\\r\\n");
+    ws63_debug_log("[ws63 dbg] command list:\r\n");
+    ws63_debug_log("[ws63 dbg]   HELP\r\n");
+    ws63_debug_log("[ws63 dbg]   MOTOR FWD <0-100>\r\n");
+    ws63_debug_log("[ws63 dbg]   MOTOR REV <0-100>\r\n");
+    ws63_debug_log("[ws63 dbg]   MOTOR DUTY <0-100>\r\n");
+    ws63_debug_log("[ws63 dbg]   MOTOR STOP\r\n");
+    ws63_debug_log("[ws63 dbg]   MOTOR BRAKE\r\n");
+    ws63_debug_log("[ws63 dbg]   MOTOR RPM\r\n");
+    ws63_debug_log("[ws63 dbg]   MOTOR STAT\r\n");
+    ws63_debug_log("[ws63 dbg]   MOTOR WATCH ON|OFF\r\n");
+    ws63_debug_log("[ws63 dbg]   ENCODER RESET\r\n");
+    ws63_debug_log("[ws63 dbg]   BEEP ON [100-5000]\r\n");
+    ws63_debug_log("[ws63 dbg]   BEEP FREQ <100-5000>\r\n");
+    ws63_debug_log("[ws63 dbg]   BEEP VOL <0-100>\r\n");
+    ws63_debug_log("[ws63 dbg]   BEEP OFF\r\n");
+    ws63_debug_log("[ws63 dbg]   BEEP STAT\r\n");
+    ws63_debug_log("[ws63 dbg]   RGB INIT\r\n");
+    ws63_debug_log("[ws63 dbg]   RGB SET <R0-255> <G0-255> <B0-255>\r\n");
+    ws63_debug_log("[ws63 dbg]   RGB OFF\r\n");
+    ws63_debug_log("[ws63 dbg]   RGB DEMO ON|OFF\r\n");
+    ws63_debug_log("[ws63 dbg]   RGB STAT\r\n");
+    ws63_debug_log("[ws63 dbg]   LD2401 INIT (alias LD2402)\r\n");
+    ws63_debug_log("[ws63 dbg]   LD2401 RAW <HEX...>\r\n");
+    ws63_debug_log("[ws63 dbg]   LD2401 STAT\r\n");
+    ws63_debug_log("[ws63 dbg]   ZW101 INIT\r\n");
+    ws63_debug_log("[ws63 dbg]   ZW101 HANDSHAKE\r\n");
+    ws63_debug_log("[ws63 dbg]   ZW101 CHECKSENSOR\r\n");
+    ws63_debug_log("[ws63 dbg]   ZW101 RAW <HEX...>\r\n");
+    ws63_debug_log("[ws63 dbg]   ZW101 STAT\r\n");
+    ws63_debug_log("[ws63 dbg]   ZW101 ZA HELP\r\n");
+    ws63_debug_log("[ws63 dbg]   ZW101 ZA ECHO\r\n");
+    ws63_debug_log("[ws63 dbg]   ZW101 ZA LOGIN <wait> <interval0-15> <press2|3> <id> <dup0|1>\r\n");
+    ws63_debug_log("[ws63 dbg]   ZW101 ZA SEARCH <wait> <start> <count>\r\n");
+    ws63_debug_log("[ws63 dbg]   ZW101 ZA SEARCHRES <buf1|2> <start> <count>\r\n");
+    ws63_debug_log("[ws63 dbg]   ZW101 ZA LOGINLIGHT <wait> <press2|3> <id> <dup0|1>\r\n");
+    ws63_debug_log("[ws63 dbg]   ZW101 ZA SEARCHECHO <wait> <start> <count>\r\n");
+    ws63_debug_log("[ws63 dbg]   ZW101 ZA TERM\r\n");
 }
 
 /**
@@ -661,7 +661,7 @@ static void ws63_debug_exec_command(const char *line)
         return;
     }
 
-    ws63_debug_log("[ws63 dbg] cmd<=%s\\r\\n", cmd);
+    ws63_debug_log("[ws63 dbg] cmd<=%s\r\n", cmd);
 
     if ((strcmp(cmd, "HELP") == 0) || (strcmp(cmd, "?") == 0)) {
         ws63_debug_print_help();
@@ -670,14 +670,14 @@ static void ws63_debug_exec_command(const char *line)
 
     if (strcmp(cmd, "MOTOR STOP") == 0) {
         ret = ws63_task_motor_coast_stop();
-        ws63_debug_log("[ws63 dbg] MOTOR STOP ret=0x%x\\r\\n", (unsigned int)ret);
+        ws63_debug_log("[ws63 dbg] MOTOR STOP ret=0x%x\r\n", (unsigned int)ret);
         ws63_debug_dump_motor_status("stop");
         return;
     }
 
     if (strcmp(cmd, "MOTOR BRAKE") == 0) {
         ret = ws63_task_motor_brake_stop();
-        ws63_debug_log("[ws63 dbg] MOTOR BRAKE ret=0x%x\\r\\n", (unsigned int)ret);
+        ws63_debug_log("[ws63 dbg] MOTOR BRAKE ret=0x%x\r\n", (unsigned int)ret);
         ws63_debug_dump_motor_status("brake");
         return;
     }
@@ -690,19 +690,19 @@ static void ws63_debug_exec_command(const char *line)
     if (strcmp(cmd, "MOTOR WATCH ON") == 0) {
         g_ws63_debug_watch_enable = 1U;
         g_ws63_debug_last_watch_ms = 0U;
-        ws63_debug_log("[ws63 dbg] watch enabled\\r\\n");
+        ws63_debug_log("[ws63 dbg] watch enabled\r\n");
         return;
     }
 
     if (strcmp(cmd, "MOTOR WATCH OFF") == 0) {
         g_ws63_debug_watch_enable = 0U;
-        ws63_debug_log("[ws63 dbg] watch disabled\\r\\n");
+        ws63_debug_log("[ws63 dbg] watch disabled\r\n");
         return;
     }
 
     if (strcmp(cmd, "ENCODER RESET") == 0) {
         ws63_encoder_reset();
-        ws63_debug_log("[ws63 dbg] encoder counter reset\\r\\n");
+        ws63_debug_log("[ws63 dbg] encoder counter reset\r\n");
         ws63_debug_dump_motor_status("encoder-reset");
         return;
     }
@@ -714,14 +714,14 @@ static void ws63_debug_exec_command(const char *line)
 
     if (strcmp(cmd, "BEEP OFF") == 0) {
         ret = ws63_task_buzzer_off();
-        ws63_debug_log("[ws63 dbg] BEEP OFF ret=0x%x\\r\\n", (unsigned int)ret);
+        ws63_debug_log("[ws63 dbg] BEEP OFF ret=0x%x\r\n", (unsigned int)ret);
         ws63_debug_dump_beep_status("beep-off");
         return;
     }
 
     if (strcmp(cmd, "BEEP ON") == 0) {
         ret = ws63_task_buzzer_on(WS63_BEEP_DEFAULT_FREQ_HZ);
-        ws63_debug_log("[ws63 dbg] BEEP ON %uHz ret=0x%x\\r\\n",
+        ws63_debug_log("[ws63 dbg] BEEP ON %uHz ret=0x%x\r\n",
             (unsigned int)WS63_BEEP_DEFAULT_FREQ_HZ,
             (unsigned int)ret);
         ws63_debug_dump_beep_status("beep-on");
@@ -733,14 +733,14 @@ static void ws63_debug_exec_command(const char *line)
             WS63_BEEP_MIN_FREQ_HZ,
             WS63_BEEP_MAX_FREQ_HZ,
             &freq_hz)) {
-            ws63_debug_log("[ws63 dbg] invalid freq, expect %u~%u\\r\\n",
+            ws63_debug_log("[ws63 dbg] invalid freq, expect %u~%u\r\n",
                 (unsigned int)WS63_BEEP_MIN_FREQ_HZ,
                 (unsigned int)WS63_BEEP_MAX_FREQ_HZ);
             return;
         }
 
         ret = ws63_task_buzzer_on(freq_hz);
-        ws63_debug_log("[ws63 dbg] BEEP ON %uHz ret=0x%x\\r\\n",
+        ws63_debug_log("[ws63 dbg] BEEP ON %uHz ret=0x%x\r\n",
             (unsigned int)freq_hz,
             (unsigned int)ret);
         ws63_debug_dump_beep_status("beep-on");
@@ -752,14 +752,14 @@ static void ws63_debug_exec_command(const char *line)
             WS63_BEEP_MIN_FREQ_HZ,
             WS63_BEEP_MAX_FREQ_HZ,
             &freq_hz)) {
-            ws63_debug_log("[ws63 dbg] invalid freq, expect %u~%u\\r\\n",
+            ws63_debug_log("[ws63 dbg] invalid freq, expect %u~%u\r\n",
                 (unsigned int)WS63_BEEP_MIN_FREQ_HZ,
                 (unsigned int)WS63_BEEP_MAX_FREQ_HZ);
             return;
         }
 
         ret = ws63_task_buzzer_on(freq_hz);
-        ws63_debug_log("[ws63 dbg] BEEP FREQ %uHz ret=0x%x\\r\\n",
+        ws63_debug_log("[ws63 dbg] BEEP FREQ %uHz ret=0x%x\r\n",
             (unsigned int)freq_hz,
             (unsigned int)ret);
         ws63_debug_dump_beep_status("beep-freq");
@@ -768,12 +768,12 @@ static void ws63_debug_exec_command(const char *line)
 
     if (strncmp(cmd, "BEEP VOL ", 9) == 0) {
         if (!ws63_debug_parse_duty(cmd + 9, &duty)) {
-            ws63_debug_log("[ws63 dbg] invalid volume, expect 0~100\\r\\n");
+            ws63_debug_log("[ws63 dbg] invalid volume, expect 0~100\r\n");
             return;
         }
 
         ret = ws63_task_buzzer_set_volume(duty);
-        ws63_debug_log("[ws63 dbg] BEEP VOL %u%% ret=0x%x\\r\\n",
+        ws63_debug_log("[ws63 dbg] BEEP VOL %u%% ret=0x%x\r\n",
             (unsigned int)duty,
             (unsigned int)ret);
         ws63_debug_dump_beep_status("beep-vol");
@@ -787,44 +787,44 @@ static void ws63_debug_exec_command(const char *line)
 
     if (strcmp(cmd, "RGB INIT") == 0) {
         ret = ws63_task_rgb_reinit();
-        ws63_debug_log("[ws63 dbg] RGB INIT ret=0x%x\\r\\n", (unsigned int)ret);
+        ws63_debug_log("[ws63 dbg] RGB INIT ret=0x%x\r\n", (unsigned int)ret);
         ws63_debug_dump_rgb_status("rgb-init");
         return;
     }
 
     if (strcmp(cmd, "RGB OFF") == 0) {
         ret = ws63_task_rgb_off();
-        ws63_debug_log("[ws63 dbg] RGB OFF ret=0x%x\\r\\n", (unsigned int)ret);
+        ws63_debug_log("[ws63 dbg] RGB OFF ret=0x%x\r\n", (unsigned int)ret);
         ws63_debug_dump_rgb_status("rgb-off");
         return;
     }
 
     if (strcmp(cmd, "RGB DEMO ON") == 0) {
         ret = ws63_task_rgb_set_demo_enable(1U);
-        ws63_debug_log("[ws63 dbg] RGB DEMO ON ret=0x%x\\r\\n", (unsigned int)ret);
+        ws63_debug_log("[ws63 dbg] RGB DEMO ON ret=0x%x\r\n", (unsigned int)ret);
         ws63_debug_dump_rgb_status("rgb-demo");
         return;
     }
 
     if (strcmp(cmd, "RGB DEMO OFF") == 0) {
         ret = ws63_task_rgb_set_demo_enable(0U);
-        ws63_debug_log("[ws63 dbg] RGB DEMO OFF ret=0x%x\\r\\n", (unsigned int)ret);
+        ws63_debug_log("[ws63 dbg] RGB DEMO OFF ret=0x%x\r\n", (unsigned int)ret);
         ws63_debug_dump_rgb_status("rgb-demo");
         return;
     }
 
     if (strncmp(cmd, "RGB SET ", 8) == 0) {
         if (!ws63_debug_parse_u32_tokens(cmd + 8, rgb_args, 4U, &rgb_argc) || (rgb_argc != 3U)) {
-            ws63_debug_log("[ws63 dbg] usage: RGB SET <R0-255> <G0-255> <B0-255>\\r\\n");
+            ws63_debug_log("[ws63 dbg] usage: RGB SET <R0-255> <G0-255> <B0-255>\r\n");
             return;
         }
         if ((rgb_args[0] > 255U) || (rgb_args[1] > 255U) || (rgb_args[2] > 255U)) {
-            ws63_debug_log("[ws63 dbg] invalid rgb range, expect 0~255\\r\\n");
+            ws63_debug_log("[ws63 dbg] invalid rgb range, expect 0~255\r\n");
             return;
         }
 
         ret = ws63_task_rgb_set_color((uint8_t)rgb_args[0], (uint8_t)rgb_args[1], (uint8_t)rgb_args[2]);
-        ws63_debug_log("[ws63 dbg] RGB SET (%u,%u,%u) ret=0x%x\\r\\n",
+        ws63_debug_log("[ws63 dbg] RGB SET (%u,%u,%u) ret=0x%x\r\n",
             (unsigned int)rgb_args[0],
             (unsigned int)rgb_args[1],
             (unsigned int)rgb_args[2],
@@ -835,23 +835,23 @@ static void ws63_debug_exec_command(const char *line)
 
     if ((strcmp(cmd, "LD2401 INIT") == 0) || (strcmp(cmd, "LD2402 INIT") == 0)) {
         ret = ws63_task_ld2402_reinit();
-        ws63_debug_log("[ws63 dbg] LD2401 INIT ret=0x%x\\r\\n", (unsigned int)ret);
+        ws63_debug_log("[ws63 dbg] LD2401 INIT ret=0x%x\r\n", (unsigned int)ret);
         return;
     }
 
     if ((strcmp(cmd, "LD2401 STAT") == 0) || (strcmp(cmd, "LD2402 STAT") == 0)) {
-        ws63_debug_log("[ws63 dbg] LD2401(alias LD2402) subport=%u\\r\\n", (unsigned int)LD2402_SUBPORT);
+        ws63_debug_log("[ws63 dbg] LD2401(alias LD2402) subport=%u\r\n", (unsigned int)LD2402_SUBPORT);
         return;
     }
 
     if ((strncmp(cmd, "LD2401 RAW ", 10) == 0) || (strncmp(cmd, "LD2402 RAW ", 10) == 0)) {
         if (!ws63_debug_parse_hex_bytes(cmd + 10, raw_buf, sizeof(raw_buf), &raw_len)) {
-            ws63_debug_log("[ws63 dbg] invalid LD2401 raw hex, example: FD FC FB FA\\r\\n");
+            ws63_debug_log("[ws63 dbg] invalid LD2401 raw hex, example: FD FC FB FA\r\n");
             return;
         }
 
         ret = ws63_task_ld2402_send_raw(raw_buf, raw_len);
-        ws63_debug_log("[ws63 dbg] LD2401 RAW len=%u ret=0x%x\\r\\n",
+        ws63_debug_log("[ws63 dbg] LD2401 RAW len=%u ret=0x%x\r\n",
             (unsigned int)raw_len,
             (unsigned int)ret);
         return;
@@ -859,14 +859,14 @@ static void ws63_debug_exec_command(const char *line)
 
     if (strcmp(cmd, "ZW101 INIT") == 0) {
         ret = ws63_task_zw101_reinit();
-        ws63_debug_log("[ws63 dbg] ZW101 INIT ret=0x%x\\r\\n", (unsigned int)ret);
+        ws63_debug_log("[ws63 dbg] ZW101 INIT ret=0x%x\r\n", (unsigned int)ret);
         return;
     }
 
     if (strcmp(cmd, "ZW101 HANDSHAKE") == 0) {
         za_ack = 0xFFU;
         ret = ws63_task_zw101_handshake(&za_ack);
-        ws63_debug_log("[ws63 dbg] ZW101 HANDSHAKE ret=0x%x ack=0x%02x\\r\\n",
+        ws63_debug_log("[ws63 dbg] ZW101 HANDSHAKE ret=0x%x ack=0x%02x\r\n",
             (unsigned int)ret,
             (unsigned int)za_ack);
         return;
@@ -875,28 +875,28 @@ static void ws63_debug_exec_command(const char *line)
     if (strcmp(cmd, "ZW101 CHECKSENSOR") == 0) {
         za_ack = 0xFFU;
         ret = ws63_task_zw101_check_sensor(&za_ack);
-        ws63_debug_log("[ws63 dbg] ZW101 CHECKSENSOR ret=0x%x ack=0x%02x\\r\\n",
+        ws63_debug_log("[ws63 dbg] ZW101 CHECKSENSOR ret=0x%x ack=0x%02x\r\n",
             (unsigned int)ret,
             (unsigned int)za_ack);
         return;
     }
 
     if (strcmp(cmd, "ZW101 ZA HELP") == 0) {
-        ws63_debug_log("[ws63 dbg] ZA commands:\\r\\n");
-        ws63_debug_log("[ws63 dbg]   ZW101 ZA ECHO\\r\\n");
-        ws63_debug_log("[ws63 dbg]   ZW101 ZA LOGIN <wait> <interval0-15> <press2|3> <id> <dup0|1>\\r\\n");
-        ws63_debug_log("[ws63 dbg]   ZW101 ZA SEARCH <wait> <start> <count>\\r\\n");
-        ws63_debug_log("[ws63 dbg]   ZW101 ZA SEARCHRES <buf1|2> <start> <count>\\r\\n");
-        ws63_debug_log("[ws63 dbg]   ZW101 ZA LOGINLIGHT <wait> <press2|3> <id> <dup0|1>\\r\\n");
-        ws63_debug_log("[ws63 dbg]   ZW101 ZA SEARCHECHO <wait> <start> <count>\\r\\n");
-        ws63_debug_log("[ws63 dbg]   ZW101 ZA TERM\\r\\n");
+        ws63_debug_log("[ws63 dbg] ZA commands:\r\n");
+        ws63_debug_log("[ws63 dbg]   ZW101 ZA ECHO\r\n");
+        ws63_debug_log("[ws63 dbg]   ZW101 ZA LOGIN <wait> <interval0-15> <press2|3> <id> <dup0|1>\r\n");
+        ws63_debug_log("[ws63 dbg]   ZW101 ZA SEARCH <wait> <start> <count>\r\n");
+        ws63_debug_log("[ws63 dbg]   ZW101 ZA SEARCHRES <buf1|2> <start> <count>\r\n");
+        ws63_debug_log("[ws63 dbg]   ZW101 ZA LOGINLIGHT <wait> <press2|3> <id> <dup0|1>\r\n");
+        ws63_debug_log("[ws63 dbg]   ZW101 ZA SEARCHECHO <wait> <start> <count>\r\n");
+        ws63_debug_log("[ws63 dbg]   ZW101 ZA TERM\r\n");
         return;
     }
 
     if (strcmp(cmd, "ZW101 ZA ECHO") == 0) {
         za_ack = 0xFFU;
         ret = ws63_task_zw101_za_get_echo(&za_ack);
-        ws63_debug_log("[ws63 dbg] ZW101 ZA ECHO ret=0x%x ack=0x%02x\\r\\n",
+        ws63_debug_log("[ws63 dbg] ZW101 ZA ECHO ret=0x%x ack=0x%02x\r\n",
             (unsigned int)ret,
             (unsigned int)za_ack);
         return;
@@ -904,12 +904,12 @@ static void ws63_debug_exec_command(const char *line)
 
     if (strncmp(cmd, "ZW101 ZA LOGIN ", 15) == 0) {
         if (!ws63_debug_parse_u32_tokens(cmd + 15, za_args, 6U, &za_argc) || (za_argc != 5U)) {
-            ws63_debug_log("[ws63 dbg] usage: ZW101 ZA LOGIN <wait> <interval0-15> <press2|3> <id> <dup0|1>\\r\\n");
+            ws63_debug_log("[ws63 dbg] usage: ZW101 ZA LOGIN <wait> <interval0-15> <press2|3> <id> <dup0|1>\r\n");
             return;
         }
         if ((za_args[1] > 15U) || ((za_args[2] != 2U) && (za_args[2] != 3U)) ||
             (za_args[3] > 65535U) || (za_args[4] > 1U)) {
-            ws63_debug_log("[ws63 dbg] invalid LOGIN args\\r\\n");
+            ws63_debug_log("[ws63 dbg] invalid LOGIN args\r\n");
             return;
         }
 
@@ -920,7 +920,7 @@ static void ws63_debug_exec_command(const char *line)
             (uint16_t)za_args[3],
             (uint8_t)za_args[4],
             &za_ack);
-        ws63_debug_log("[ws63 dbg] ZW101 ZA LOGIN ret=0x%x ack=0x%02x\\r\\n",
+        ws63_debug_log("[ws63 dbg] ZW101 ZA LOGIN ret=0x%x ack=0x%02x\r\n",
             (unsigned int)ret,
             (unsigned int)za_ack);
         return;
@@ -928,11 +928,11 @@ static void ws63_debug_exec_command(const char *line)
 
     if (strncmp(cmd, "ZW101 ZA SEARCH ", 16) == 0) {
         if (!ws63_debug_parse_u32_tokens(cmd + 16, za_args, 6U, &za_argc) || (za_argc != 3U)) {
-            ws63_debug_log("[ws63 dbg] usage: ZW101 ZA SEARCH <wait> <start> <count>\\r\\n");
+            ws63_debug_log("[ws63 dbg] usage: ZW101 ZA SEARCH <wait> <start> <count>\r\n");
             return;
         }
         if ((za_args[1] > 65535U) || (za_args[2] > 65535U)) {
-            ws63_debug_log("[ws63 dbg] invalid SEARCH args\\r\\n");
+            ws63_debug_log("[ws63 dbg] invalid SEARCH args\r\n");
             return;
         }
 
@@ -945,7 +945,7 @@ static void ws63_debug_exec_command(const char *line)
             &za_page_id,
             &za_score,
             &za_ack);
-        ws63_debug_log("[ws63 dbg] ZW101 ZA SEARCH ret=0x%x ack=0x%02x id=%u score=%u\\r\\n",
+        ws63_debug_log("[ws63 dbg] ZW101 ZA SEARCH ret=0x%x ack=0x%02x id=%u score=%u\r\n",
             (unsigned int)ret,
             (unsigned int)za_ack,
             (unsigned int)za_page_id,
@@ -955,11 +955,11 @@ static void ws63_debug_exec_command(const char *line)
 
     if (strncmp(cmd, "ZW101 ZA SEARCHRES ", 19) == 0) {
         if (!ws63_debug_parse_u32_tokens(cmd + 19, za_args, 6U, &za_argc) || (za_argc != 3U)) {
-            ws63_debug_log("[ws63 dbg] usage: ZW101 ZA SEARCHRES <buf1|2> <start> <count>\\r\\n");
+            ws63_debug_log("[ws63 dbg] usage: ZW101 ZA SEARCHRES <buf1|2> <start> <count>\r\n");
             return;
         }
         if (((za_args[0] != 1U) && (za_args[0] != 2U)) || (za_args[1] > 65535U) || (za_args[2] > 65535U)) {
-            ws63_debug_log("[ws63 dbg] invalid SEARCHRES args\\r\\n");
+            ws63_debug_log("[ws63 dbg] invalid SEARCHRES args\r\n");
             return;
         }
 
@@ -972,7 +972,7 @@ static void ws63_debug_exec_command(const char *line)
             &za_page_id,
             &za_score,
             &za_ack);
-        ws63_debug_log("[ws63 dbg] ZW101 ZA SEARCHRES ret=0x%x ack=0x%02x id=%u score=%u\\r\\n",
+        ws63_debug_log("[ws63 dbg] ZW101 ZA SEARCHRES ret=0x%x ack=0x%02x id=%u score=%u\r\n",
             (unsigned int)ret,
             (unsigned int)za_ack,
             (unsigned int)za_page_id,
@@ -982,11 +982,11 @@ static void ws63_debug_exec_command(const char *line)
 
     if (strncmp(cmd, "ZW101 ZA LOGINLIGHT ", 20) == 0) {
         if (!ws63_debug_parse_u32_tokens(cmd + 20, za_args, 6U, &za_argc) || (za_argc != 4U)) {
-            ws63_debug_log("[ws63 dbg] usage: ZW101 ZA LOGINLIGHT <wait> <press2|3> <id> <dup0|1>\\r\\n");
+            ws63_debug_log("[ws63 dbg] usage: ZW101 ZA LOGINLIGHT <wait> <press2|3> <id> <dup0|1>\r\n");
             return;
         }
         if (((za_args[1] != 2U) && (za_args[1] != 3U)) || (za_args[2] > 65535U) || (za_args[3] > 1U)) {
-            ws63_debug_log("[ws63 dbg] invalid LOGINLIGHT args\\r\\n");
+            ws63_debug_log("[ws63 dbg] invalid LOGINLIGHT args\r\n");
             return;
         }
 
@@ -996,7 +996,7 @@ static void ws63_debug_exec_command(const char *line)
             (uint16_t)za_args[2],
             (uint8_t)za_args[3],
             &za_ack);
-        ws63_debug_log("[ws63 dbg] ZW101 ZA LOGINLIGHT ret=0x%x ack=0x%02x\\r\\n",
+        ws63_debug_log("[ws63 dbg] ZW101 ZA LOGINLIGHT ret=0x%x ack=0x%02x\r\n",
             (unsigned int)ret,
             (unsigned int)za_ack);
         return;
@@ -1004,11 +1004,11 @@ static void ws63_debug_exec_command(const char *line)
 
     if (strncmp(cmd, "ZW101 ZA SEARCHECHO ", 20) == 0) {
         if (!ws63_debug_parse_u32_tokens(cmd + 20, za_args, 6U, &za_argc) || (za_argc != 3U)) {
-            ws63_debug_log("[ws63 dbg] usage: ZW101 ZA SEARCHECHO <wait> <start> <count>\\r\\n");
+            ws63_debug_log("[ws63 dbg] usage: ZW101 ZA SEARCHECHO <wait> <start> <count>\r\n");
             return;
         }
         if ((za_args[1] > 65535U) || (za_args[2] > 65535U)) {
-            ws63_debug_log("[ws63 dbg] invalid SEARCHECHO args\\r\\n");
+            ws63_debug_log("[ws63 dbg] invalid SEARCHECHO args\r\n");
             return;
         }
 
@@ -1021,7 +1021,7 @@ static void ws63_debug_exec_command(const char *line)
             &za_page_id,
             &za_score,
             &za_ack);
-        ws63_debug_log("[ws63 dbg] ZW101 ZA SEARCHECHO ret=0x%x ack=0x%02x id=%u score=%u\\r\\n",
+        ws63_debug_log("[ws63 dbg] ZW101 ZA SEARCHECHO ret=0x%x ack=0x%02x id=%u score=%u\r\n",
             (unsigned int)ret,
             (unsigned int)za_ack,
             (unsigned int)za_page_id,
@@ -1032,25 +1032,25 @@ static void ws63_debug_exec_command(const char *line)
     if (strcmp(cmd, "ZW101 ZA TERM") == 0) {
         za_ack = 0xFFU;
         ret = ws63_task_zw101_za_terminate(&za_ack);
-        ws63_debug_log("[ws63 dbg] ZW101 ZA TERM ret=0x%x ack=0x%02x\\r\\n",
+        ws63_debug_log("[ws63 dbg] ZW101 ZA TERM ret=0x%x ack=0x%02x\r\n",
             (unsigned int)ret,
             (unsigned int)za_ack);
         return;
     }
 
     if (strcmp(cmd, "ZW101 STAT") == 0) {
-        ws63_debug_log("[ws63 dbg] ZW101 subport=%u\\r\\n", (unsigned int)ZW101_SUBPORT);
+        ws63_debug_log("[ws63 dbg] ZW101 subport=%u\r\n", (unsigned int)ZW101_SUBPORT);
         return;
     }
 
     if (strncmp(cmd, "ZW101 RAW ", 10) == 0) {
         if (!ws63_debug_parse_hex_bytes(cmd + 10, raw_buf, sizeof(raw_buf), &raw_len)) {
-            ws63_debug_log("[ws63 dbg] invalid ZW101 raw hex, example: EF 01 FF FF\\r\\n");
+            ws63_debug_log("[ws63 dbg] invalid ZW101 raw hex, example: EF 01 FF FF\r\n");
             return;
         }
 
         ret = ws63_task_zw101_send_raw(raw_buf, raw_len);
-        ws63_debug_log("[ws63 dbg] ZW101 RAW len=%u ret=0x%x\\r\\n",
+        ws63_debug_log("[ws63 dbg] ZW101 RAW len=%u ret=0x%x\r\n",
             (unsigned int)raw_len,
             (unsigned int)ret);
         return;
@@ -1058,39 +1058,39 @@ static void ws63_debug_exec_command(const char *line)
 
     if (strncmp(cmd, "MOTOR FWD ", 10) == 0) {
         if (!ws63_debug_parse_duty(cmd + 10, &duty)) {
-            ws63_debug_log("[ws63 dbg] invalid duty, expect 0~100\\r\\n");
+            ws63_debug_log("[ws63 dbg] invalid duty, expect 0~100\r\n");
             return;
         }
         ret = ws63_task_motor_forward(duty);
-        ws63_debug_log("[ws63 dbg] MOTOR FWD %u ret=0x%x\\r\\n", (unsigned int)duty, (unsigned int)ret);
+        ws63_debug_log("[ws63 dbg] MOTOR FWD %u ret=0x%x\r\n", (unsigned int)duty, (unsigned int)ret);
         ws63_debug_dump_motor_status("forward");
         return;
     }
 
     if (strncmp(cmd, "MOTOR REV ", 10) == 0) {
         if (!ws63_debug_parse_duty(cmd + 10, &duty)) {
-            ws63_debug_log("[ws63 dbg] invalid duty, expect 0~100\\r\\n");
+            ws63_debug_log("[ws63 dbg] invalid duty, expect 0~100\r\n");
             return;
         }
         ret = ws63_task_motor_reverse(duty);
-        ws63_debug_log("[ws63 dbg] MOTOR REV %u ret=0x%x\\r\\n", (unsigned int)duty, (unsigned int)ret);
+        ws63_debug_log("[ws63 dbg] MOTOR REV %u ret=0x%x\r\n", (unsigned int)duty, (unsigned int)ret);
         ws63_debug_dump_motor_status("reverse");
         return;
     }
 
     if (strncmp(cmd, "MOTOR DUTY ", 11) == 0) {
         if (!ws63_debug_parse_duty(cmd + 11, &duty)) {
-            ws63_debug_log("[ws63 dbg] invalid duty, expect 0~100\\r\\n");
+            ws63_debug_log("[ws63 dbg] invalid duty, expect 0~100\r\n");
             return;
         }
         ret = ws63_task_motor_set_duty(duty);
-        ws63_debug_log("[ws63 dbg] MOTOR DUTY %u ret=0x%x\\r\\n", (unsigned int)duty, (unsigned int)ret);
+        ws63_debug_log("[ws63 dbg] MOTOR DUTY %u ret=0x%x\r\n", (unsigned int)duty, (unsigned int)ret);
         ws63_debug_dump_motor_status("duty");
         return;
     }
 
-    ws63_debug_log("[ws63 dbg] unknown command: %s\\r\\n", cmd);
-    ws63_debug_log("[ws63 dbg] type HELP for command list\\r\\n");
+    ws63_debug_log("[ws63 dbg] unknown command: %s\r\n", cmd);
+    ws63_debug_log("[ws63 dbg] type HELP for command list\r\n");
 }
 
 /**
@@ -1114,18 +1114,18 @@ static void ws63_debug_uart_cmd_init(void)
 
     ret = ws63_debug_uart_init(g_ws63_debug_uart_rx_buf, sizeof(g_ws63_debug_uart_rx_buf));
     if (ret != ERRCODE_SUCC) {
-        osal_printk("[wk2114 final task] debug uart init fail, ret=0x%x\\r\\n", (unsigned int)ret);
+        osal_printk("[wk2114 final task] debug uart init fail, ret=0x%x\r\n", (unsigned int)ret);
         return;
     }
 
     ret = ws63_debug_uart_register_rx_callback(ws63_debug_uart_rx_callback, 1U);
     if (ret != ERRCODE_SUCC) {
-        osal_printk("[wk2114 final task] debug uart cb reg fail, ret=0x%x\\r\\n", (unsigned int)ret);
+        osal_printk("[wk2114 final task] debug uart cb reg fail, ret=0x%x\r\n", (unsigned int)ret);
         return;
     }
 
     g_ws63_debug_uart_ready = 1U;
-    ws63_debug_log("[ws63 dbg] uart ready bus=%u baud=%u tx=%u rx=%u\\r\\n",
+    ws63_debug_log("[ws63 dbg] uart ready bus=%u baud=%u tx=%u rx=%u\r\n",
         (unsigned int)WS63_DEBUG_UART_BUS,
         (unsigned int)WS63_DEBUG_UART_BAUD,
         (unsigned int)WS63_DEBUG_UART_TX_PIN,
@@ -1149,13 +1149,13 @@ static void ws63_debug_uart_cmd_process(uint32_t now_ms)
 
     ws63_debug_take_async_flags(&rx_error, &too_long, &overflow);
     if (rx_error == 1U) {
-        ws63_debug_log("[ws63 dbg] uart rx error\\r\\n");
+        ws63_debug_log("[ws63 dbg] uart rx error\r\n");
     }
     if (too_long == 1U) {
-        ws63_debug_log("[ws63 dbg] command too long, dropped\\r\\n");
+        ws63_debug_log("[ws63 dbg] command too long, dropped\r\n");
     }
     if (overflow == 1U) {
-        ws63_debug_log("[ws63 dbg] command queue overflow, dropped\\r\\n");
+        ws63_debug_log("[ws63 dbg] command queue overflow, dropped\r\n");
     }
 
     while (ws63_debug_queue_pop_line(cmd_line, sizeof(cmd_line)) == 1U) {

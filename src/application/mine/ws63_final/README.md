@@ -59,6 +59,25 @@ ws63_final/
 
 ## 8. 任务维护记录
 
+### 2026-04-10: 调试命令日志换行格式修复（\r\n 字面量问题）
+
+变更摘要：
+- 修复 `ws63_final` 调试命令日志中错误使用 `\\r\\n` 字面量的问题，统一改为 `\r\n` 控制符输出。
+- 修复后 `uart ready` 与 `command list` 等日志按行显示，不再把 `\r\n` 作为可见字符打印。
+- 本次仅调整日志格式，不改动命令解析、驱动交互与业务逻辑。
+
+影响文件：
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_debug.c`
+- `src/application/mine/ws63_final/README.md`
+
+验证结果：
+- 命令：`cd /home/xixi/code/fbb_ws63_20260114/src && python3 build.py -c ws63-liteos-app`
+- 结果：构建通过（`Build target:ws63_liteos_app success`）。
+
+后续事项：
+- 上板观察 `ws63 dbg` 启动日志应逐行换行显示；
+- 若现场串口工具仍显示转义文本，需检查上位机是否启用了“显示控制字符转义”选项。
+
 ### 2026-04-10: ZW101 初始化超时最小修复（子口波特率对齐 57600）
 
 变更摘要：
