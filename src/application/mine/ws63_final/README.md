@@ -59,6 +59,26 @@ ws63_final/
 
 ## 8. 任务维护记录
 
+### 2026-04-10: WK2114 主口读路径防卡死修复（规避 uapi_uart_read 长轮询）
+
+变更摘要：
+- 修复 `ws63_final` 主口 UART 读路径在当前驱动配置下可能出现的长轮询卡死问题，避免 `ws63_wk_task` 持续 100% 占用后触发 NMI 重启。
+- 在 BSP 层新增“按字节 + FIFO 非空预判 + 软超时”的安全读取封装，替换主口/调试口原有直接 `uapi_uart_read` 调用。
+- 重写主口 `flush_rx` 为安全非阻塞逐字节清空，避免 `len>1` 读取在无数据时陷入不可退出轮询。
+- 保持 `Driver/App` 协议流程不变，仅修复底层读取语义与超时行为。
+
+影响文件：
+- `src/application/mine/ws63_final/BSP/ws63_final_bsp_uart.c`
+- `src/application/mine/ws63_final/README.md`
+
+验证结果：
+- 命令：`cd /home/xixi/code/fbb_ws63_20260114/src && python3 build.py ws63-liteos-app`
+- 结果：构建通过（`Build target:ws63_liteos_app success`）。
+
+后续事项：
+- 上板重点观察 `ld2402_init` 阶段是否不再出现 `ws63_wk_task` 长时间 100% 占用与 NMI 重启。
+- 若现场仍有偶发超时，可再补充 `ws63_bsp_host_uart_read` 的超时日志（开始/结束/返回字节数）用于进一步定位链路抖动。
+
 ### 2026-04-10: 调试命令日志换行格式修复（\r\n 字面量问题）
 
 变更摘要：
