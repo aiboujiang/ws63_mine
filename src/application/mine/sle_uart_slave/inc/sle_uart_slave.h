@@ -100,12 +100,12 @@ extern "C" {
 /**
  * @brief UART2 挂载 LD2402 模式开关，1=启用，0=禁用。
  */
-#define MINE_UART2_MODE_LD2402_ENABLE 1
+#define MINE_UART2_MODE_LD2402_ENABLE 0
 
 /**
  * @brief UART2 挂载 ZW101 模式开关，1=启用，0=禁用。
  */
-#define MINE_UART2_MODE_ZW101_ENABLE 0
+#define MINE_UART2_MODE_ZW101_ENABLE 1
 
 /* UART2 三种用途必须互斥：Camera / LD2402 / ZW101 仅可启用一项。 */
 #if ((MINE_UART2_MODE_CAMERA_ENABLE != 0) && (MINE_UART2_MODE_CAMERA_ENABLE != 1))

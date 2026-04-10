@@ -57,7 +57,10 @@ extern "C" {
 #define ZW101_SUBPORT  1U
 #define LD2402_SUBPORT 2U
 
-#define WS63_SUBPORT1_BAUD      115200U
+/* ZW101 模组默认波特率：与 sle_uart_slave 现网配置保持一致。 */
+#define WS63_ZW101_BAUD         57600U
+
+#define WS63_SUBPORT1_BAUD      WS63_ZW101_BAUD
 #define WS63_SUBPORT2_BAUD      115200U
 #define WS63_SUBPORT3_BAUD      115200U
 #define WS63_SUBPORT4_BAUD      115200U

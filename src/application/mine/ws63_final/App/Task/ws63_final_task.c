@@ -163,6 +163,7 @@ static void ws63_default_rx_callback(uint8_t sub_port, const uint8_t *data, uint
 static errcode_t ws63_init_enabled_subports(void)
 {
     uint8_t sub_port;
+    uint32_t sub_baud;
     errcode_t ret;
 
     for (sub_port = 1U; sub_port <= WS63_SUBPORT_MAX; sub_port++) {
@@ -170,8 +171,8 @@ static errcode_t ws63_init_enabled_subports(void)
             continue;
         }
 
-        ret = wk2114_subport_init(sub_port,
-            ws63_get_subport_baud(sub_port));
+        sub_baud = ws63_get_subport_baud(sub_port);
+        ret = wk2114_subport_init(sub_port, sub_baud);
         if (ret != ERRCODE_SUCC) {
             osal_printk("[wk2114 final task] sub-uart%u init fail\r\n", (unsigned int)sub_port);
             return ret;
@@ -179,6 +180,10 @@ static errcode_t ws63_init_enabled_subports(void)
 
         /* 针对不同外设进行初始化和回调绑定。 */
         if ((sub_port == ZW101_SUBPORT) && (WS63_SLE_ZW101_ENABLE == 1U)) {
+            /* 启动时输出 ZW101 绑定子口与波特率，便于现场核对配置是否生效。 */
+            osal_printk("[wk2114 final task] ZW101 cfg sub-uart%u baud=%u\r\n",
+                (unsigned int)sub_port,
+                (unsigned int)sub_baud);
             if (zw101_init(sub_port) == ERRCODE_SUCC) {
                 g_ws63_rx_cb[sub_port] = zw101_process_data;
             } else {

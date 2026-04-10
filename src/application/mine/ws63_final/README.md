@@ -59,6 +59,26 @@ ws63_final/
 
 ## 8. 任务维护记录
 
+### 2026-04-10: ZW101 初始化超时最小修复（子口波特率对齐 57600）
+
+变更摘要：
+- 修复 `ws63_final` 中 ZW101 子口默认波特率与模组默认值不一致的问题：将子口1（ZW101）波特率从 `115200` 对齐到 `57600`。
+- 新增 ZW101 初始化配置日志，启动时打印 `ZW101 cfg sub-uartX baud=Y`，便于现场快速确认配置是否生效。
+- 保持现有握手流程与 ACK 解析策略不变（仍为 `0x53 -> 0x35 -> check_sensor` 路径），确保本轮改动风险最小。
+
+影响文件：
+- `src/application/mine/ws63_final/Config/ws63_final_config.h`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task.c`
+- `src/application/mine/ws63_final/README.md`
+
+验证结果：
+- 命令：`cd /home/xixi/code/fbb_ws63_20260114/src && python3 build.py -c ws63-liteos-app`
+- 结果：构建通过（`Build target:ws63_liteos_app success`）。
+
+后续事项：
+- 上板后重点核对日志：`sub-uart1 init ok, baud=57600` 与 `ZW101 cfg sub-uart1 baud=57600`；
+- 若仍出现 `ack=0x26`，再进入第二阶段（双波特率探测 + 接收统计日志）排查物理层差异。
+
 ### 2026-04-10: ZW101/LD2402 初始化失败诊断增强（握手命令拆分 + 失败观测）
 
 变更摘要：
