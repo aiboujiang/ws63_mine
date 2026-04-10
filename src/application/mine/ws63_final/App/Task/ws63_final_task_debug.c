@@ -174,7 +174,8 @@ static int32_t ws63_debug_normalize_rpm(ws63_motor_state_t state, int32_t rpm_ra
         return -rpm_abs;
     }
 
-    return rpm_abs;
+    /* STOP/BRAKE 阶段保留编码器原始符号，便于观察电机惯性衰减方向。 */
+    return rpm_raw;
 }
 
 /**

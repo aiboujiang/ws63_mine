@@ -59,6 +59,27 @@ ws63_final/
 
 ## 8. 任务维护记录
 
+### 2026-04-10: 串口实测日志问题修复（RGB 默认可用 + STOP 符号显示）
+
+变更摘要：
+- 根据现场串口日志定位 `RGB INIT/SET/DEMO` 返回 `0xffffffff` 的根因：`WS63_RGB_ENABLE` 处于关闭配置。
+- 将 `WS63_RGB_ENABLE` 默认值从 `0` 调整为 `1`，使 `RGB INIT` 等调试命令在默认构建下可直接联调。
+- 修正电机状态日志的 RPM 归一化逻辑：在 `STOP/BRAKE` 状态下保留编码器原始符号，便于观察反转后惯性衰减方向。
+- 保持分层边界不变，仅修改配置层与 Task 调试显示逻辑。
+
+影响文件：
+- `src/application/mine/ws63_final/Config/ws63_final_config.h`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_debug.c`
+- `src/application/mine/ws63_final/README.md`
+
+验证结果：
+- 命令：`cd /home/xixi/code/fbb_ws63_20260114/src && python3 build.py ws63-liteos-app`
+- 结果：构建通过（`Build target:ws63_liteos_app success`）。
+
+后续事项：
+- 上板建议复测：`RGB INIT` -> `RGB SET 255 0 0` -> `RGB DEMO ON`；
+- 反转后执行 `MOTOR STOP`，确认短暂余转期间 `motor_rpm/out_rps` 符号与实际方向一致。
+
 ### 2026-04-09: ZW101 ZA 兼容命令调试接入 + 指令族函数补齐
 
 变更摘要：
