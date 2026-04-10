@@ -453,7 +453,11 @@ static errcode_t zw101_send_cmd_wait(uint8_t cmd,
         return ret;
     }
 
-    return zw101_wait_ack(timeout_ms, filter_autologin_progress, out_result);
+    ret = zw101_wait_ack(timeout_ms, filter_autologin_progress, out_result);
+    if ((ret != ERRCODE_SUCC) && (out_result != NULL) && (out_result->ack_code == ZW101_ACK_TIMEOUT)) {
+        osal_printk("[zw101] cmd 0x%02X wait ack timeout\r\n", (unsigned int)cmd);
+    }
+    return ret;
 }
 
 /**
@@ -510,6 +514,7 @@ static errcode_t zw101_check_ready(void)
 
 errcode_t zw101_init(uint8_t sub_port)
 {
+    errcode_t ret;
     uint8_t retry;
     uint8_t ack;
 
@@ -525,9 +530,21 @@ errcode_t zw101_init(uint8_t sub_port)
     zw101_drain_uart();
 
     for (retry = 0U; retry < 3U; retry++) {
-        if (zw101_za_get_echo(&ack) == ERRCODE_SUCC) {
+        ack = 0xFFU;
+        ret = zw101_za_get_echo(&ack);
+        osal_printk("[zw101] init try%u echo ret=0x%x ack=0x%02X\r\n",
+            (unsigned int)(retry + 1U),
+            (unsigned int)ret,
+            (unsigned int)ack);
+        if (ret == ERRCODE_SUCC) {
             if ((ack == ZW101_ACK_GET_ECHO_READY) || (ack == ZW101_ACK_OK)) {
-                if (zw101_maint_check_sensor(&ack) == ERRCODE_SUCC) {
+                ack = 0xFFU;
+                ret = zw101_maint_check_sensor(&ack);
+                osal_printk("[zw101] init try%u check_sensor ret=0x%x ack=0x%02X\r\n",
+                    (unsigned int)(retry + 1U),
+                    (unsigned int)ret,
+                    (unsigned int)ack);
+                if (ret == ERRCODE_SUCC) {
                     if (ack == ZW101_ACK_OK) {
                         g_zw101_ready = 1U;
                         osal_printk("[zw101] init ok (echo=0x%02X sensor=0x%02X)\r\n",
@@ -540,9 +557,21 @@ errcode_t zw101_init(uint8_t sub_port)
         }
 
         /* 兼容路径：若 ZA 握手不通，退回标准握手 0x35 再做传感器检查。 */
-        if (zw101_maint_handshake(&ack) == ERRCODE_SUCC) {
+        ack = 0xFFU;
+        ret = zw101_maint_handshake(&ack);
+        osal_printk("[zw101] init try%u handshake ret=0x%x ack=0x%02X\r\n",
+            (unsigned int)(retry + 1U),
+            (unsigned int)ret,
+            (unsigned int)ack);
+        if (ret == ERRCODE_SUCC) {
             if (ack == ZW101_ACK_OK) {
-                if (zw101_maint_check_sensor(&ack) == ERRCODE_SUCC) {
+                ack = 0xFFU;
+                ret = zw101_maint_check_sensor(&ack);
+                osal_printk("[zw101] init try%u check_sensor ret=0x%x ack=0x%02X\r\n",
+                    (unsigned int)(retry + 1U),
+                    (unsigned int)ret,
+                    (unsigned int)ack);
+                if (ret == ERRCODE_SUCC) {
                     if (ack == ZW101_ACK_OK) {
                         g_zw101_ready = 1U;
                         osal_printk("[zw101] init ok (handshake+sensor)\r\n");

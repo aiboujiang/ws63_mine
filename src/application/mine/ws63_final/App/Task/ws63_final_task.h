@@ -197,6 +197,22 @@ errcode_t ws63_task_ld2402_send_raw(const uint8_t *data, uint16_t len);
 errcode_t ws63_task_zw101_reinit(void);
 
 /**
+ * @brief 执行 ZW101 标准握手命令（0x35）。
+ *
+ * @param ack_out 输出 ACK 码，可为空。
+ * @return errcode_t ERRCODE_SUCC=握手成功，其他=失败。
+ */
+errcode_t ws63_task_zw101_handshake(uint8_t *ack_out);
+
+/**
+ * @brief 执行 ZW101 传感器检测命令（0x36）。
+ *
+ * @param ack_out 输出 ACK 码，可为空。
+ * @return errcode_t ERRCODE_SUCC=检测成功，其他=失败。
+ */
+errcode_t ws63_task_zw101_check_sensor(uint8_t *ack_out);
+
+/**
  * @brief 向 ZW101 发送原始命令帧。
  *
  * @param data 命令缓冲区。

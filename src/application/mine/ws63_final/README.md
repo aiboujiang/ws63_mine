@@ -59,6 +59,32 @@ ws63_final/
 
 ## 8. 任务维护记录
 
+### 2026-04-10: ZW101/LD2402 初始化失败诊断增强（握手命令拆分 + 失败观测）
+
+变更摘要：
+- 将调试命令中的 `ZW101 HANDSHAKE` 从 `INIT` 别名改为“仅发送 0x35 握手并回显 ACK”，便于快速判断基础链路是否可达。
+- 新增 `ZW101 CHECKSENSOR` 命令（0x36），用于与握手命令配合定位“握手成功但传感器检测失败”的场景。
+- ZW101 驱动补充初始化分步日志：每轮打印 `echo/handshake/check_sensor` 的 `ret` 与 `ack`，并在命令等待 ACK 超时时输出命令码。
+- LD2402 驱动补充初始化分步日志：每轮打印 `rx_total/valid_frame/enable_ack`，用于区分“完全无回包”与“收到帧但非目标 ACK”。
+- 同步更新调试手册，新增 `ack=0x26`（ACK 超时）释义与排查顺序。
+
+影响文件：
+- `src/application/mine/ws63_final/App/Task/ws63_final_task.h`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_sensor_bridge.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_debug.c`
+- `src/application/mine/ws63_final/Driver/zw101.c`
+- `src/application/mine/ws63_final/Driver/ld2402.c`
+- `src/application/mine/ws63_final/DEBUG_COMMANDS.md`
+- `src/application/mine/ws63_final/README.md`
+
+验证结果：
+- 命令：`cd /home/xixi/code/fbb_ws63_20260114/src && python3 build.py ws63-liteos-app`
+- 结果：构建通过（`Build target:ws63_liteos_app success`）。
+
+后续事项：
+- 上板建议先执行 `ZW101 HANDSHAKE`、`ZW101 CHECKSENSOR`、`ZW101 ZA ECHO`，并结合新增 `init try` 日志判断是否为“串口无回包”。
+- 对 LD2402 建议关注 `init tryN rx_total`，若连续为 `0`，优先排查模块供电、TX/RX 交叉与子口连线。
+
 ### 2026-04-10: 串口实测日志问题修复（RGB 默认可用 + STOP 符号显示）
 
 变更摘要：

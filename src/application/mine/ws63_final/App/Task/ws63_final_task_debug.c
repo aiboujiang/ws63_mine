@@ -608,7 +608,9 @@ static void ws63_debug_print_help(void)
     ws63_debug_log("[ws63 dbg]   LD2401 INIT (alias LD2402)\\r\\n");
     ws63_debug_log("[ws63 dbg]   LD2401 RAW <HEX...>\\r\\n");
     ws63_debug_log("[ws63 dbg]   LD2401 STAT\\r\\n");
-    ws63_debug_log("[ws63 dbg]   ZW101 INIT|HANDSHAKE\\r\\n");
+    ws63_debug_log("[ws63 dbg]   ZW101 INIT\\r\\n");
+    ws63_debug_log("[ws63 dbg]   ZW101 HANDSHAKE\\r\\n");
+    ws63_debug_log("[ws63 dbg]   ZW101 CHECKSENSOR\\r\\n");
     ws63_debug_log("[ws63 dbg]   ZW101 RAW <HEX...>\\r\\n");
     ws63_debug_log("[ws63 dbg]   ZW101 STAT\\r\\n");
     ws63_debug_log("[ws63 dbg]   ZW101 ZA HELP\\r\\n");
@@ -855,9 +857,27 @@ static void ws63_debug_exec_command(const char *line)
         return;
     }
 
-    if ((strcmp(cmd, "ZW101 INIT") == 0) || (strcmp(cmd, "ZW101 HANDSHAKE") == 0)) {
+    if (strcmp(cmd, "ZW101 INIT") == 0) {
         ret = ws63_task_zw101_reinit();
         ws63_debug_log("[ws63 dbg] ZW101 INIT ret=0x%x\\r\\n", (unsigned int)ret);
+        return;
+    }
+
+    if (strcmp(cmd, "ZW101 HANDSHAKE") == 0) {
+        za_ack = 0xFFU;
+        ret = ws63_task_zw101_handshake(&za_ack);
+        ws63_debug_log("[ws63 dbg] ZW101 HANDSHAKE ret=0x%x ack=0x%02x\\r\\n",
+            (unsigned int)ret,
+            (unsigned int)za_ack);
+        return;
+    }
+
+    if (strcmp(cmd, "ZW101 CHECKSENSOR") == 0) {
+        za_ack = 0xFFU;
+        ret = ws63_task_zw101_check_sensor(&za_ack);
+        ws63_debug_log("[ws63 dbg] ZW101 CHECKSENSOR ret=0x%x ack=0x%02x\\r\\n",
+            (unsigned int)ret,
+            (unsigned int)za_ack);
         return;
     }
 

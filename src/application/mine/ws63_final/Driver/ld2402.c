@@ -140,8 +140,11 @@ errcode_t ld2402_init(uint8_t sub_port)
     while (retry-- > 0) {
         uint8_t round;
         uint8_t drain_round;
+        uint8_t retry_index;
         bool has_valid_frame = false;
         bool has_enable_ack = false;
+
+        retry_index = (uint8_t)(LD2402_INIT_RETRY_MAX - retry);
 
         // 清空接收缓存（带上限，避免读回异常时卡死）
         for (drain_round = 0U; drain_round < LD2402_DRAIN_MAX_ROUND; drain_round++) {
@@ -180,6 +183,12 @@ errcode_t ld2402_init(uint8_t sub_port)
 
             ws63_bsp_sleep_ms(LD2402_INIT_POLL_GAP_MS);
         }
+
+        osal_printk("[ld2402] init try%u rx_total=%u valid_frame=%u enable_ack=%u\r\n",
+            (unsigned int)retry_index,
+            (unsigned int)rx_total,
+            (unsigned int)has_valid_frame,
+            (unsigned int)has_enable_ack);
 
         if (has_valid_frame) {
             if (has_enable_ack) {

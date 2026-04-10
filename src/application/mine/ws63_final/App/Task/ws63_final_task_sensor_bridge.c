@@ -54,6 +54,36 @@ errcode_t ws63_task_zw101_reinit(void)
 }
 
 /**
+ * @brief 执行 ZW101 标准握手命令（0x35）。
+ */
+errcode_t ws63_task_zw101_handshake(uint8_t *ack_out)
+{
+    if (!ws63_is_subport_enabled(ZW101_SUBPORT)) {
+        if (ack_out != NULL) {
+            *ack_out = 0xFFU;
+        }
+        return ERRCODE_FAIL;
+    }
+
+    return zw101_maint_handshake(ack_out);
+}
+
+/**
+ * @brief 执行 ZW101 传感器检测命令（0x36）。
+ */
+errcode_t ws63_task_zw101_check_sensor(uint8_t *ack_out)
+{
+    if (!ws63_is_subport_enabled(ZW101_SUBPORT)) {
+        if (ack_out != NULL) {
+            *ack_out = 0xFFU;
+        }
+        return ERRCODE_FAIL;
+    }
+
+    return zw101_maint_check_sensor(ack_out);
+}
+
+/**
  * @brief 向 ZW101 发送原始命令帧。
  */
 errcode_t ws63_task_zw101_send_raw(const uint8_t *data, uint16_t len)
