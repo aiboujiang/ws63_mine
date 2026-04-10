@@ -27,8 +27,8 @@ errcode_t ws63_start(void)
     ret = ws63_os_start_task("ws63_final_task",
         ws63_task_entry,
         0,
-        WS63_TASK_STACK_SIZE,
-        WS63_TASK_PRIORITY);
+        WS63_MGR_TASK_STACK_SIZE,
+        WS63_MGR_TASK_PRIORITY);
     if (ret != ERRCODE_SUCC) {
         osal_printk("[wk2114 final main] start task fail\r\n");
         return ret;

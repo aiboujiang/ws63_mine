@@ -8,9 +8,53 @@
 
 #include <stdint.h>
 
+#include "ws63_final_config.h"
 #include "ws63_final_task.h"
 
 #define WS63_SUBPORT_MAX 4U
+
+/* WK2114 发送队列消息：统一封装“目标子口 + 数据”请求。 */
+typedef struct {
+	uint8_t sub_port;
+	uint16_t len;
+	uint8_t data[WS63_TASK_QUEUE_PAYLOAD_MAX];
+} ws63_wk2114_tx_msg_t;
+
+/* WK2114 上行到 SLE 的队列消息：带子口标识以便 SLE 打标签转发。 */
+typedef struct {
+	uint8_t sub_port;
+	uint16_t len;
+	uint8_t data[WS63_TASK_QUEUE_PAYLOAD_MAX];
+} ws63_sle_uplink_msg_t;
+
+/* RGB 控制命令：由调试命令/API 投递，RGB 任务串行执行。 */
+typedef enum {
+	WS63_RGB_CMD_REINIT = 0,
+	WS63_RGB_CMD_SET_COLOR,
+	WS63_RGB_CMD_SET_DEMO,
+	WS63_RGB_CMD_OFF
+} ws63_rgb_cmd_type_t;
+
+typedef struct {
+	ws63_rgb_cmd_type_t type;
+	uint8_t r;
+	uint8_t g;
+	uint8_t b;
+	uint8_t enable;
+} ws63_rgb_ctrl_msg_t;
+
+/* 蜂鸣器控制命令：通过消息队列串行下发到硬件任务。 */
+typedef enum {
+	WS63_BEEP_CMD_ON = 0,
+	WS63_BEEP_CMD_OFF,
+	WS63_BEEP_CMD_SET_VOLUME
+} ws63_beep_cmd_type_t;
+
+typedef struct {
+	ws63_beep_cmd_type_t type;
+	uint16_t freq_hz;
+	uint8_t volume_percent;
+} ws63_beep_ctrl_msg_t;
 
 /**
  * @brief 初始化 RGB 演示链路。
@@ -23,6 +67,13 @@ void ws63_rgb_demo_init(void);
  * @param now_ms 当前系统毫秒 Tick。
  */
 void ws63_rgb_demo_process(uint32_t now_ms);
+
+/**
+ * @brief 启动 RGB 独立任务。
+ *
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_rgb_task_start(void);
 
 /**
  * @brief 初始化电机与编码器能力。
@@ -40,5 +91,37 @@ uint8_t ws63_task_motor_encoder_is_ready(void);
  * @brief 初始化蜂鸣器能力。
  */
 void ws63_task_buzzer_init(void);
+
+/**
+ * @brief 启动蜂鸣器独立任务。
+ *
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_beep_task_start(void);
+
+/**
+ * @brief 向 WK2114 发送队列投递消息。
+ */
+errcode_t ws63_task_post_wk2114_tx(const ws63_wk2114_tx_msg_t *msg, uint32_t timeout);
+
+/**
+ * @brief 向 SLE 上行队列投递消息。
+ */
+errcode_t ws63_task_post_sle_uplink(const ws63_sle_uplink_msg_t *msg, uint32_t timeout);
+
+/**
+ * @brief 获取 WK2114 发送队列中的一条消息。
+ */
+errcode_t ws63_task_recv_wk2114_tx(ws63_wk2114_tx_msg_t *msg, uint32_t timeout);
+
+/**
+ * @brief 获取 SLE 上行队列中的一条消息。
+ */
+errcode_t ws63_task_recv_sle_uplink(ws63_sle_uplink_msg_t *msg, uint32_t timeout);
+
+/**
+ * @brief 查询 WK2114 驱动链路是否就绪。
+ */
+uint8_t ws63_task_wk2114_is_ready(void);
 
 #endif

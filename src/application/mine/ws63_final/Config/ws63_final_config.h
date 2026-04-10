@@ -75,6 +75,38 @@ extern "C" {
 #define WS63_TASK_STACK_SIZE    2048U
 #define WS63_TASK_PRIORITY      26U
 
+/* RTOS 多任务拆分参数：管理任务负责调试与系统保活。 */
+#define WS63_MGR_TASK_STACK_SIZE        WS63_TASK_STACK_SIZE
+#define WS63_MGR_TASK_PRIORITY          WS63_TASK_PRIORITY
+
+/* WK2114 通信任务：负责子口轮询收发与驱动状态维护。 */
+#define WS63_WK2114_TASK_STACK_SIZE     3072U
+#define WS63_WK2114_TASK_PRIORITY       24U
+#define WS63_WK2114_TASK_POLL_MS        5U
+#define WS63_WK2114_RETRY_GAP_MS        1000U
+
+/* SLE 协议任务：负责协议状态机与上下行桥接。 */
+#define WS63_SLE_TASK_STACK_SIZE        4096U
+#define WS63_SLE_TASK_PRIORITY          25U
+#define WS63_SLE_TASK_POLL_MS           5U
+#define WS63_SLE_RETRY_GAP_MS           1000U
+
+/* RGB 渲染任务：负责演示模式与手动设色控制。 */
+#define WS63_RGB_TASK_STACK_SIZE        2048U
+#define WS63_RGB_TASK_PRIORITY          27U
+#define WS63_RGB_TASK_POLL_MS           10U
+
+/* 蜂鸣器任务：负责频率/音量/开关控制串行化。 */
+#define WS63_BEEP_TASK_STACK_SIZE       2048U
+#define WS63_BEEP_TASK_PRIORITY         27U
+
+/* 任务间队列参数：固定上限保证内存可控。 */
+#define WS63_TASK_QUEUE_PAYLOAD_MAX     WS63_SLE_SAFE_CHUNK_LEN
+#define WS63_WK2114_TX_QUEUE_DEPTH      16U
+#define WS63_SLE_UPLINK_QUEUE_DEPTH     16U
+#define WS63_RGB_CTRL_QUEUE_DEPTH       8U
+#define WS63_BEEP_CTRL_QUEUE_DEPTH      8U
+
 /* 调试输出节流周期。 */
 #define WS63_LOG_GAP_MS         1000U
 

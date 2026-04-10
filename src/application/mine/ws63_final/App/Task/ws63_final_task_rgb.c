@@ -27,7 +27,32 @@ static uint8_t g_ws63_rgb_color_index = 0U;
 static uint32_t g_ws63_rgb_last_switch_ms = 0U;
 /* 演示模式开关：命令手动设色时会自动关闭，避免颜色被周期任务覆盖。 */
 static uint8_t g_ws63_rgb_demo_enable = 0U;
+
+/* RGB 控制队列与任务状态。 */
+static unsigned long g_ws63_rgb_ctrl_queue = 0UL;
+static uint8_t g_ws63_rgb_task_started = 0U;
 #endif
+
+/**
+ * @brief 统一发送 RGB 控制消息。
+ */
+static errcode_t ws63_rgb_post_ctrl_msg(const ws63_rgb_ctrl_msg_t *msg, uint32_t timeout)
+{
+#if (WS63_RGB_ENABLE != 1U)
+    (void)msg;
+    (void)timeout;
+    return ERRCODE_FAIL;
+#else
+    if ((msg == NULL) || (g_ws63_rgb_ctrl_queue == 0UL)) {
+        return ERRCODE_FAIL;
+    }
+
+    return ws63_os_msg_queue_send(g_ws63_rgb_ctrl_queue,
+        msg,
+        (uint16_t)sizeof(ws63_rgb_ctrl_msg_t),
+        timeout);
+#endif
+}
 
 /**
  * @brief 初始化 RGB 演示链路。
@@ -89,6 +114,146 @@ void ws63_rgb_demo_process(uint32_t now_ms)
 }
 
 /**
+ * @brief 执行一条 RGB 控制命令。
+ */
+static void ws63_rgb_process_ctrl_msg(const ws63_rgb_ctrl_msg_t *msg)
+{
+#if (WS63_RGB_ENABLE == 1U)
+    errcode_t ret;
+    ws63_rgb_color_t color;
+
+    if (msg == NULL) {
+        return;
+    }
+
+    switch (msg->type) {
+        case WS63_RGB_CMD_REINIT:
+            ws63_rgb_demo_init();
+            break;
+        case WS63_RGB_CMD_SET_COLOR:
+            if (g_ws63_rgb_ready == 0U) {
+                break;
+            }
+            color.r = msg->r;
+            color.g = msg->g;
+            color.b = msg->b;
+            ret = ws63_rgb_ws2812_set_color(&color);
+            if (ret == ERRCODE_SUCC) {
+                g_ws63_rgb_demo_enable = 0U;
+            } else {
+                osal_printk("[wk2114 final task] rgb set fail, ret=0x%x\r\n", (unsigned int)ret);
+            }
+            break;
+        case WS63_RGB_CMD_SET_DEMO:
+            if (g_ws63_rgb_ready == 0U) {
+                break;
+            }
+            g_ws63_rgb_demo_enable = (msg->enable != 0U) ? 1U : 0U;
+            if (g_ws63_rgb_demo_enable == 1U) {
+                /* 开启演示后立即触发一次颜色切换。 */
+                g_ws63_rgb_last_switch_ms = ws63_os_tick_ms() - WS63_RGB_DEMO_INTERVAL_MS;
+            }
+            break;
+        case WS63_RGB_CMD_OFF:
+            if (g_ws63_rgb_ready == 0U) {
+                break;
+            }
+            color.r = 0U;
+            color.g = 0U;
+            color.b = 0U;
+            ret = ws63_rgb_ws2812_set_color(&color);
+            if (ret == ERRCODE_SUCC) {
+                g_ws63_rgb_demo_enable = 0U;
+            }
+            break;
+        default:
+            break;
+    }
+#else
+    (void)msg;
+#endif
+}
+
+/**
+ * @brief RGB 独立任务入口：串行处理控制命令并驱动演示周期。
+ */
+static void *ws63_rgb_task_entry(const char *arg)
+{
+#if (WS63_RGB_ENABLE == 1U)
+    ws63_rgb_ctrl_msg_t msg;
+
+    (void)arg;
+    ws63_rgb_demo_init();
+
+    while (1) {
+        uint32_t size;
+        uint32_t now_ms;
+
+        /* 每个周期尽量清空控制队列，保证命令响应实时性。 */
+        while (1) {
+            size = (uint32_t)sizeof(msg);
+            if (ws63_os_msg_queue_recv(g_ws63_rgb_ctrl_queue, &msg, &size, WS63_OS_NO_WAIT) != ERRCODE_SUCC) {
+                break;
+            }
+            ws63_rgb_process_ctrl_msg(&msg);
+        }
+
+        now_ms = ws63_os_tick_ms();
+        ws63_rgb_demo_process(now_ms);
+        ws63_os_sleep_ms(WS63_RGB_TASK_POLL_MS);
+    }
+#else
+    (void)arg;
+    while (1) {
+        ws63_os_sleep_ms(1000U);
+    }
+#endif
+
+    return NULL;
+}
+
+/**
+ * @brief 启动 RGB 独立任务。
+ */
+errcode_t ws63_rgb_task_start(void)
+{
+#if (WS63_RGB_ENABLE != 1U)
+    return ERRCODE_FAIL;
+#else
+    errcode_t ret;
+
+    if (g_ws63_rgb_task_started == 1U) {
+        return ERRCODE_SUCC;
+    }
+
+    ret = ws63_os_msg_queue_create("ws63_rgb_q",
+        WS63_RGB_CTRL_QUEUE_DEPTH,
+        (uint16_t)sizeof(ws63_rgb_ctrl_msg_t),
+        &g_ws63_rgb_ctrl_queue);
+    if (ret != ERRCODE_SUCC) {
+        osal_printk("[wk2114 final task] rgb queue create fail\r\n");
+        return ret;
+    }
+
+    ret = ws63_os_start_task("ws63_rgb_task",
+        ws63_rgb_task_entry,
+        0U,
+        WS63_RGB_TASK_STACK_SIZE,
+        WS63_RGB_TASK_PRIORITY);
+    if (ret != ERRCODE_SUCC) {
+        ws63_os_msg_queue_delete(g_ws63_rgb_ctrl_queue);
+        g_ws63_rgb_ctrl_queue = 0UL;
+        osal_printk("[wk2114 final task] rgb task start fail\r\n");
+        return ret;
+    }
+
+    g_ws63_rgb_task_started = 1U;
+    osal_printk("[wk2114 final task] rgb task start ok\r\n");
+    return ERRCODE_SUCC;
+#endif
+}
+
+/**
  * @brief 重新初始化 RGB 驱动并恢复演示模式。
  */
 errcode_t ws63_task_rgb_reinit(void)
@@ -96,8 +261,19 @@ errcode_t ws63_task_rgb_reinit(void)
 #if (WS63_RGB_ENABLE != 1U)
     return ERRCODE_FAIL;
 #else
-    ws63_rgb_demo_init();
-    return (g_ws63_rgb_ready == 1U) ? ERRCODE_SUCC : ERRCODE_FAIL;
+    ws63_rgb_ctrl_msg_t msg = {
+        .type = WS63_RGB_CMD_REINIT,
+        .r = 0U,
+        .g = 0U,
+        .b = 0U,
+        .enable = 0U
+    };
+
+    if (g_ws63_rgb_task_started == 0U) {
+        return ERRCODE_FAIL;
+    }
+
+    return ws63_rgb_post_ctrl_msg(&msg, WS63_OS_NO_WAIT);
 #endif
 }
 
@@ -112,18 +288,19 @@ errcode_t ws63_task_rgb_set_color(uint8_t r, uint8_t g, uint8_t b)
     (void)b;
     return ERRCODE_FAIL;
 #else
-    errcode_t ret;
-    ws63_rgb_color_t color = {r, g, b};
+    ws63_rgb_ctrl_msg_t msg = {
+        .type = WS63_RGB_CMD_SET_COLOR,
+        .r = r,
+        .g = g,
+        .b = b,
+        .enable = 0U
+    };
 
-    if (g_ws63_rgb_ready == 0U) {
+    if ((g_ws63_rgb_task_started == 0U) || (g_ws63_rgb_ready == 0U)) {
         return ERRCODE_FAIL;
     }
 
-    ret = ws63_rgb_ws2812_set_color(&color);
-    if (ret == ERRCODE_SUCC) {
-        g_ws63_rgb_demo_enable = 0U;
-    }
-    return ret;
+    return ws63_rgb_post_ctrl_msg(&msg, WS63_OS_NO_WAIT);
 #endif
 }
 
@@ -132,7 +309,23 @@ errcode_t ws63_task_rgb_set_color(uint8_t r, uint8_t g, uint8_t b)
  */
 errcode_t ws63_task_rgb_off(void)
 {
-    return ws63_task_rgb_set_color(0U, 0U, 0U);
+#if (WS63_RGB_ENABLE != 1U)
+    return ERRCODE_FAIL;
+#else
+    ws63_rgb_ctrl_msg_t msg = {
+        .type = WS63_RGB_CMD_OFF,
+        .r = 0U,
+        .g = 0U,
+        .b = 0U,
+        .enable = 0U
+    };
+
+    if ((g_ws63_rgb_task_started == 0U) || (g_ws63_rgb_ready == 0U)) {
+        return ERRCODE_FAIL;
+    }
+
+    return ws63_rgb_post_ctrl_msg(&msg, WS63_OS_NO_WAIT);
+#endif
 }
 
 /**
@@ -144,16 +337,19 @@ errcode_t ws63_task_rgb_set_demo_enable(uint8_t enable)
     (void)enable;
     return ERRCODE_FAIL;
 #else
-    if (g_ws63_rgb_ready == 0U) {
+    ws63_rgb_ctrl_msg_t msg = {
+        .type = WS63_RGB_CMD_SET_DEMO,
+        .r = 0U,
+        .g = 0U,
+        .b = 0U,
+        .enable = enable
+    };
+
+    if ((g_ws63_rgb_task_started == 0U) || (g_ws63_rgb_ready == 0U)) {
         return ERRCODE_FAIL;
     }
 
-    g_ws63_rgb_demo_enable = (enable != 0U) ? 1U : 0U;
-    if (g_ws63_rgb_demo_enable == 1U) {
-        /* 开启演示后立即生效，避免等待一个完整周期。 */
-        g_ws63_rgb_last_switch_ms = ws63_os_tick_ms() - WS63_RGB_DEMO_INTERVAL_MS;
-    }
-    return ERRCODE_SUCC;
+    return ws63_rgb_post_ctrl_msg(&msg, WS63_OS_NO_WAIT);
 #endif
 }
 

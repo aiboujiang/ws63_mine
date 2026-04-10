@@ -1,11 +1,15 @@
 /**
  * @file ws63_final_task.c
- * @brief WK2114 最终版应用任务层实现。
+ * @brief WK2114 最终版应用任务层实现（RTOS 多任务拆分）。
  */
 
 #include "ws63_final_task_internal.h"
 
+#include <stdbool.h>
+#include <stddef.h>
+
 #include "osal_debug.h"
+#include "securec.h"
 
 #include "ws63_final_common.h"
 #include "ws63_final_config.h"
@@ -21,77 +25,116 @@
 static ws63_rx_callback_t g_ws63_rx_cb[WS63_SUBPORT_MAX + 1U] = {0};
 static uint32_t g_ws63_last_log_ms[WS63_SUBPORT_MAX + 1U] = {0};
 
+/* RTOS 队列：WK2114 发送请求与 SLE 上行消息。 */
+static unsigned long g_ws63_wk2114_tx_queue = 0UL;
+static unsigned long g_ws63_sle_uplink_queue = 0UL;
+
+/* 任务状态：用于 API 快速判断是否可投递请求。 */
+static uint8_t g_ws63_wk2114_ready = 0U;
+static uint8_t g_ws63_wk2114_task_started = 0U;
+static uint8_t g_ws63_sle_task_started = 0U;
+
 /**
- * @brief 处理 SLE 下行数据：按模块开关分发到对应子口。
- *
- * 设计说明：
- * 1) 只向“已启用模块 + 已启用子口”发送，避免误写其它业务口；
- * 2) 使用驱动层统一写接口，应用层不触碰寄存器与底层 UART 细节。
+ * @brief 设置 WK2114 链路就绪状态。
  */
-#if (WS63_SLE_CORE_ENABLE == 1U)
-static errcode_t ws63_sle_downlink_handler(const uint8_t *data, uint16_t len)
+static void ws63_set_wk2114_ready(uint8_t ready)
 {
-    uint8_t sent_count = 0U;
+    unsigned int irq_status;
 
-    if ((data == NULL) || (len == 0U)) {
-        return ERRCODE_INVALID_PARAM;
-    }
+    irq_status = ws63_os_irq_lock();
+    g_ws63_wk2114_ready = (ready != 0U) ? 1U : 0U;
+    ws63_os_irq_unlock(irq_status);
+}
 
-#if (WS63_SLE_LD2402_ENABLE == 1U)
-    if (ws63_is_subport_enabled(WS63_SLE_LD2402_SUBPORT)) {
-        if (wk2114_subport_write(WS63_SLE_LD2402_SUBPORT, data, len) == ERRCODE_SUCC) {
-            sent_count++;
-        }
-    }
-#endif
+/**
+ * @brief 获取 WK2114 链路就绪状态。
+ */
+uint8_t ws63_task_wk2114_is_ready(void)
+{
+    unsigned int irq_status;
+    uint8_t ready;
 
-#if (WS63_SLE_ZW101_ENABLE == 1U)
-    if (ws63_is_subport_enabled(WS63_SLE_ZW101_SUBPORT)) {
-        if (wk2114_subport_write(WS63_SLE_ZW101_SUBPORT, data, len) == ERRCODE_SUCC) {
-            sent_count++;
-        }
-    }
-#endif
+    irq_status = ws63_os_irq_lock();
+    ready = g_ws63_wk2114_ready;
+    ws63_os_irq_unlock(irq_status);
+    return ready;
+}
 
-#if (WS63_SLE_CAMERA_ENABLE == 1U)
-    if (ws63_is_subport_enabled(WS63_SLE_CAMERA_SUBPORT)) {
-        if (wk2114_subport_write(WS63_SLE_CAMERA_SUBPORT, data, len) == ERRCODE_SUCC) {
-            sent_count++;
-        }
-    }
-#endif
-
-    if (sent_count == 0U) {
+/**
+ * @brief 向 WK2114 发送队列投递消息。
+ */
+errcode_t ws63_task_post_wk2114_tx(const ws63_wk2114_tx_msg_t *msg, uint32_t timeout)
+{
+    if ((msg == NULL) || (g_ws63_wk2114_tx_queue == 0UL)) {
         return ERRCODE_FAIL;
     }
 
-    return ERRCODE_SUCC;
-}
-#endif
-
-/**
- * @brief 初始化 SLE 从机桥接。
- */
-static void ws63_sle_bridge_init(void)
-{
-#if (WS63_SLE_CORE_ENABLE == 1U)
-    errcode_t ret;
-
-    ret = ws63_sle_init(ws63_sle_downlink_handler);
-    if (ret != ERRCODE_SUCC) {
-        osal_printk("[wk2114 final task] sle bridge init fail, ret=0x%x\r\n", (unsigned int)ret);
-        return;
+    if ((msg->sub_port == 0U) || (msg->sub_port > WS63_SUBPORT_MAX) || (msg->len == 0U) ||
+        (msg->len > WS63_TASK_QUEUE_PAYLOAD_MAX)) {
+        return ERRCODE_INVALID_PARAM;
     }
 
-    osal_printk("[wk2114 final task] sle bridge init ok\r\n");
-#endif
+    return ws63_os_msg_queue_send(g_ws63_wk2114_tx_queue,
+        msg,
+        (uint16_t)sizeof(ws63_wk2114_tx_msg_t),
+        timeout);
+}
+
+/**
+ * @brief 从 WK2114 发送队列读取消息。
+ */
+errcode_t ws63_task_recv_wk2114_tx(ws63_wk2114_tx_msg_t *msg, uint32_t timeout)
+{
+    uint32_t size;
+
+    if ((msg == NULL) || (g_ws63_wk2114_tx_queue == 0UL)) {
+        return ERRCODE_FAIL;
+    }
+
+    size = (uint32_t)sizeof(ws63_wk2114_tx_msg_t);
+    return ws63_os_msg_queue_recv(g_ws63_wk2114_tx_queue, msg, &size, timeout);
+}
+
+/**
+ * @brief 向 SLE 上行队列投递消息。
+ */
+errcode_t ws63_task_post_sle_uplink(const ws63_sle_uplink_msg_t *msg, uint32_t timeout)
+{
+    if ((msg == NULL) || (g_ws63_sle_uplink_queue == 0UL)) {
+        return ERRCODE_FAIL;
+    }
+
+    if ((msg->sub_port == 0U) || (msg->sub_port > WS63_SUBPORT_MAX) || (msg->len == 0U) ||
+        (msg->len > WS63_TASK_QUEUE_PAYLOAD_MAX)) {
+        return ERRCODE_INVALID_PARAM;
+    }
+
+    return ws63_os_msg_queue_send(g_ws63_sle_uplink_queue,
+        msg,
+        (uint16_t)sizeof(ws63_sle_uplink_msg_t),
+        timeout);
+}
+
+/**
+ * @brief 从 SLE 上行队列读取消息。
+ */
+errcode_t ws63_task_recv_sle_uplink(ws63_sle_uplink_msg_t *msg, uint32_t timeout)
+{
+    uint32_t size;
+
+    if ((msg == NULL) || (g_ws63_sle_uplink_queue == 0UL)) {
+        return ERRCODE_FAIL;
+    }
+
+    size = (uint32_t)sizeof(ws63_sle_uplink_msg_t);
+    return ws63_os_msg_queue_recv(g_ws63_sle_uplink_queue, msg, &size, timeout);
 }
 
 /**
  * @brief 默认接收回调。
  *
  * 作用：
- * 1) 在你还未接入具体业务模块时，先给出链路活性日志；
+ * 1) 在还未接入具体业务模块时，先给出链路活性日志；
  * 2) 输出做节流，防止高频数据淹没调试口。
  */
 static void ws63_default_rx_callback(uint8_t sub_port, const uint8_t *data, uint16_t len)
@@ -134,7 +177,7 @@ static errcode_t ws63_init_enabled_subports(void)
             return ret;
         }
 
-        /* 针对不同外设进行初始化和回调绑定 */
+        /* 针对不同外设进行初始化和回调绑定。 */
         if ((sub_port == ZW101_SUBPORT) && (WS63_SLE_ZW101_ENABLE == 1U)) {
             if (zw101_init(sub_port) == ERRCODE_SUCC) {
                 g_ws63_rx_cb[sub_port] = zw101_process_data;
@@ -158,7 +201,7 @@ static errcode_t ws63_init_enabled_subports(void)
 }
 
 /**
- * @brief 轮询并分发子串口接收数据。
+ * @brief 轮询并分发子串口接收数据，同时转发到 SLE 上行队列。
  */
 static void ws63_poll_and_dispatch(void)
 {
@@ -167,6 +210,8 @@ static void ws63_poll_and_dispatch(void)
     uint8_t rx_buf[WS63_FIFO_CHUNK_MAX];
 
     for (sub_port = 1U; sub_port <= WS63_SUBPORT_MAX; sub_port++) {
+        ws63_sle_uplink_msg_t uplink_msg;
+
         if (!ws63_is_subport_enabled(sub_port)) {
             continue;
         }
@@ -176,18 +221,302 @@ static void ws63_poll_and_dispatch(void)
             g_ws63_rx_cb[sub_port](sub_port, rx_buf, len);
 
 #if (WS63_SLE_CORE_ENABLE == 1U)
-            /* 上行到 SLE 的模块由中间件按子口映射和模块开关再次过滤。 */
-            (void)ws63_sle_send_subport_data(sub_port, rx_buf, len);
+            /*
+             * 上行数据只做“拷贝 + 投递”，由 SLE 任务统一发送。
+             * 这样可以避免 WK2114 轮询线程被 SLE 发送路径阻塞。
+             */
+            uplink_msg.sub_port = sub_port;
+            uplink_msg.len = len;
+            if (memcpy_s(uplink_msg.data, sizeof(uplink_msg.data), rx_buf, len) == EOK) {
+                (void)ws63_task_post_sle_uplink(&uplink_msg, WS63_OS_NO_WAIT);
+            }
 #endif
         }
     }
 }
 
 /**
+ * @brief 处理 WK2114 发送队列中的待发数据。
+ */
+static void ws63_wk2114_process_tx_queue(void)
+{
+    while (1) {
+        ws63_wk2114_tx_msg_t tx_msg;
+        errcode_t ret;
+
+        ret = ws63_task_recv_wk2114_tx(&tx_msg, WS63_OS_NO_WAIT);
+        if (ret != ERRCODE_SUCC) {
+            break;
+        }
+
+        if (!ws63_is_subport_enabled(tx_msg.sub_port)) {
+            continue;
+        }
+
+        (void)wk2114_subport_write(tx_msg.sub_port, tx_msg.data, tx_msg.len);
+    }
+}
+
+/**
+ * @brief 处理 SLE 上行队列中的待发数据。
+ */
+static void ws63_sle_process_uplink_queue(void)
+{
+#if (WS63_SLE_CORE_ENABLE == 1U)
+    while (1) {
+        ws63_sle_uplink_msg_t uplink_msg;
+
+        if (ws63_task_recv_sle_uplink(&uplink_msg, WS63_OS_NO_WAIT) != ERRCODE_SUCC) {
+            break;
+        }
+
+        (void)ws63_sle_send_subport_data(uplink_msg.sub_port, uplink_msg.data, uplink_msg.len);
+    }
+#else
+    return;
+#endif
+ }
+
+/**
+ * @brief 按指定子口投递下行数据到 WK2114 发送队列（自动分片）。
+ */
+static uint8_t ws63_enqueue_downlink_to_subport(uint8_t sub_port, const uint8_t *data, uint16_t len)
+{
+    uint16_t offset = 0U;
+    uint8_t sent_count = 0U;
+
+    if (!ws63_is_subport_enabled(sub_port)) {
+        return 0U;
+    }
+
+    while (offset < len) {
+        ws63_wk2114_tx_msg_t tx_msg;
+        uint16_t remain;
+        uint16_t chunk;
+
+        remain = (uint16_t)(len - offset);
+        chunk = (remain > WS63_TASK_QUEUE_PAYLOAD_MAX) ? WS63_TASK_QUEUE_PAYLOAD_MAX : remain;
+
+        tx_msg.sub_port = sub_port;
+        tx_msg.len = chunk;
+        if (memcpy_s(tx_msg.data, sizeof(tx_msg.data), data + offset, chunk) != EOK) {
+            break;
+        }
+
+        if (ws63_task_post_wk2114_tx(&tx_msg, WS63_OS_NO_WAIT) != ERRCODE_SUCC) {
+            break;
+        }
+
+        offset = (uint16_t)(offset + chunk);
+        sent_count++;
+    }
+
+    return sent_count;
+}
+
+/**
+ * @brief 处理 SLE 下行数据：按模块开关分发到对应子口队列。
+ */
+#if (WS63_SLE_CORE_ENABLE == 1U)
+static errcode_t ws63_sle_downlink_handler(const uint8_t *data, uint16_t len)
+{
+    uint8_t sent_count = 0U;
+
+    if ((data == NULL) || (len == 0U)) {
+        return ERRCODE_INVALID_PARAM;
+    }
+
+#if (WS63_SLE_LD2402_ENABLE == 1U)
+    sent_count = (uint8_t)(sent_count + ws63_enqueue_downlink_to_subport(WS63_SLE_LD2402_SUBPORT, data, len));
+#endif
+
+#if (WS63_SLE_ZW101_ENABLE == 1U)
+    sent_count = (uint8_t)(sent_count + ws63_enqueue_downlink_to_subport(WS63_SLE_ZW101_SUBPORT, data, len));
+#endif
+
+#if (WS63_SLE_CAMERA_ENABLE == 1U)
+    sent_count = (uint8_t)(sent_count + ws63_enqueue_downlink_to_subport(WS63_SLE_CAMERA_SUBPORT, data, len));
+#endif
+
+    if (sent_count == 0U) {
+        return ERRCODE_FAIL;
+    }
+
+    return ERRCODE_SUCC;
+}
+#endif
+
+/**
+ * @brief 初始化 SLE 从机桥接。
+ */
+static errcode_t ws63_sle_bridge_init(void)
+{
+#if (WS63_SLE_CORE_ENABLE == 1U)
+    errcode_t ret;
+
+    ret = ws63_sle_init(ws63_sle_downlink_handler);
+    if (ret != ERRCODE_SUCC) {
+        osal_printk("[wk2114 final task] sle bridge init fail, ret=0x%x\r\n", (unsigned int)ret);
+        return ret;
+    }
+
+    osal_printk("[wk2114 final task] sle bridge init ok\r\n");
+#endif
+
+    return ERRCODE_SUCC;
+}
+
+/**
+ * @brief WK2114 通信任务入口。
+ */
+static void *ws63_wk2114_task_entry(const char *arg)
+{
+    (void)arg;
+
+    while (1) {
+        if (ws63_task_wk2114_is_ready() == 0U) {
+            wk2114_link_status_t status = {0};
+
+            if (wk2114_init() != ERRCODE_SUCC) {
+                ws63_set_wk2114_ready(0U);
+                ws63_os_sleep_ms(WS63_WK2114_RETRY_GAP_MS);
+                continue;
+            }
+
+            ws63_os_sleep_ms(10U);
+            wk2114_get_link_status(&status);
+            osal_printk("[wk2114 final task] link matched=%u gena=0x%02x\r\n",
+                (unsigned int)status.matched,
+                (unsigned int)status.last_gena);
+
+            if (ws63_init_enabled_subports() != ERRCODE_SUCC) {
+                ws63_set_wk2114_ready(0U);
+                ws63_os_sleep_ms(WS63_WK2114_RETRY_GAP_MS);
+                continue;
+            }
+
+            ws63_set_wk2114_ready(1U);
+            osal_printk("[wk2114 final task] wk2114 worker ready\r\n");
+        }
+
+        ws63_wk2114_process_tx_queue();
+        ws63_poll_and_dispatch();
+        ws63_os_sleep_ms(WS63_WK2114_TASK_POLL_MS);
+    }
+
+    return NULL;
+}
+
+/**
+ * @brief SLE 协议任务入口。
+ */
+static void *ws63_sle_task_entry(const char *arg)
+{
+#if (WS63_SLE_CORE_ENABLE == 1U)
+    uint8_t sle_inited = 0U;
+
+    (void)arg;
+    while (1) {
+        if (sle_inited == 0U) {
+            if (ws63_sle_bridge_init() != ERRCODE_SUCC) {
+                ws63_os_sleep_ms(WS63_SLE_RETRY_GAP_MS);
+                continue;
+            }
+            sle_inited = 1U;
+        }
+
+        ws63_sle_process();
+        ws63_sle_process_uplink_queue();
+        ws63_os_sleep_ms(WS63_SLE_TASK_POLL_MS);
+    }
+#else
+    (void)arg;
+    while (1) {
+        ws63_os_sleep_ms(1000U);
+    }
+#endif
+
+    return NULL;
+}
+
+/**
+ * @brief 启动 WK2114 通信任务与发送队列。
+ */
+static errcode_t ws63_start_wk2114_task(void)
+{
+    errcode_t ret;
+
+    if (g_ws63_wk2114_task_started == 1U) {
+        return ERRCODE_SUCC;
+    }
+
+    ret = ws63_os_msg_queue_create("ws63_wk_tx_q",
+        WS63_WK2114_TX_QUEUE_DEPTH,
+        (uint16_t)sizeof(ws63_wk2114_tx_msg_t),
+        &g_ws63_wk2114_tx_queue);
+    if (ret != ERRCODE_SUCC) {
+        osal_printk("[wk2114 final task] wk2114 tx queue create fail\r\n");
+        return ret;
+    }
+
+    ret = ws63_os_start_task("ws63_wk_task",
+        ws63_wk2114_task_entry,
+        0U,
+        WS63_WK2114_TASK_STACK_SIZE,
+        WS63_WK2114_TASK_PRIORITY);
+    if (ret != ERRCODE_SUCC) {
+        ws63_os_msg_queue_delete(g_ws63_wk2114_tx_queue);
+        g_ws63_wk2114_tx_queue = 0UL;
+        return ret;
+    }
+
+    g_ws63_wk2114_task_started = 1U;
+    return ERRCODE_SUCC;
+}
+
+/**
+ * @brief 启动 SLE 协议任务与上行队列。
+ */
+static errcode_t ws63_start_sle_task(void)
+{
+    errcode_t ret;
+
+#if (WS63_SLE_CORE_ENABLE != 1U)
+    return ERRCODE_SUCC;
+#endif
+
+    if (g_ws63_sle_task_started == 1U) {
+        return ERRCODE_SUCC;
+    }
+
+    ret = ws63_os_msg_queue_create("ws63_sle_up_q",
+        WS63_SLE_UPLINK_QUEUE_DEPTH,
+        (uint16_t)sizeof(ws63_sle_uplink_msg_t),
+        &g_ws63_sle_uplink_queue);
+    if (ret != ERRCODE_SUCC) {
+        osal_printk("[wk2114 final task] sle uplink queue create fail\r\n");
+        return ret;
+    }
+
+    ret = ws63_os_start_task("ws63_sle_task",
+        ws63_sle_task_entry,
+        0U,
+        WS63_SLE_TASK_STACK_SIZE,
+        WS63_SLE_TASK_PRIORITY);
+    if (ret != ERRCODE_SUCC) {
+        ws63_os_msg_queue_delete(g_ws63_sle_uplink_queue);
+        g_ws63_sle_uplink_queue = 0UL;
+        return ret;
+    }
+
+    g_ws63_sle_task_started = 1U;
+    return ERRCODE_SUCC;
+}
+
+/**
  * @brief 注册子串口回调。
  */
-errcode_t ws63_task_register_rx_callback(uint8_t sub_port,
-    ws63_rx_callback_t callback)
+errcode_t ws63_task_register_rx_callback(uint8_t sub_port, ws63_rx_callback_t callback)
 {
     if (!ws63_is_subport_valid(sub_port)) {
         return ERRCODE_INVALID_PARAM;
@@ -198,21 +527,55 @@ errcode_t ws63_task_register_rx_callback(uint8_t sub_port,
 }
 
 /**
- * @brief 通过子串口发送数据。
+ * @brief 通过子串口发送数据（队列化，避免跨线程直接写硬件）。
  */
 errcode_t ws63_task_send(uint8_t sub_port, const uint8_t *data, uint16_t len)
 {
-    return wk2114_subport_write(sub_port, data, len);
+    uint16_t offset = 0U;
+
+    if ((data == NULL) || (len == 0U)) {
+        return ERRCODE_INVALID_PARAM;
+    }
+    if (!ws63_is_subport_valid(sub_port)) {
+        return ERRCODE_INVALID_PARAM;
+    }
+    if (ws63_task_wk2114_is_ready() == 0U) {
+        return ERRCODE_FAIL;
+    }
+
+    while (offset < len) {
+        ws63_wk2114_tx_msg_t tx_msg;
+        uint16_t remain;
+        uint16_t chunk;
+
+        remain = (uint16_t)(len - offset);
+        chunk = (remain > WS63_TASK_QUEUE_PAYLOAD_MAX) ? WS63_TASK_QUEUE_PAYLOAD_MAX : remain;
+
+        tx_msg.sub_port = sub_port;
+        tx_msg.len = chunk;
+        if (memcpy_s(tx_msg.data, sizeof(tx_msg.data), data + offset, chunk) != EOK) {
+            return ERRCODE_FAIL;
+        }
+
+        if (ws63_task_post_wk2114_tx(&tx_msg, WS63_OS_NO_WAIT) != ERRCODE_SUCC) {
+            return ERRCODE_FAIL;
+        }
+
+        offset = (uint16_t)(offset + chunk);
+    }
+
+    return ERRCODE_SUCC;
 }
 
 /**
- * @brief WK2114 最终版业务任务入口。
+ * @brief WK2114 最终版业务管理任务入口。
+ *
+ * 管理任务职责：
+ * 1) 执行与外设无强耦合的应用流程（调试命令、编码器采样、喂狗）；
+ * 2) 启动 WK2114/SLE/RGB/BEEP 独立任务，体现 RTOS 并发架构。
  */
 void *ws63_task_entry(const char *arg)
 {
-    /* 链路状态类型由驱动层定义，应用层直接复用统一结构。 */
-    wk2114_link_status_t status = {0};
-    bool wk2114_ready = false;
     errcode_t wdt_ret;
 
     (void)arg;
@@ -221,56 +584,36 @@ void *ws63_task_entry(const char *arg)
     /* 电机/编码器初始化独立于 WK2114 链路，失败仅记录日志，不阻断任务。 */
     ws63_motor_encoder_init();
 
-    /* 蜂鸣器初始化独立于 WK2114 链路，便于离线串口命令直接控测。 */
-    ws63_task_buzzer_init();
-
     /* 在线调试串口：用于电机命令控测与状态日志输出。 */
     ws63_task_debug_init();
 
-    /* 先启动 SLE 桥接：即使 WK2114 链路异常，也能保留无线侧诊断日志。 */
-    ws63_sle_bridge_init();
-
-    if (wk2114_init() != ERRCODE_SUCC) {
-        osal_printk("[wk2114 final task] driver init fail, keep sle alive\r\n");
-    } else {
-        wk2114_ready = true;
+    if (ws63_start_sle_task() != ERRCODE_SUCC) {
+        osal_printk("[wk2114 final task] start sle task fail\r\n");
     }
 
-    if (wk2114_ready) {
-        ws63_os_sleep_ms(10U);
+    if (ws63_start_wk2114_task() != ERRCODE_SUCC) {
+        osal_printk("[wk2114 final task] start wk2114 task fail\r\n");
+    }
 
-        wk2114_get_link_status(&status);
-        osal_printk("[wk2114 final task] link matched=%u gena=0x%02x\r\n",
-            (unsigned int)status.matched, (unsigned int)status.last_gena);
+    if (ws63_rgb_task_start() != ERRCODE_SUCC) {
+        osal_printk("[wk2114 final task] start rgb task fail\r\n");
+    }
 
-        if (ws63_init_enabled_subports() != ERRCODE_SUCC) {
-            osal_printk("[wk2114 final task] subport init fail\r\n");
-            wk2114_ready = false;
-        }
-
-        if (wk2114_ready) {
-            ws63_rgb_demo_init();
-        }
+    if (ws63_beep_task_start() != ERRCODE_SUCC) {
+        osal_printk("[wk2114 final task] start beep task fail\r\n");
     }
 
     while (1) {
         uint32_t now_ms;
 
-        if (wk2114_ready) {
-            ws63_poll_and_dispatch();
-        }
         now_ms = ws63_os_tick_ms();
         if (ws63_task_motor_encoder_is_ready() == 1U) {
             ws63_encoder_sample(now_ms);
         }
+
         ws63_task_debug_process(now_ms);
-        ws63_rgb_demo_process(now_ms);
 
-#if (WS63_SLE_CORE_ENABLE == 1U)
-        ws63_sle_process();
-#endif
-
-        /* 与 RGB 演示并行时持续喂狗，避免任务轮询窗口过长触发复位。 */
+        /* 多任务并行后仍在管理线程持续喂狗，避免高负载场景触发复位。 */
         wdt_ret = ws63_os_feed_watchdog();
         if (wdt_ret != ERRCODE_SUCC) {
 #if (WS63_RGB_LOG_ENABLE == 1U)

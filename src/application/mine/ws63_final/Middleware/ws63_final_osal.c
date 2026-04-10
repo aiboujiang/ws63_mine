@@ -46,6 +46,88 @@ errcode_t ws63_os_start_task(const char *name,
 }
 
 /**
+ * @brief 创建消息队列。
+ */
+errcode_t ws63_os_msg_queue_create(const char *name,
+    uint16_t queue_len, uint16_t msg_size, unsigned long *queue_id)
+{
+    int ret;
+
+    if ((name == NULL) || (queue_id == NULL) || (queue_len == 0U) || (msg_size == 0U)) {
+        return ERRCODE_INVALID_PARAM;
+    }
+
+    ret = osal_msg_queue_create(name,
+        (unsigned short)queue_len,
+        queue_id,
+        0U,
+        (unsigned short)msg_size);
+    if (ret != OSAL_SUCCESS) {
+        return ERRCODE_FAIL;
+    }
+
+    return ERRCODE_SUCC;
+}
+
+/**
+ * @brief 向消息队列发送一条拷贝消息。
+ */
+errcode_t ws63_os_msg_queue_send(unsigned long queue_id,
+    const void *msg, uint16_t msg_size, uint32_t timeout)
+{
+    int ret;
+
+    if ((queue_id == 0UL) || (msg == NULL) || (msg_size == 0U)) {
+        return ERRCODE_INVALID_PARAM;
+    }
+
+    ret = osal_msg_queue_write_copy(queue_id,
+        (void *)(uintptr_t)msg,
+        (unsigned int)msg_size,
+        (unsigned int)timeout);
+    if (ret != OSAL_SUCCESS) {
+        return ERRCODE_FAIL;
+    }
+
+    return ERRCODE_SUCC;
+}
+
+/**
+ * @brief 从消息队列接收一条拷贝消息。
+ */
+errcode_t ws63_os_msg_queue_recv(unsigned long queue_id,
+    void *msg, uint32_t *msg_size, uint32_t timeout)
+{
+    int ret;
+    unsigned int read_size;
+
+    if ((queue_id == 0UL) || (msg == NULL) || (msg_size == NULL) || (*msg_size == 0U)) {
+        return ERRCODE_INVALID_PARAM;
+    }
+
+    read_size = (unsigned int)(*msg_size);
+    ret = osal_msg_queue_read_copy(queue_id, msg, &read_size, (unsigned int)timeout);
+    if (ret != OSAL_SUCCESS) {
+        return ERRCODE_FAIL;
+    }
+
+    *msg_size = (uint32_t)read_size;
+    return ERRCODE_SUCC;
+}
+
+/**
+ * @brief 删除消息队列。
+ */
+void ws63_os_msg_queue_delete(unsigned long queue_id)
+{
+    if (queue_id == 0UL) {
+        return;
+    }
+
+    osal_msg_queue_delete(queue_id);
+}
+
+/**
  * @brief 毫秒延时。
  */
 void ws63_os_sleep_ms(uint32_t ms)

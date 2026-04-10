@@ -438,3 +438,32 @@ ws63_final/
 
 后续事项：
 - 若现场需要“固定色常亮”，建议先执行 `RGB DEMO OFF`，再执行 `RGB SET R G B`。
+
+### 2026-04-10: ws63_final RTOS 多任务化改造（WK2114/SLE/RGB/BEEP 解耦）
+
+变更摘要：
+- 将原 `ws63_final_task.c` 单循环重构为“管理任务 + WK2114 通信任务 + SLE 协议任务”，并引入任务间消息队列。
+- `WK2114` 与 `SLE` 之间改为队列桥接：上行由 WK2114 投递到 SLE 队列，下行由 SLE 回调投递到 WK2114 发送队列。
+- `RGB` 子模块改为独立 RTOS 任务，新增控制队列，`SET/OFF/DEMO/REINIT` 命令由队列串行执行，避免与其它模块抢占执行链路。
+- `BEEP` 子模块改为独立 RTOS 任务，新增控制队列，`ON/OFF/VOL` 命令由任务串行落地，减少并发硬件访问冲突。
+- 中间件 `ws63_final_osal` 新增消息队列封装接口，保持 App 层不直接依赖底层 OSAL 队列细节。
+- 配置层新增多任务参数（栈大小、优先级、队列深度），默认保留现有行为并支持后续按负载调参。
+
+影响文件：
+- `src/application/mine/ws63_final/Middleware/ws63_final_osal.h`
+- `src/application/mine/ws63_final/Middleware/ws63_final_osal.c`
+- `src/application/mine/ws63_final/Config/ws63_final_config.h`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_internal.h`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_rgb.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_device_ctrl.c`
+- `src/application/mine/ws63_final/App/Main/ws63_final_main.c`
+- `src/application/mine/ws63_final/README.md`
+
+验证结果：
+- 命令：`cd /home/xixi/code/fbb_ws63_20260114/src && python3 build.py ws63-liteos-app`
+- 结果：构建通过（`Build target:ws63_liteos_app success`）。
+
+后续事项：
+- 若现场并发负载持续升高，可优先调大 `WS63_WK2114_TX_QUEUE_DEPTH` 与 `WS63_SLE_UPLINK_QUEUE_DEPTH`。
+- 若发现任务栈水位偏低，建议先提高 `WS63_SLE_TASK_STACK_SIZE`，再评估 `WS63_WK2114_TASK_STACK_SIZE`。
