@@ -59,6 +59,24 @@ ws63_final/
 
 ## 8. 任务维护记录
 
+### 2026-04-11: TTP229 I2C 上拉容错修复
+
+变更摘要：
+- 发现 `GPIO15/16` 的内部上拉配置在当前板级上会返回失败，但这不影响 TTP229 的 I2C 通信本身。
+- 将 BSP 中的上拉配置改为“尽力设置、失败仅告警”，避免误把可恢复的引脚能力差异当成初始化失败。
+- 保持原有 I2C 读流程、Task 状态机和报警逻辑不变，只修正初始化容错边界。
+
+影响文件：
+- `src/application/mine/ws63_final/BSP/ws63_final_bsp_ttp229.c`
+- `src/application/mine/ws63_final/README.md`
+
+验证结果：
+- 命令：`cd /home/xixi/code/fbb_ws63_20260114/src && python3 build.py ws63-liteos-app`
+- 结果：构建通过，且 TTP229 BSP 不再因内部上拉返回码直接中止初始化。
+
+后续事项：
+- 上板时继续优先观察 TTP229 的 `init ok` / `init fail` 日志，再确认按键读数是否稳定。
+
 ### 2026-04-11: TTP229 改为 I2C 读取
 
 变更摘要：

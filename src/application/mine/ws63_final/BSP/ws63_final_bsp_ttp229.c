@@ -11,6 +11,7 @@
 
 #include "i2c.h"
 #include "gpio.h"
+#include "osal_debug.h"
 #include "osal_task.h"
 #include "pinctrl.h"
 
@@ -38,12 +39,14 @@ errcode_t ws63_bsp_ttp229_init(void)
 
     ret = uapi_pin_set_pull(WS63_TTP229_SCL_PIN, PIN_PULL_TYPE_UP);
     if (ret != ERRCODE_SUCC) {
-        return ret;
+        /* GPIO15/16 在不同板级上不一定都支持内部上拉，这里保留告警但不阻断 I2C 初始化。 */
+        osal_printk("[wk2114 final bsp] TTP229 SCL pull config skip, ret=0x%x\r\n", (unsigned int)ret);
     }
 
     ret = uapi_pin_set_pull(WS63_TTP229_SDA_PIN, PIN_PULL_TYPE_UP);
     if (ret != ERRCODE_SUCC) {
-        return ret;
+        /* 触摸键盘总线只依赖可用的 SDA/SCL 复用，外部上拉存在时可继续工作。 */
+        osal_printk("[wk2114 final bsp] TTP229 SDA pull config skip, ret=0x%x\r\n", (unsigned int)ret);
     }
 
     /* 按规格书以 7bit 从机地址 0x65 进行标准 I2C 读取。 */
