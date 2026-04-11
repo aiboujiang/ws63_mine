@@ -18,6 +18,7 @@
 #include "soc_osal.h"
 
 #include "ws63_final_config.h"
+#include "ws63_final_osal.h"
 
 #define WS63_SLE_TAG_LD2402 "[LD2402]"
 #define WS63_SLE_TAG_ZW101  "[ZW101]"
@@ -55,6 +56,38 @@ static const uint8_t g_ws63_sle_fallback_mac[SLE_ADDR_LEN] = WS63_SLE_FALLBACK_M
 static sle_announce_seek_callbacks_t g_ws63_sle_seek_cbks = {0};
 static sle_connection_callbacks_t g_ws63_sle_conn_cbks = {0};
 static ssapc_callbacks_t g_ws63_sle_ssapc_cbks = {0};
+
+/* 上行 success 日志控制：默认关闭逐包 success，仅在需要时打开。 */
+static uint8_t g_ws63_sle_uplink_success_log_enable = WS63_SLE_UPLINK_SUCCESS_LOG_ENABLE_DEFAULT;
+static uint32_t g_ws63_sle_uplink_success_log_gap_ms = WS63_SLE_UPLINK_SUCCESS_LOG_GAP_MS_DEFAULT;
+static uint32_t g_ws63_sle_uplink_success_last_log_ms = 0U;
+static uint32_t g_ws63_sle_uplink_success_skip_count = 0U;
+
+/**
+ * @brief 按时间窗口输出上行 success 日志，避免高频数据导致串口刷屏。
+ */
+static void ws63_sle_log_uplink_success_limited(uint8_t sub_port, uint16_t len)
+{
+    uint32_t now_ms;
+
+    if (g_ws63_sle_uplink_success_log_enable == 0U) {
+        return;
+    }
+
+    now_ms = ws63_os_tick_ms();
+    if ((g_ws63_sle_uplink_success_log_gap_ms > 0U) &&
+        ((uint32_t)(now_ms - g_ws63_sle_uplink_success_last_log_ms) < g_ws63_sle_uplink_success_log_gap_ms)) {
+        g_ws63_sle_uplink_success_skip_count++;
+        return;
+    }
+
+    g_ws63_sle_uplink_success_last_log_ms = now_ms;
+    WS63_SLE_LOG("uplink send success, sub_port=%u, len=%u, suppressed=%u",
+        (unsigned int)sub_port,
+        (unsigned int)len,
+        (unsigned int)g_ws63_sle_uplink_success_skip_count);
+    g_ws63_sle_uplink_success_skip_count = 0U;
+}
 
 /**
  * @brief 按子口映射对应的上行模块标签。
@@ -692,8 +725,32 @@ errcode_t ws63_sle_send_subport_data(uint8_t sub_port, const uint8_t *data, uint
     }
 
     osal_vfree(payload);
-    WS63_SLE_LOG("uplink send success, sub_port=%u, len=%u", (unsigned int)sub_port, (unsigned int)len);
+    ws63_sle_log_uplink_success_limited(sub_port, len);
     return ERRCODE_SUCC;
+}
+
+errcode_t ws63_sle_set_uplink_success_log_enable(uint8_t enable)
+{
+    g_ws63_sle_uplink_success_log_enable = (enable != 0U) ? 1U : 0U;
+    return ERRCODE_SUCC;
+}
+
+uint8_t ws63_sle_get_uplink_success_log_enable(void)
+{
+    return g_ws63_sle_uplink_success_log_enable;
+}
+
+errcode_t ws63_sle_set_uplink_success_log_gap_ms(uint32_t gap_ms)
+{
+    g_ws63_sle_uplink_success_log_gap_ms = gap_ms;
+    g_ws63_sle_uplink_success_last_log_ms = 0U;
+    g_ws63_sle_uplink_success_skip_count = 0U;
+    return ERRCODE_SUCC;
+}
+
+uint32_t ws63_sle_get_uplink_success_log_gap_ms(void)
+{
+    return g_ws63_sle_uplink_success_log_gap_ms;
 }
 
 #else
@@ -719,6 +776,28 @@ errcode_t ws63_sle_send_subport_data(uint8_t sub_port, const uint8_t *data, uint
     (void)data;
     (void)len;
     return ERRCODE_FAIL;
+}
+
+errcode_t ws63_sle_set_uplink_success_log_enable(uint8_t enable)
+{
+    (void)enable;
+    return ERRCODE_FAIL;
+}
+
+uint8_t ws63_sle_get_uplink_success_log_enable(void)
+{
+    return 0U;
+}
+
+errcode_t ws63_sle_set_uplink_success_log_gap_ms(uint32_t gap_ms)
+{
+    (void)gap_ms;
+    return ERRCODE_FAIL;
+}
+
+uint32_t ws63_sle_get_uplink_success_log_gap_ms(void)
+{
+    return 0U;
 }
 
 #endif

@@ -9,6 +9,7 @@
 #include "ld2402.h"
 #include "wk2114.h"
 #include "ws63_final_bsp.h"
+#include "ws63_final_config.h"
 #include "osal_debug.h"
 #include <stdbool.h>
 #include <stddef.h>
@@ -48,6 +49,11 @@ static const uint8_t g_ld2402_cmd_disable[] = {
 /* 命令帧尾与数据帧尾。 */
 static const uint8_t g_ld2402_cmd_tail[LD2402_TAIL_LEN] = {0x04, 0x03, 0x02, 0x01};
 static const uint8_t g_ld2402_data_tail[LD2402_TAIL_LEN] = {0xF8, 0xF7, 0xF6, 0xF5};
+
+/* 运行态日志控制：默认“开启但按间隔节流”，避免上电后高频刷屏。 */
+static uint8_t g_ld2402_data_log_enable = WS63_LD2402_DATA_LOG_ENABLE_DEFAULT;
+static uint32_t g_ld2402_data_log_gap_ms = WS63_LD2402_DATA_LOG_GAP_MS_DEFAULT;
+static uint32_t g_ld2402_data_last_log_ms = 0U;
 
 /**
  * @brief 检查缓冲区中的某个完整 LD2402 帧。
@@ -221,11 +227,65 @@ errcode_t ld2402_init(uint8_t sub_port)
  */
 void ld2402_process_data(uint8_t sub_port, const uint8_t *data, uint16_t len)
 {
+    uint32_t now_ms;
+
     (void)sub_port;
     /* 当前版本暂不解析原始负载，显式标记避免 -Werror=unused-parameter。 */
     (void)data;
-    if (len > 0) {
-        osal_printk("LD2402 processing %u bytes.\r\n", (unsigned int)len);
-        /* logic to parse ld2402 radar packet */
+
+    if (len == 0U) {
+        return;
     }
+
+    if (g_ld2402_data_log_enable == 0U) {
+        return;
+    }
+
+    now_ms = ws63_bsp_get_tick_ms();
+    /*
+     * 仅限制日志输出频率，不改变日志文案语义，便于兼容现场既有关键字检索。
+     * 当间隔配置为 0 时，保持每包都输出。
+     */
+    if ((g_ld2402_data_log_gap_ms > 0U) &&
+        ((uint32_t)(now_ms - g_ld2402_data_last_log_ms) < g_ld2402_data_log_gap_ms)) {
+        return;
+    }
+
+    g_ld2402_data_last_log_ms = now_ms;
+    osal_printk("LD2402 processing %u bytes.\r\n", (unsigned int)len);
+    /* logic to parse ld2402 radar packet */
+}
+
+/**
+ * @brief 设置 LD2402 运行态日志开关。
+ */
+errcode_t ld2402_set_data_log_enable(uint8_t enable)
+{
+    g_ld2402_data_log_enable = (enable != 0U) ? 1U : 0U;
+    return ERRCODE_SUCC;
+}
+
+/**
+ * @brief 获取 LD2402 运行态日志开关状态。
+ */
+uint8_t ld2402_get_data_log_enable(void)
+{
+    return g_ld2402_data_log_enable;
+}
+
+/**
+ * @brief 设置 LD2402 运行态日志最小输出间隔。
+ */
+errcode_t ld2402_set_data_log_gap_ms(uint32_t gap_ms)
+{
+    g_ld2402_data_log_gap_ms = gap_ms;
+    return ERRCODE_SUCC;
+}
+
+/**
+ * @brief 获取 LD2402 运行态日志最小输出间隔。
+ */
+uint32_t ld2402_get_data_log_gap_ms(void)
+{
+    return g_ld2402_data_log_gap_ms;
 }

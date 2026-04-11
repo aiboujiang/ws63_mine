@@ -25,4 +25,34 @@ errcode_t ld2402_init(uint8_t sub_port);
  */
 void ld2402_process_data(uint8_t sub_port, const uint8_t *data, uint16_t len);
 
+/**
+ * @brief 设置 LD2402 运行态日志开关。
+ *
+ * @param enable 1=开启，0=关闭。
+ * @return errcode_t ERRCODE_SUCC 成功。
+ */
+errcode_t ld2402_set_data_log_enable(uint8_t enable);
+
+/**
+ * @brief 获取 LD2402 运行态日志开关状态。
+ *
+ * @return uint8_t 1=开启，0=关闭。
+ */
+uint8_t ld2402_get_data_log_enable(void);
+
+/**
+ * @brief 设置 LD2402 运行态日志最小输出间隔。
+ *
+ * @param gap_ms 间隔毫秒，0 表示不做时间节流。
+ * @return errcode_t ERRCODE_SUCC 成功。
+ */
+errcode_t ld2402_set_data_log_gap_ms(uint32_t gap_ms);
+
+/**
+ * @brief 获取 LD2402 运行态日志最小输出间隔。
+ *
+ * @return uint32_t 间隔毫秒。
+ */
+uint32_t ld2402_get_data_log_gap_ms(void);
+
 #endif

@@ -25,6 +25,7 @@
 #define WS63_DEBUG_LOG_BUF_MAX 192U
 #define WS63_DEBUG_CMD_QUEUE_DEPTH 8U
 #define WS63_DEBUG_RAW_CMD_MAX_BYTES 64U
+#define WS63_DEBUG_SENSOR_LOG_GAP_MS_MAX 60000U
 
 #if (WS63_DEBUG_UART_ENABLE == 1U)
 static uint8_t g_ws63_debug_uart_ready = 0U;
@@ -601,6 +602,28 @@ static void ws63_debug_dump_ttp229_status(const char *tag)
 }
 
 /**
+ * @brief 输出当前 LD2402 运行日志配置。
+ */
+static void ws63_debug_dump_ld2402_log_status(const char *tag)
+{
+    ws63_debug_log("[ws63 dbg] %s ld2402_log=%s gap=%ums\r\n",
+        (tag == NULL) ? "ld2402-log" : tag,
+        (ws63_task_ld2402_get_log_enable() == 1U) ? "ON" : "OFF",
+        (unsigned int)ws63_task_ld2402_get_log_gap_ms());
+}
+
+/**
+ * @brief 输出当前 SLE 上行 success 日志配置。
+ */
+static void ws63_debug_dump_sle_uplink_log_status(const char *tag)
+{
+    ws63_debug_log("[ws63 dbg] %s sle_uplink_log=%s gap=%ums\r\n",
+        (tag == NULL) ? "sle-ulog" : tag,
+        (ws63_task_sle_uplink_log_get_enable() == 1U) ? "ON" : "OFF",
+        (unsigned int)ws63_task_sle_uplink_log_get_gap_ms());
+}
+
+/**
  * @brief 打印调试命令帮助。
  */
 static void ws63_debug_print_help(void)
@@ -635,6 +658,12 @@ static void ws63_debug_print_help(void)
     ws63_debug_log("[ws63 dbg]   LD2401 INIT (alias LD2402)\r\n");
     ws63_debug_log("[ws63 dbg]   LD2401 RAW <HEX...>\r\n");
     ws63_debug_log("[ws63 dbg]   LD2401 STAT\r\n");
+    ws63_debug_log("[ws63 dbg]   LD2401 LOG ON|OFF\r\n");
+    ws63_debug_log("[ws63 dbg]   LD2401 LOGINT <0-60000ms>\r\n");
+    ws63_debug_log("[ws63 dbg]   LD2401 LOGSTAT\r\n");
+    ws63_debug_log("[ws63 dbg]   SLE ULOG ON|OFF\r\n");
+    ws63_debug_log("[ws63 dbg]   SLE ULOGINT <0-60000ms>\r\n");
+    ws63_debug_log("[ws63 dbg]   SLE ULOGSTAT\r\n");
     ws63_debug_log("[ws63 dbg]   ZW101 INIT\r\n");
     ws63_debug_log("[ws63 dbg]   ZW101 HANDSHAKE\r\n");
     ws63_debug_log("[ws63 dbg]   ZW101 CHECKSENSOR\r\n");
@@ -916,6 +945,75 @@ static void ws63_debug_exec_command(const char *line)
 
     if ((strcmp(cmd, "LD2401 STAT") == 0) || (strcmp(cmd, "LD2402 STAT") == 0)) {
         ws63_debug_log("[ws63 dbg] LD2401(alias LD2402) subport=%u\r\n", (unsigned int)LD2402_SUBPORT);
+        ws63_debug_dump_ld2402_log_status("ld2402-log");
+        return;
+    }
+
+    if ((strcmp(cmd, "LD2401 LOG ON") == 0) || (strcmp(cmd, "LD2402 LOG ON") == 0)) {
+        ret = ws63_task_ld2402_set_log_enable(1U);
+        ws63_debug_log("[ws63 dbg] LD2401 LOG ON ret=0x%x\r\n", (unsigned int)ret);
+        ws63_debug_dump_ld2402_log_status("ld2402-log");
+        return;
+    }
+
+    if ((strcmp(cmd, "LD2401 LOG OFF") == 0) || (strcmp(cmd, "LD2402 LOG OFF") == 0)) {
+        ret = ws63_task_ld2402_set_log_enable(0U);
+        ws63_debug_log("[ws63 dbg] LD2401 LOG OFF ret=0x%x\r\n", (unsigned int)ret);
+        ws63_debug_dump_ld2402_log_status("ld2402-log");
+        return;
+    }
+
+    if ((strcmp(cmd, "LD2401 LOGSTAT") == 0) || (strcmp(cmd, "LD2402 LOGSTAT") == 0)) {
+        ws63_debug_dump_ld2402_log_status("ld2402-log");
+        return;
+    }
+
+    if ((strncmp(cmd, "LD2401 LOGINT ", 13) == 0) || (strncmp(cmd, "LD2402 LOGINT ", 13) == 0)) {
+        if (!ws63_debug_parse_u32_tokens(cmd + 13, rgb_args, 4U, &rgb_argc) || (rgb_argc != 1U) ||
+            (rgb_args[0] > WS63_DEBUG_SENSOR_LOG_GAP_MS_MAX)) {
+            ws63_debug_log("[ws63 dbg] usage: LD2401 LOGINT <0-60000>\r\n");
+            return;
+        }
+
+        ret = ws63_task_ld2402_set_log_gap_ms(rgb_args[0]);
+        ws63_debug_log("[ws63 dbg] LD2401 LOGINT %ums ret=0x%x\r\n",
+            (unsigned int)rgb_args[0],
+            (unsigned int)ret);
+        ws63_debug_dump_ld2402_log_status("ld2402-log");
+        return;
+    }
+
+    if (strcmp(cmd, "SLE ULOG ON") == 0) {
+        ret = ws63_task_sle_uplink_log_set_enable(1U);
+        ws63_debug_log("[ws63 dbg] SLE ULOG ON ret=0x%x\r\n", (unsigned int)ret);
+        ws63_debug_dump_sle_uplink_log_status("sle-ulog");
+        return;
+    }
+
+    if (strcmp(cmd, "SLE ULOG OFF") == 0) {
+        ret = ws63_task_sle_uplink_log_set_enable(0U);
+        ws63_debug_log("[ws63 dbg] SLE ULOG OFF ret=0x%x\r\n", (unsigned int)ret);
+        ws63_debug_dump_sle_uplink_log_status("sle-ulog");
+        return;
+    }
+
+    if (strcmp(cmd, "SLE ULOGSTAT") == 0) {
+        ws63_debug_dump_sle_uplink_log_status("sle-ulog");
+        return;
+    }
+
+    if (strncmp(cmd, "SLE ULOGINT ", 11) == 0) {
+        if (!ws63_debug_parse_u32_tokens(cmd + 11, rgb_args, 4U, &rgb_argc) || (rgb_argc != 1U) ||
+            (rgb_args[0] > WS63_DEBUG_SENSOR_LOG_GAP_MS_MAX)) {
+            ws63_debug_log("[ws63 dbg] usage: SLE ULOGINT <0-60000>\r\n");
+            return;
+        }
+
+        ret = ws63_task_sle_uplink_log_set_gap_ms(rgb_args[0]);
+        ws63_debug_log("[ws63 dbg] SLE ULOGINT %ums ret=0x%x\r\n",
+            (unsigned int)rgb_args[0],
+            (unsigned int)ret);
+        ws63_debug_dump_sle_uplink_log_status("sle-ulog");
         return;
     }
 

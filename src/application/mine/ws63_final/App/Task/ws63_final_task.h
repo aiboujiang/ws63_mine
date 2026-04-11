@@ -190,6 +190,66 @@ errcode_t ws63_task_ld2402_reinit(void);
 errcode_t ws63_task_ld2402_send_raw(const uint8_t *data, uint16_t len);
 
 /**
+ * @brief 设置 LD2402 运行态日志开关。
+ *
+ * @param enable 1=开启，0=关闭。
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_task_ld2402_set_log_enable(uint8_t enable);
+
+/**
+ * @brief 获取 LD2402 运行态日志开关。
+ *
+ * @return uint8_t 1=开启，0=关闭。
+ */
+uint8_t ws63_task_ld2402_get_log_enable(void);
+
+/**
+ * @brief 设置 LD2402 运行态日志最小输出间隔。
+ *
+ * @param gap_ms 间隔毫秒，0 表示每包都输出。
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_task_ld2402_set_log_gap_ms(uint32_t gap_ms);
+
+/**
+ * @brief 获取 LD2402 运行态日志最小输出间隔。
+ *
+ * @return uint32_t 间隔毫秒。
+ */
+uint32_t ws63_task_ld2402_get_log_gap_ms(void);
+
+/**
+ * @brief 设置 SLE 上行 success 日志开关。
+ *
+ * @param enable 1=开启，0=关闭。
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_task_sle_uplink_log_set_enable(uint8_t enable);
+
+/**
+ * @brief 获取 SLE 上行 success 日志开关。
+ *
+ * @return uint8_t 1=开启，0=关闭。
+ */
+uint8_t ws63_task_sle_uplink_log_get_enable(void);
+
+/**
+ * @brief 设置 SLE 上行 success 日志最小输出间隔。
+ *
+ * @param gap_ms 间隔毫秒，0 表示每次 success 都打印。
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_task_sle_uplink_log_set_gap_ms(uint32_t gap_ms);
+
+/**
+ * @brief 获取 SLE 上行 success 日志最小输出间隔。
+ *
+ * @return uint32_t 间隔毫秒。
+ */
+uint32_t ws63_task_sle_uplink_log_get_gap_ms(void);
+
+/**
  * @brief 重新初始化 ZW101（触发握手检测）。
  *
  * @return errcode_t ERRCODE_SUCC 成功，其他失败。

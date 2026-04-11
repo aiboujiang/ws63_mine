@@ -113,6 +113,16 @@ extern "C" {
 /* 调试输出节流周期。 */
 #define WS63_LOG_GAP_MS         1000U
 
+/* LD2402 运行态日志默认策略：1=开启日志（按间隔输出），0=关闭运行态日志。 */
+#define WS63_LD2402_DATA_LOG_ENABLE_DEFAULT         1U
+/* LD2402 运行态日志默认间隔（ms），0 表示不做时间节流。 */
+#define WS63_LD2402_DATA_LOG_GAP_MS_DEFAULT         1000U
+
+/* SLE 上行 success 日志默认策略：1=开启，0=关闭（仅保留失败日志）。 */
+#define WS63_SLE_UPLINK_SUCCESS_LOG_ENABLE_DEFAULT  0U
+/* SLE 上行 success 日志默认间隔（ms），0 表示每次成功都打印。 */
+#define WS63_SLE_UPLINK_SUCCESS_LOG_GAP_MS_DEFAULT  2000U
+
 /* ----------------------------- 调试串口命令配置 ---------------------------- */
 /* 在线控测串口开关：0=关闭，1=开启。 */
 #define WS63_DEBUG_UART_ENABLE          1U

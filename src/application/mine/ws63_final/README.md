@@ -59,6 +59,35 @@ ws63_final/
 
 ## 8. 任务维护记录
 
+### 2026-04-11: LD2402 上电刷屏限制（运行态节流 + 运行时开关）
+
+变更摘要：
+- 修复 `ws63_final` 中 LD2402 上电后运行态日志持续刷屏问题：在 Driver 层对 `LD2402 processing ...` 增加时间节流，默认每 1000ms 最多输出一次。
+- 保留初始化/失败诊断日志（如 `init try`、`init failed`），确保链路故障定位能力不受影响。
+- SLE 中间件将 `uplink send success` 从“每包打印”改为“可开关 + 间隔节流 + 抑制计数”，默认关闭 success 逐包日志，失败日志保持即时输出。
+- 调试串口新增运行时控制命令：`LD2401 LOG ON|OFF`、`LD2401 LOGINT <ms>`、`LD2401 LOGSTAT`、`SLE ULOG ON|OFF`、`SLE ULOGINT <ms>`、`SLE ULOGSTAT`，无需重编译即可现场调节日志强度。
+- 配置层新增默认策略宏，统一控制 LD2402 与 SLE success 日志初始行为。
+
+影响文件：
+- `src/application/mine/ws63_final/Config/ws63_final_config.h`
+- `src/application/mine/ws63_final/Driver/ld2402.h`
+- `src/application/mine/ws63_final/Driver/ld2402.c`
+- `src/application/mine/ws63_final/Middleware/ws63_final_sle.h`
+- `src/application/mine/ws63_final/Middleware/ws63_final_sle.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task.h`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_sensor_bridge.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_debug.c`
+- `src/application/mine/ws63_final/DEBUG_COMMANDS.md`
+- `src/application/mine/ws63_final/README.md`
+
+验证结果：
+- 命令：`cd /home/xixi/code/fbb_ws63_20260114/src && python3 build.py ws63-liteos-app`
+- 结果：构建通过（`Build target:ws63_liteos_app success`）。
+
+后续事项：
+- 上板可先执行 `LD2401 LOGSTAT` 与 `SLE ULOGSTAT` 确认默认策略，再按现场需要用 `LOGINT` 动态调整节流窗口。
+- 若需临时抓全量包级日志，可将间隔设为 `0`（例如 `LD2401 LOGINT 0` / `SLE ULOGINT 0`）。
+
 ### 2026-04-10: WK2114 主口读路径防卡死修复（规避 uapi_uart_read 长轮询）
 
 变更摘要：

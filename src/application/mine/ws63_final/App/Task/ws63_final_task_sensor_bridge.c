@@ -9,6 +9,7 @@
 
 #include "ws63_final_common.h"
 #include "ws63_final_config.h"
+#include "ws63_final_sle.h"
 #include "wk2114.h"
 #include "ld2402.h"
 #include "zw101.h"
@@ -39,6 +40,70 @@ errcode_t ws63_task_ld2402_send_raw(const uint8_t *data, uint16_t len)
     }
 
     return wk2114_subport_write(LD2402_SUBPORT, data, len);
+}
+
+/**
+ * @brief 设置 LD2402 运行态日志开关。
+ */
+errcode_t ws63_task_ld2402_set_log_enable(uint8_t enable)
+{
+    return ld2402_set_data_log_enable(enable);
+}
+
+/**
+ * @brief 获取 LD2402 运行态日志开关。
+ */
+uint8_t ws63_task_ld2402_get_log_enable(void)
+{
+    return ld2402_get_data_log_enable();
+}
+
+/**
+ * @brief 设置 LD2402 运行态日志最小输出间隔。
+ */
+errcode_t ws63_task_ld2402_set_log_gap_ms(uint32_t gap_ms)
+{
+    return ld2402_set_data_log_gap_ms(gap_ms);
+}
+
+/**
+ * @brief 获取 LD2402 运行态日志最小输出间隔。
+ */
+uint32_t ws63_task_ld2402_get_log_gap_ms(void)
+{
+    return ld2402_get_data_log_gap_ms();
+}
+
+/**
+ * @brief 设置 SLE 上行 success 日志开关。
+ */
+errcode_t ws63_task_sle_uplink_log_set_enable(uint8_t enable)
+{
+    return ws63_sle_set_uplink_success_log_enable(enable);
+}
+
+/**
+ * @brief 获取 SLE 上行 success 日志开关。
+ */
+uint8_t ws63_task_sle_uplink_log_get_enable(void)
+{
+    return ws63_sle_get_uplink_success_log_enable();
+}
+
+/**
+ * @brief 设置 SLE 上行 success 日志最小输出间隔。
+ */
+errcode_t ws63_task_sle_uplink_log_set_gap_ms(uint32_t gap_ms)
+{
+    return ws63_sle_set_uplink_success_log_gap_ms(gap_ms);
+}
+
+/**
+ * @brief 获取 SLE 上行 success 日志最小输出间隔。
+ */
+uint32_t ws63_task_sle_uplink_log_get_gap_ms(void)
+{
+    return ws63_sle_get_uplink_success_log_gap_ms();
 }
 
 /**
