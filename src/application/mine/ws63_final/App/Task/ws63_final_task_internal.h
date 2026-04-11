@@ -100,6 +100,13 @@ void ws63_task_buzzer_init(void);
 errcode_t ws63_beep_task_start(void);
 
 /**
+ * @brief 启动 TTP229 独立任务。
+ *
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_ttp229_task_start(void);
+
+/**
  * @brief 向 WK2114 发送队列投递消息。
  */
 errcode_t ws63_task_post_wk2114_tx(const ws63_wk2114_tx_msg_t *msg, uint32_t timeout);

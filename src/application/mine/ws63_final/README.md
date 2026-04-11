@@ -526,3 +526,35 @@ ws63_final/
 后续事项：
 - 若现场并发负载持续升高，可优先调大 `WS63_WK2114_TX_QUEUE_DEPTH` 与 `WS63_SLE_UPLINK_QUEUE_DEPTH`。
 - 若发现任务栈水位偏低，建议先提高 `WS63_SLE_TASK_STACK_SIZE`，再评估 `WS63_WK2114_TASK_STACK_SIZE`。
+
+### 2026-04-11: TTP229 触摸键盘接入 ws63_final（GPIO16/15）
+
+变更摘要：
+- 新增 TTP229 BSP/Driver/Task 三层实现，遵循 `ws63_final` 分层架构，硬件操作仅放在 BSP。
+- 固定接线配置：`SCL=GPIO16`、`SDO(板上标注 SDA)=GPIO15`，并在配置层新增时序与任务参数宏。
+- 新增 TTP229 独立任务与状态机（`INIT/DISABLED/READY/FAULT`），支持运行时启停与重初始化。
+- 统一按键语义为“位为 1 表示按下”，并新增“多键同时按下报警”机制。
+- 调试串口新增 `TTP229 INIT/STAT/READ/MASK/ENABLE/ALARM` 命令，便于现场联调与排障。
+
+影响文件：
+- `src/application/mine/ws63_final/Config/ws63_final_config.h`
+- `src/application/mine/ws63_final/BSP/ws63_final_bsp.h`
+- `src/application/mine/ws63_final/BSP/ws63_final_bsp_ttp229.c`
+- `src/application/mine/ws63_final/Driver/ws63_ttp229.h`
+- `src/application/mine/ws63_final/Driver/ws63_ttp229.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task.h`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_internal.h`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_debug.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_ttp229.c`
+- `src/application/mine/ws63_final/CMakeLists.txt`
+- `src/application/mine/ws63_final/DEBUG_COMMANDS.md`
+- `src/application/mine/ws63_final/README.md`
+
+验证结果：
+- 命令：`cd /home/xixi/code/fbb_ws63_20260114/src && python3 build.py ws63-liteos-app`
+- 结果：构建通过（`Build target:ws63_liteos_app success`）。
+
+后续事项：
+- 上板重点验证 `TTP229 READ` 返回位图是否满足“位1=按下”语义。
+- 若 `mask` 长期固定不变，优先检查 GPIO15/16 接线与 TTP229 时序参数。

@@ -271,6 +271,42 @@ extern "C" {
 /* PWM v151 计数位宽上限（16bit）。 */
 #define WS63_BEEP_PWM_PERIOD_TICKS_MAX  0xFFFFU
 
+/* ----------------------------- TTP229 触摸键盘配置 ----------------------------- */
+/* TTP229 功能开关：0=关闭，1=开启。 */
+#define WS63_TTP229_ENABLE                      1U
+
+/* TTP229 接线：SCL=GPIO16，SDO(板上标注 SDA)=GPIO15。 */
+#define WS63_TTP229_SCL_PIN                     GPIO_16
+#define WS63_TTP229_SDO_PIN                     GPIO_15
+
+/* TTP229 引脚复用模式：默认按 GPIO 输入输出模式。 */
+#define WS63_TTP229_SCL_PIN_MODE                0
+#define WS63_TTP229_SDO_PIN_MODE                0
+
+/* TTP229 独立任务参数。 */
+#define WS63_TTP229_TASK_STACK_SIZE             2048U
+#define WS63_TTP229_TASK_PRIORITY               27U
+#define WS63_TTP229_TASK_POLL_MS                10U
+#define WS63_TTP229_INIT_RETRY_MS               500U
+
+/* 状态机默认开关：支持运行时通过调试命令启停。 */
+#define WS63_TTP229_ENABLE_DEFAULT              1U
+
+/* 多键报警默认开关：1=开启，2键及以上同时按下时告警。 */
+#define WS63_TTP229_MULTI_KEY_ALARM_DEFAULT     1U
+
+/*
+ * TTP229 扫描时序参数（参考现有移植代码）：
+ * 1) 起始脉冲：高电平 93us，低电平 10us；
+ * 2) 位时钟脉冲：高/低电平宽度；
+ * 3) 一次读取结束后的间隔延时。
+ */
+#define WS63_TTP229_START_PULSE_HIGH_US         93U
+#define WS63_TTP229_START_PULSE_LOW_US          10U
+#define WS63_TTP229_SCL_PULSE_HIGH_US           2U
+#define WS63_TTP229_SCL_PULSE_LOW_US            2U
+#define WS63_TTP229_READ_GAP_MS                 4U
+
 #ifdef __cplusplus
 #if __cplusplus
 }

@@ -292,6 +292,78 @@ errcode_t ws63_task_zw101_za_auto_search_echo(uint8_t wait_time,
 errcode_t ws63_task_zw101_za_terminate(uint8_t *ack_out);
 
 /**
+ * @brief 触发 TTP229 状态机重初始化。
+ *
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_task_ttp229_reinit(void);
+
+/**
+ * @brief 设置 TTP229 状态机使能。
+ *
+ * @param enable 1=启用采样，0=暂停采样。
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_task_ttp229_set_enable(uint8_t enable);
+
+/**
+ * @brief 查询 TTP229 驱动是否就绪。
+ *
+ * @return uint8_t 1=就绪，0=未就绪。
+ */
+uint8_t ws63_task_ttp229_is_ready(void);
+
+/**
+ * @brief 查询 TTP229 状态机是否启用。
+ *
+ * @return uint8_t 1=启用，0=关闭。
+ */
+uint8_t ws63_task_ttp229_is_enabled(void);
+
+/**
+ * @brief 设置 TTP229 多键报警开关。
+ *
+ * @param enable 1=开启报警，0=关闭报警。
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_task_ttp229_set_multi_key_alarm(uint8_t enable);
+
+/**
+ * @brief 查询 TTP229 多键报警是否开启。
+ *
+ * @return uint8_t 1=开启，0=关闭。
+ */
+uint8_t ws63_task_ttp229_is_multi_key_alarm_enable(void);
+
+/**
+ * @brief 查询当前是否处于多键报警状态。
+ *
+ * @return uint8_t 1=处于报警，0=未报警。
+ */
+uint8_t ws63_task_ttp229_is_multi_key_active(void);
+
+/**
+ * @brief 获取 TTP229 最近一次原始 16 位码。
+ *
+ * @return uint16_t 原始码值。
+ */
+uint16_t ws63_task_ttp229_get_raw_code(void);
+
+/**
+ * @brief 获取 TTP229 最近一次按下掩码（位1=按下）。
+ *
+ * @return uint16_t 按下掩码。
+ */
+uint16_t ws63_task_ttp229_get_pressed_mask(void);
+
+/**
+ * @brief 获取 TTP229 最近一次按下按键数量。
+ *
+ * @return uint8_t 按键数量（0~16）。
+ */
+uint8_t ws63_task_ttp229_get_pressed_count(void);
+
+/**
  * @brief 获取编码器最新 RPM。
  *
  * @return int32_t 有符号 RPM。

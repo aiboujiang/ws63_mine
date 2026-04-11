@@ -2,13 +2,14 @@
 
 ## 1. 适用范围
 
-本手册适用于 `ws63_final` 模块中的电机、编码器、蜂鸣器、RGB、LD2401（兼容 LD2402）与 ZW101 在线控测命令。
+本手册适用于 `ws63_final` 模块中的电机、编码器、蜂鸣器、RGB、TTP229、LD2401（兼容 LD2402）与 ZW101 在线控测命令。
 
 目标：
 - 通过串口实时控制电机正反转、停止、刹车与占空比。
 - 通过串口实时查看编码器 RPM、窗口增量与累计计数。
 - 通过串口实时控制蜂鸣器开关与频率。
 - 通过串口实时控制 RGB 颜色、开关与演示模式。
+- 通过串口实时读取 TTP229 按键掩码并控制状态机/报警开关。
 - 通过串口在线触发 LD2401/ZW101 初始化握手及发送原始调试帧。
 - 通过串口在线验证 ZW101 ZA 兼容命令链路（回显/自动登录/自动搜索/终止）。
 - 通过统一日志格式快速定位指令执行状态。
@@ -130,7 +131,31 @@
 - `RGB STAT`
   - 功能：查询 RGB 驱动就绪状态与演示模式状态。
 
-### 3.7 LD2401（兼容 LD2402）调试命令
+### 3.7 TTP229 调试命令
+
+- `TTP229 INIT`
+  - 功能：触发 TTP229 状态机重初始化。
+
+- `TTP229 STAT`
+  - 功能：查询 TTP229 当前就绪状态、使能状态、报警状态、原始码与按下掩码。
+
+- `TTP229 READ`
+  - 功能：读取并输出最近一次采样缓存（`raw/mask/count`）。
+
+- `TTP229 MASK`
+  - 功能：`READ` 命令别名。
+
+- `TTP229 ENABLE ON|OFF`
+  - 功能：控制 TTP229 状态机启停。
+
+- `TTP229 ALARM ON|OFF`
+  - 功能：控制“多键同时按下报警”开关。
+
+说明：
+- 当前按键语义已统一为“位为 1 表示按下”。
+- 当 `count>=2` 且报警开启时，会输出 `multi-key alarm` 告警日志。
+
+### 3.8 LD2401（兼容 LD2402）调试命令
 
 - `LD2401 INIT`（或 `LD2402 INIT`）
   - 功能：重新初始化 LD2401/LD2402 模块并执行握手检测。
@@ -142,7 +167,7 @@
 - `LD2401 STAT`（或 `LD2402 STAT`）
   - 功能：输出当前命令映射的子串口信息。
 
-### 3.8 ZW101 调试命令
+### 3.9 ZW101 调试命令
 
 - `ZW101 INIT`
   - 功能：重新初始化 ZW101 模块并执行握手检测。
@@ -231,8 +256,10 @@
 7. 发送 `MOTOR WATCH OFF` 结束监控。
 8. 发送 `BEEP ON 2000` + `BEEP VOL 30`，验证蜂鸣器频率与音量调节。
 9. 发送 `RGB INIT`、`RGB SET 255 0 0`、`RGB DEMO ON`，验证 RGB 固定色与演示模式切换。
-10. 发送 `LD2401 INIT`、`ZW101 HANDSHAKE`，验证两类模块调试链路。
-11. 发送 `ZW101 ZA ECHO`、`ZW101 ZA SEARCH 20 0 10`，验证 ZA 兼容命令通信链路。
+10. 发送 `TTP229 STAT`、`TTP229 READ`，验证触摸键盘采样与位图语义（位1=按下）。
+11. 同时按下两个触摸键，观察是否出现多键报警日志。
+12. 发送 `LD2401 INIT`、`ZW101 HANDSHAKE`，验证两类模块调试链路。
+13. 发送 `ZW101 ZA ECHO`、`ZW101 ZA SEARCH 20 0 10`，验证 ZA 兼容命令通信链路。
 
 ## 6. 常见问题
 
@@ -263,6 +290,10 @@
   - 说明：通常是演示模式仍处于开启状态；可先执行 `RGB DEMO OFF` 再设置固定颜色。
   - 排查：若命令返回失败，检查 `WS63_RGB_ENABLE` 是否开启并确认 SPI1 引脚连接。
 
+- 现象：`TTP229 STAT` 中 `mask` 始终为 `0x0000` 或 `0xFFFF`。
+  - 排查：确认接线为 `SCL->GPIO16`、`SDO(板上标注SDA)->GPIO15`，并检查供电与地线。
+  - 排查：若接线无误，按规格书复核时序参数（起始脉冲/时钟脉冲）是否匹配当前模组。
+
 - 现象：`LD2401 RAW` / `ZW101 RAW` 返回参数错误。
   - 排查：确保使用两位十六进制字节并用空格分隔，例如 `AA 55 01 0F`。
   - 排查：避免输入奇数字符数（例如 `A B2`），解析器会直接判定为非法。
@@ -280,7 +311,10 @@
 - `src/application/mine/ws63_final/App/Task/ws63_final_task.c`
 - `src/application/mine/ws63_final/Config/ws63_final_config.h`
 - `src/application/mine/ws63_final/BSP/ws63_final_bsp.c`
+- `src/application/mine/ws63_final/BSP/ws63_final_bsp_ttp229.c`
 - `src/application/mine/ws63_final/BSP/ws63_final_bsp_beep.c`
 - `src/application/mine/ws63_final/Driver/ws63_buzzer.c`
+- `src/application/mine/ws63_final/Driver/ws63_ttp229.c`
 - `src/application/mine/ws63_final/App/Task/ws63_final_task_rgb.c`
 - `src/application/mine/ws63_final/App/Task/ws63_final_task_debug.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_ttp229.c`

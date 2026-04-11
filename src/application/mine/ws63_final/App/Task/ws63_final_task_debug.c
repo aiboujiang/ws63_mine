@@ -580,6 +580,27 @@ static void ws63_debug_dump_rgb_status(const char *tag)
 }
 
 /**
+ * @brief Êä³öµ±Ç° TTP229 ×´Ì¬¡£
+ */
+static void ws63_debug_dump_ttp229_status(const char *tag)
+{
+#if (WS63_TTP229_ENABLE == 1U)
+    ws63_debug_log("[ws63 dbg] %s ttp229=%s enable=%s alarm=%s active=%s raw=0x%04x mask=0x%04x count=%u\r\n",
+        (tag == NULL) ? "ttp229" : tag,
+        (ws63_task_ttp229_is_ready() == 1U) ? "READY" : "NOT_READY",
+        (ws63_task_ttp229_is_enabled() == 1U) ? "ON" : "OFF",
+        (ws63_task_ttp229_is_multi_key_alarm_enable() == 1U) ? "ON" : "OFF",
+        (ws63_task_ttp229_is_multi_key_active() == 1U) ? "ON" : "OFF",
+        (unsigned int)ws63_task_ttp229_get_raw_code(),
+        (unsigned int)ws63_task_ttp229_get_pressed_mask(),
+        (unsigned int)ws63_task_ttp229_get_pressed_count());
+#else
+    ws63_debug_log("[ws63 dbg] %s ttp229=DISABLED\r\n",
+        (tag == NULL) ? "ttp229" : tag);
+#endif
+}
+
+/**
  * @brief ´òÓ¡µ÷ÊÔÃüÁî°ïÖú¡£
  */
 static void ws63_debug_print_help(void)
@@ -605,6 +626,12 @@ static void ws63_debug_print_help(void)
     ws63_debug_log("[ws63 dbg]   RGB OFF\r\n");
     ws63_debug_log("[ws63 dbg]   RGB DEMO ON|OFF\r\n");
     ws63_debug_log("[ws63 dbg]   RGB STAT\r\n");
+    ws63_debug_log("[ws63 dbg]   TTP229 INIT\r\n");
+    ws63_debug_log("[ws63 dbg]   TTP229 STAT\r\n");
+    ws63_debug_log("[ws63 dbg]   TTP229 READ\r\n");
+    ws63_debug_log("[ws63 dbg]   TTP229 MASK\r\n");
+    ws63_debug_log("[ws63 dbg]   TTP229 ENABLE ON|OFF\r\n");
+    ws63_debug_log("[ws63 dbg]   TTP229 ALARM ON|OFF\r\n");
     ws63_debug_log("[ws63 dbg]   LD2401 INIT (alias LD2402)\r\n");
     ws63_debug_log("[ws63 dbg]   LD2401 RAW <HEX...>\r\n");
     ws63_debug_log("[ws63 dbg]   LD2401 STAT\r\n");
@@ -782,6 +809,54 @@ static void ws63_debug_exec_command(const char *line)
 
     if (strcmp(cmd, "RGB STAT") == 0) {
         ws63_debug_dump_rgb_status("rgb-query");
+        return;
+    }
+
+    if (strcmp(cmd, "TTP229 INIT") == 0) {
+        ret = ws63_task_ttp229_reinit();
+        ws63_debug_log("[ws63 dbg] TTP229 INIT ret=0x%x\r\n", (unsigned int)ret);
+        ws63_debug_dump_ttp229_status("ttp229-init");
+        return;
+    }
+
+    if (strcmp(cmd, "TTP229 STAT") == 0) {
+        ws63_debug_dump_ttp229_status("ttp229-query");
+        return;
+    }
+
+    if ((strcmp(cmd, "TTP229 READ") == 0) || (strcmp(cmd, "TTP229 MASK") == 0)) {
+        ws63_debug_log("[ws63 dbg] TTP229 raw=0x%04x mask=0x%04x count=%u\r\n",
+            (unsigned int)ws63_task_ttp229_get_raw_code(),
+            (unsigned int)ws63_task_ttp229_get_pressed_mask(),
+            (unsigned int)ws63_task_ttp229_get_pressed_count());
+        return;
+    }
+
+    if (strcmp(cmd, "TTP229 ENABLE ON") == 0) {
+        ret = ws63_task_ttp229_set_enable(1U);
+        ws63_debug_log("[ws63 dbg] TTP229 ENABLE ON ret=0x%x\r\n", (unsigned int)ret);
+        ws63_debug_dump_ttp229_status("ttp229-enable");
+        return;
+    }
+
+    if (strcmp(cmd, "TTP229 ENABLE OFF") == 0) {
+        ret = ws63_task_ttp229_set_enable(0U);
+        ws63_debug_log("[ws63 dbg] TTP229 ENABLE OFF ret=0x%x\r\n", (unsigned int)ret);
+        ws63_debug_dump_ttp229_status("ttp229-enable");
+        return;
+    }
+
+    if (strcmp(cmd, "TTP229 ALARM ON") == 0) {
+        ret = ws63_task_ttp229_set_multi_key_alarm(1U);
+        ws63_debug_log("[ws63 dbg] TTP229 ALARM ON ret=0x%x\r\n", (unsigned int)ret);
+        ws63_debug_dump_ttp229_status("ttp229-alarm");
+        return;
+    }
+
+    if (strcmp(cmd, "TTP229 ALARM OFF") == 0) {
+        ret = ws63_task_ttp229_set_multi_key_alarm(0U);
+        ws63_debug_log("[ws63 dbg] TTP229 ALARM OFF ret=0x%x\r\n", (unsigned int)ret);
+        ws63_debug_dump_ttp229_status("ttp229-alarm");
         return;
     }
 

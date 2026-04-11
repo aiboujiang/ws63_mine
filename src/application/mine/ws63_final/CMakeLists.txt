@@ -11,6 +11,7 @@ set(SOURCES
     "BSP/ws63_final_bsp_rgb.c"
     "BSP/ws63_final_bsp_motor_encoder.c"
     "BSP/ws63_final_bsp_beep.c"
+    "BSP/ws63_final_bsp_ttp229.c"
     "Driver/wk2114.c"
     "Driver/ld2402.c"
     "Driver/zw101.c"
@@ -19,6 +20,7 @@ set(SOURCES
     "Driver/ws63_motor.c"
     "Driver/ws63_encoder.c"
     "Driver/ws63_buzzer.c"
+    "Driver/ws63_ttp229.c"
     "Middleware/ws63_final_osal.c"
     "Middleware/ws63_final_sle.c"
     "App/Task/ws63_final_task.c"
@@ -26,6 +28,7 @@ set(SOURCES
     "App/Task/ws63_final_task_device_ctrl.c"
     "App/Task/ws63_final_task_sensor_bridge.c"
     "App/Task/ws63_final_task_debug.c"
+    "App/Task/ws63_final_task_ttp229.c"
     "App/Main/ws63_final_main.c"
 )
 

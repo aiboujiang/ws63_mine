@@ -608,6 +608,12 @@ void *ws63_task_entry(const char *arg)
         osal_printk("[wk2114 final task] start beep task fail\r\n");
     }
 
+#if (WS63_TTP229_ENABLE == 1U)
+    if (ws63_ttp229_task_start() != ERRCODE_SUCC) {
+        osal_printk("[wk2114 final task] start ttp229 task fail\r\n");
+    }
+#endif
+
     while (1) {
         uint32_t now_ms;
 
