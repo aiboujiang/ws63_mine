@@ -6,6 +6,7 @@
 #include "ws63_final_task_internal.h"
 
 #include "osal_debug.h"
+#include "securec.h"
 
 #include "ws63_final_config.h"
 #include "ws63_final_osal.h"
@@ -36,6 +37,108 @@ static ws63_ttp229_sample_t g_ws63_ttp229_last_sample = {
     .pressed_count = 0U,
     .multi_key = 0U
 };
+
+/*
+ * 实测得到的按键位图映射。
+ *
+ * 说明：TTP229 仍然以 raw 位图为准，这里只负责把物理按键标签映射成
+ * 可读文本，便于调试输出和现场联调。
+ */
+typedef struct {
+    uint16_t mask;
+    const char *label;
+} ws63_ttp229_key_map_t;
+
+static const ws63_ttp229_key_map_t g_ws63_ttp229_key_map[] = {
+    {0x1000U, "A"},
+    {0x2000U, "B"},
+    {0x4000U, "C"},
+    {0x8000U, "D"},
+    {0x0001U, "1"},
+    {0x0010U, "2"},
+    {0x0100U, "3"},
+    {0x0008U, "*"},
+    {0x0080U, "0"},
+    {0x0800U, "#"}
+};
+
+/**
+ * @brief 将按键位图格式化成可读文本。
+ *
+ * @param pressed_mask 位图（位为 1 表示按下）。
+ * @param text 输出缓冲区。
+ * @param text_len 输出缓冲区长度。
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+static errcode_t ws63_ttp229_format_pressed_text(uint16_t pressed_mask, char *text, uint16_t text_len)
+{
+    uint16_t known_mask = 0U;
+    uint16_t used_len = 0U;
+    uint16_t unknown_mask;
+    uint16_t i;
+    int32_t ret;
+
+    if ((text == NULL) || (text_len == 0U)) {
+        return ERRCODE_INVALID_PARAM;
+    }
+
+    text[0] = '\0';
+
+    for (i = 0U; i < (uint16_t)(sizeof(g_ws63_ttp229_key_map) / sizeof(g_ws63_ttp229_key_map[0])); i++) {
+        const ws63_ttp229_key_map_t *map = &g_ws63_ttp229_key_map[i];
+
+        known_mask = (uint16_t)(known_mask | map->mask);
+        if ((pressed_mask & map->mask) == 0U) {
+            continue;
+        }
+
+        if (used_len >= text_len) {
+            return ERRCODE_INVALID_PARAM;
+        }
+
+        /* 先输出分隔符，再输出标签，保证多键结果按 A+B 这种形式展示。 */
+        ret = snprintf_s(text + used_len,
+            (size_t)(text_len - used_len),
+            (size_t)(text_len - used_len - 1U),
+            "%s%s",
+            (used_len == 0U) ? "" : "+",
+            map->label);
+        if (ret < 0) {
+            return ERRCODE_FAIL;
+        }
+
+        used_len = (uint16_t)(used_len + (uint16_t)ret);
+    }
+
+    unknown_mask = (uint16_t)(pressed_mask & (uint16_t)(~known_mask));
+    if (unknown_mask != 0U) {
+        if (used_len >= text_len) {
+            return ERRCODE_INVALID_PARAM;
+        }
+
+        /* 未知位仍然按十六进制保留，避免现场调试时丢失原始信息。 */
+        ret = snprintf_s(text + used_len,
+            (size_t)(text_len - used_len),
+            (size_t)(text_len - used_len - 1U),
+            "%s0x%04x",
+            (used_len == 0U) ? "" : "+",
+            (unsigned int)unknown_mask);
+        if (ret < 0) {
+            return ERRCODE_FAIL;
+        }
+
+        used_len = (uint16_t)(used_len + (uint16_t)ret);
+    }
+
+    if (used_len == 0U) {
+        ret = snprintf_s(text, (size_t)text_len, (size_t)(text_len - 1U), "NONE");
+        if (ret < 0) {
+            return ERRCODE_FAIL;
+        }
+    }
+
+    return ERRCODE_SUCC;
+}
 
 /**
  * @brief TTP229 状态锁。
@@ -105,9 +208,14 @@ static void ws63_ttp229_handle_alarm_transition(const ws63_ttp229_sample_t *samp
     unsigned int irq_status;
     uint8_t alarm_enable;
     uint8_t alarm_active;
+    char key_text[64] = {0};
 
     if (sample == NULL) {
         return;
+    }
+
+    if (ws63_ttp229_format_pressed_text(sample->pressed_mask, key_text, sizeof(key_text)) != ERRCODE_SUCC) {
+        (void)strncpy_s(key_text, sizeof(key_text), "ERR", 3U);
     }
 
     irq_status = ws63_ttp229_lock();
@@ -125,9 +233,10 @@ static void ws63_ttp229_handle_alarm_transition(const ws63_ttp229_sample_t *samp
     }
 
     if ((sample->multi_key != 0U) && (alarm_active == 0U)) {
-        osal_printk("[wk2114 final task] TTP229 multi-key alarm mask=0x%04x count=%u\r\n",
+        osal_printk("[wk2114 final task] TTP229 multi-key alarm mask=0x%04x count=%u keys=%s\r\n",
             (unsigned int)sample->pressed_mask,
-            (unsigned int)sample->pressed_count);
+            (unsigned int)sample->pressed_count,
+            key_text);
         irq_status = ws63_ttp229_lock();
         g_ws63_ttp229_multi_alarm_active = 1U;
         ws63_ttp229_unlock(irq_status);
@@ -464,5 +573,32 @@ uint8_t ws63_task_ttp229_get_pressed_count(void)
     pressed_count = g_ws63_ttp229_last_sample.pressed_count;
     ws63_ttp229_unlock(irq_status);
     return pressed_count;
+#endif
+}
+
+/**
+ * @brief 获取最近一次按键标签文本。
+ */
+errcode_t ws63_task_ttp229_get_pressed_text(char *text, uint16_t text_len)
+{
+#if (WS63_TTP229_ENABLE != 1U)
+    (void)text;
+    (void)text_len;
+    return ERRCODE_FAIL;
+#else
+    unsigned int irq_status;
+    ws63_ttp229_sample_t sample;
+
+    if ((text == NULL) || (text_len == 0U)) {
+        return ERRCODE_INVALID_PARAM;
+    }
+
+    text[0] = '\0';
+
+    irq_status = ws63_ttp229_lock();
+    sample = g_ws63_ttp229_last_sample;
+    ws63_ttp229_unlock(irq_status);
+
+    return ws63_ttp229_format_pressed_text(sample.pressed_mask, text, text_len);
 #endif
 }

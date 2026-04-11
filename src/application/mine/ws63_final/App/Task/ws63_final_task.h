@@ -424,6 +424,18 @@ uint16_t ws63_task_ttp229_get_pressed_mask(void);
 uint8_t ws63_task_ttp229_get_pressed_count(void);
 
 /**
+ * @brief Get the latest TTP229 key label text.
+ *
+ * The text follows the measured board mapping and keeps multi-key presses as
+ * additive labels, for example A+B when both keys are pressed.
+ *
+ * @param text Output buffer.
+ * @param text_len Output buffer length.
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_task_ttp229_get_pressed_text(char *text, uint16_t text_len);
+
+/**
  * @brief 获取编码器最新 RPM。
  *
  * @return int32_t 有符号 RPM。

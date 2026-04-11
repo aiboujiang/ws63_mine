@@ -653,3 +653,26 @@ ws63_final/
 后续事项：
 - 上板重点验证 `TTP229 READ` 返回位图是否满足“位1=按下”语义。
 - 若 `mask` 长期固定不变，优先检查 GPIO15/16 接线与 TTP229 时序参数。
+
+### 2026-04-11: TTP229 实测映射落地
+
+变更摘要：
+- 按现场实测确认 TTP229 raw 映射：A=0x1000、B=0x2000、C=0x4000、D=0x8000、1=0x0001、2=0x0010、3=0x0100、*=0x0008、0=0x0080、#=0x0800。
+- 多键同时按下保持按位相加语义，调试输出新增 `keys=` 可读标签，便于直接对照物理键位。
+- BSP 去掉内部上拉尝试，保持只使用板上外置上拉，不再把可恢复的引脚差异当成初始化路径的一部分。
+
+影响文件：
+- `src/application/mine/ws63_final/BSP/ws63_final_bsp_ttp229.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task.h`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_ttp229.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_debug.c`
+- `src/application/mine/ws63_final/DEBUG_COMMANDS.md`
+- `src/application/mine/ws63_final/README.md`
+
+验证结果：
+- 命令：`cd /home/xixi/code/fbb_ws63_20260114/src && python3 build.py ws63-liteos-app`
+- 结果：构建通过（`Build target:ws63_liteos_app success`）。
+
+后续事项：
+- 上板时优先验证 `TTP229 READ` / `TTP229 WATCH ON` 的 `keys=` 输出是否与 A/B/C/D/1/2/3/*/0/# 一致。
+- 如后续补充更多按键标签，只需扩展 Task 层映射表，不影响 BSP 读码。

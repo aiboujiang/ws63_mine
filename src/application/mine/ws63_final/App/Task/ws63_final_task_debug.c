@@ -589,7 +589,13 @@ static void ws63_debug_dump_rgb_status(const char *tag)
 static void ws63_debug_dump_ttp229_status(const char *tag)
 {
 #if (WS63_TTP229_ENABLE == 1U)
-    ws63_debug_log("[ws63 dbg] %s ttp229=%s enable=%s alarm=%s active=%s raw=0x%04x mask=0x%04x count=%u\r\n",
+    char key_text[64] = {0};
+
+    if (ws63_task_ttp229_get_pressed_text(key_text, sizeof(key_text)) != ERRCODE_SUCC) {
+        (void)strncpy_s(key_text, sizeof(key_text), "ERR", 3U);
+    }
+
+    ws63_debug_log("[ws63 dbg] %s ttp229=%s enable=%s alarm=%s active=%s raw=0x%04x mask=0x%04x count=%u keys=%s\r\n",
         (tag == NULL) ? "ttp229" : tag,
         (ws63_task_ttp229_is_ready() == 1U) ? "READY" : "NOT_READY",
         (ws63_task_ttp229_is_enabled() == 1U) ? "ON" : "OFF",
@@ -597,7 +603,8 @@ static void ws63_debug_dump_ttp229_status(const char *tag)
         (ws63_task_ttp229_is_multi_key_active() == 1U) ? "ON" : "OFF",
         (unsigned int)ws63_task_ttp229_get_raw_code(),
         (unsigned int)ws63_task_ttp229_get_pressed_mask(),
-        (unsigned int)ws63_task_ttp229_get_pressed_count());
+        (unsigned int)ws63_task_ttp229_get_pressed_count(),
+        key_text);
 #else
     ws63_debug_log("[ws63 dbg] %s ttp229=DISABLED\r\n",
         (tag == NULL) ? "ttp229" : tag);
@@ -858,10 +865,17 @@ static void ws63_debug_exec_command(const char *line)
     }
 
     if ((strcmp(cmd, "TTP229 READ") == 0) || (strcmp(cmd, "TTP229 MASK") == 0)) {
-        ws63_debug_log("[ws63 dbg] TTP229 raw=0x%04x mask=0x%04x count=%u\r\n",
+        char key_text[64] = {0};
+
+        if (ws63_task_ttp229_get_pressed_text(key_text, sizeof(key_text)) != ERRCODE_SUCC) {
+            (void)strncpy_s(key_text, sizeof(key_text), "ERR", 3U);
+        }
+
+        ws63_debug_log("[ws63 dbg] TTP229 raw=0x%04x mask=0x%04x count=%u keys=%s\r\n",
             (unsigned int)ws63_task_ttp229_get_raw_code(),
             (unsigned int)ws63_task_ttp229_get_pressed_mask(),
-            (unsigned int)ws63_task_ttp229_get_pressed_count());
+            (unsigned int)ws63_task_ttp229_get_pressed_count(),
+            key_text);
         return;
     }
 

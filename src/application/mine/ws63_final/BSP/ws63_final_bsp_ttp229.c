@@ -19,6 +19,9 @@
 
 /**
  * @brief 初始化 TTP229 I2C 相关引脚与主机控制器。
+ *
+ * 说明：板级已经提供外部上拉，这里只做 I2C 复用和主机初始化，避免
+ * 额外的内部上拉配置和外部上拉互相干扰。
  */
 errcode_t ws63_bsp_ttp229_init(void)
 {
@@ -35,18 +38,6 @@ errcode_t ws63_bsp_ttp229_init(void)
     ret = uapi_pin_set_mode(WS63_TTP229_SDA_PIN, (pin_mode_t)WS63_TTP229_I2C_PIN_MODE);
     if (ret != ERRCODE_SUCC) {
         return ret;
-    }
-
-    ret = uapi_pin_set_pull(WS63_TTP229_SCL_PIN, PIN_PULL_TYPE_UP);
-    if (ret != ERRCODE_SUCC) {
-        /* GPIO15/16 在不同板级上不一定都支持内部上拉，这里保留告警但不阻断 I2C 初始化。 */
-        osal_printk("[wk2114 final bsp] TTP229 SCL pull config skip, ret=0x%x\r\n", (unsigned int)ret);
-    }
-
-    ret = uapi_pin_set_pull(WS63_TTP229_SDA_PIN, PIN_PULL_TYPE_UP);
-    if (ret != ERRCODE_SUCC) {
-        /* 触摸键盘总线只依赖可用的 SDA/SCL 复用，外部上拉存在时可继续工作。 */
-        osal_printk("[wk2114 final bsp] TTP229 SDA pull config skip, ret=0x%x\r\n", (unsigned int)ret);
     }
 
     /* 按规格书以 7bit 从机地址 0x65 进行标准 I2C 读取。 */
