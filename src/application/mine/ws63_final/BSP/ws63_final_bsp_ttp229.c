@@ -1,127 +1,70 @@
 /**
  * @file ws63_final_bsp_ttp229.c
- * @brief WK2114 最终版 BSP TTP229 子模块实现。
+ * @brief WS63_final TTP229 BSP 子模块实现。
  *
  * 说明：
- * 1) 本文件是 TTP229 唯一允许直接访问 GPIO/延时 API 的层；
- * 2) Driver 层仅通过本文件导出的接口操作引脚与时序。
+ * 1) 本文件是 TTP229 唯一允许直接访问 GPIO/I2C API 的层；
+ * 2) Driver 层仅通过本文件导出的接口完成初始化与读取。
  */
 
 #include "ws63_final_bsp.h"
 
+#include "i2c.h"
 #include "gpio.h"
 #include "osal_task.h"
 #include "pinctrl.h"
-#include "tcxo.h"
 
 #include "ws63_final_config.h"
 
 /**
- * @brief 配置 TTP229 SCL 引脚为输出。
- */
-static errcode_t ws63_bsp_ttp229_setup_scl_output(void)
-{
-    errcode_t ret;
-
-    ret = uapi_pin_set_mode(WS63_TTP229_SCL_PIN, (pin_mode_t)WS63_TTP229_SCL_PIN_MODE);
-    if (ret != ERRCODE_SUCC) {
-        return ret;
-    }
-
-    return uapi_gpio_set_dir(WS63_TTP229_SCL_PIN, GPIO_DIRECTION_OUTPUT);
-}
-
-/**
- * @brief 初始化 TTP229 相关引脚。
+ * @brief 初始化 TTP229 I2C 相关引脚与主机控制器。
  */
 errcode_t ws63_bsp_ttp229_init(void)
 {
     errcode_t ret;
 
     uapi_pin_init();
-    uapi_gpio_init();
 
-    ret = ws63_bsp_ttp229_setup_scl_output();
+    /* I2C 走复用功能脚，先把 SCL/SDA 切到外设模式并上拉，避免空闲态漂浮。 */
+    ret = uapi_pin_set_mode(WS63_TTP229_SCL_PIN, (pin_mode_t)WS63_TTP229_I2C_PIN_MODE);
     if (ret != ERRCODE_SUCC) {
         return ret;
     }
 
-    ret = uapi_gpio_set_val(WS63_TTP229_SCL_PIN, GPIO_LEVEL_LOW);
+    ret = uapi_pin_set_mode(WS63_TTP229_SDA_PIN, (pin_mode_t)WS63_TTP229_I2C_PIN_MODE);
     if (ret != ERRCODE_SUCC) {
         return ret;
     }
 
-    ret = uapi_pin_set_mode(WS63_TTP229_SDO_PIN, (pin_mode_t)WS63_TTP229_SDO_PIN_MODE);
+    ret = uapi_pin_set_pull(WS63_TTP229_SCL_PIN, PIN_PULL_TYPE_UP);
     if (ret != ERRCODE_SUCC) {
         return ret;
     }
 
-    return uapi_gpio_set_dir(WS63_TTP229_SDO_PIN, GPIO_DIRECTION_INPUT);
+    ret = uapi_pin_set_pull(WS63_TTP229_SDA_PIN, PIN_PULL_TYPE_UP);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+
+    /* 按规格书以 7bit 从机地址 0x65 进行标准 I2C 读取。 */
+    return uapi_i2c_master_init(WS63_TTP229_I2C_BUS, WS63_TTP229_I2C_SPEED, 0U);
 }
 
 /**
- * @brief 配置 SDO 为输出并设置电平。
+ * @brief 通过 I2C 读取 TTP229 的 2 字节键值。
  */
-errcode_t ws63_bsp_ttp229_set_sdo_output(uint8_t level_high)
+errcode_t ws63_bsp_ttp229_read_bytes(uint8_t *data, uint16_t len)
 {
-    errcode_t ret;
+    i2c_data_t i2c_data = {0};
 
-    ret = uapi_pin_set_mode(WS63_TTP229_SDO_PIN, (pin_mode_t)WS63_TTP229_SDO_PIN_MODE);
-    if (ret != ERRCODE_SUCC) {
-        return ret;
+    if ((data == NULL) || (len < WS63_TTP229_I2C_READ_LEN)) {
+        return ERRCODE_INVALID_PARAM;
     }
 
-    ret = uapi_gpio_set_dir(WS63_TTP229_SDO_PIN, GPIO_DIRECTION_OUTPUT);
-    if (ret != ERRCODE_SUCC) {
-        return ret;
-    }
+    i2c_data.receive_buf = data;
+    i2c_data.receive_len = len;
 
-    return uapi_gpio_set_val(WS63_TTP229_SDO_PIN,
-        (level_high != 0U) ? GPIO_LEVEL_HIGH : GPIO_LEVEL_LOW);
-}
-
-/**
- * @brief 配置 SDO 为输入。
- */
-errcode_t ws63_bsp_ttp229_set_sdo_input(void)
-{
-    errcode_t ret;
-
-    ret = uapi_pin_set_mode(WS63_TTP229_SDO_PIN, (pin_mode_t)WS63_TTP229_SDO_PIN_MODE);
-    if (ret != ERRCODE_SUCC) {
-        return ret;
-    }
-
-    return uapi_gpio_set_dir(WS63_TTP229_SDO_PIN, GPIO_DIRECTION_INPUT);
-}
-
-/**
- * @brief 设置 SCL 电平。
- */
-errcode_t ws63_bsp_ttp229_set_scl(uint8_t level_high)
-{
-    return uapi_gpio_set_val(WS63_TTP229_SCL_PIN,
-        (level_high != 0U) ? GPIO_LEVEL_HIGH : GPIO_LEVEL_LOW);
-}
-
-/**
- * @brief 读取 SDO 电平。
- */
-uint8_t ws63_bsp_ttp229_read_sdo_level(void)
-{
-    return (uapi_gpio_get_val(WS63_TTP229_SDO_PIN) == GPIO_LEVEL_HIGH) ? 1U : 0U;
-}
-
-/**
- * @brief TTP229 微秒级延时。
- */
-void ws63_bsp_ttp229_delay_us(uint32_t us)
-{
-    if (us == 0U) {
-        return;
-    }
-
-    (void)uapi_tcxo_delay_us(us);
+    return uapi_i2c_master_read(WS63_TTP229_I2C_BUS, WS63_TTP229_I2C_ADDR, &i2c_data);
 }
 
 /**

@@ -20,8 +20,8 @@ extern "C" {
  * @brief TTP229 一次采样结果。
  *
  * 说明：
- * 1) raw_code 为芯片原始 16 位输出（按原协议位语义）；
- * 2) pressed_mask 做了语义反转：位为 1 表示按下，位为 0 表示未按下。
+ * 1) raw_code 为芯片通过 I2C 直接读回的 16 位原始键值；
+ * 2) pressed_mask 保持与手册一致的语义：位为 1 表示按下，位为 0 表示未按下。
  */
 typedef struct {
     uint16_t raw_code;

@@ -243,48 +243,20 @@ errcode_t ws63_bsp_beep_start(uint16_t freq_hz, uint8_t volume_percent);
 errcode_t ws63_bsp_beep_stop(void);
 
 /**
- * @brief 初始化 TTP229 相关 GPIO 资源。
+ * @brief 初始化 TTP229 I2C 相关引脚与总线资源。
  *
  * @return errcode_t ERRCODE_SUCC 成功，其他失败。
  */
 errcode_t ws63_bsp_ttp229_init(void);
 
 /**
- * @brief 配置 TTP229 SDO 引脚为输出并设置电平。
+ * @brief 通过 TTP229 I2C 总线读取键值数据。
  *
- * @param level_high 1=高电平，0=低电平。
+ * @param data 输出缓冲区，至少 2 字节。
+ * @param len  读取长度，必须不小于 2 字节。
  * @return errcode_t ERRCODE_SUCC 成功，其他失败。
  */
-errcode_t ws63_bsp_ttp229_set_sdo_output(uint8_t level_high);
-
-/**
- * @brief 配置 TTP229 SDO 引脚为输入。
- *
- * @return errcode_t ERRCODE_SUCC 成功，其他失败。
- */
-errcode_t ws63_bsp_ttp229_set_sdo_input(void);
-
-/**
- * @brief 设置 TTP229 SCL 引脚电平。
- *
- * @param level_high 1=高电平，0=低电平。
- * @return errcode_t ERRCODE_SUCC 成功，其他失败。
- */
-errcode_t ws63_bsp_ttp229_set_scl(uint8_t level_high);
-
-/**
- * @brief 读取 TTP229 SDO 引脚电平。
- *
- * @return uint8_t 1=高电平，0=低电平。
- */
-uint8_t ws63_bsp_ttp229_read_sdo_level(void);
-
-/**
- * @brief TTP229 微秒级延时。
- *
- * @param us 延时微秒。
- */
-void ws63_bsp_ttp229_delay_us(uint32_t us);
+errcode_t ws63_bsp_ttp229_read_bytes(uint8_t *data, uint16_t len);
 
 /**
  * @brief TTP229 毫秒级延时。

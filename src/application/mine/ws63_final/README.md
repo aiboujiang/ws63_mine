@@ -59,6 +59,31 @@ ws63_final/
 
 ## 8. 任务维护记录
 
+### 2026-04-11: TTP229 改为 I2C 读取
+
+变更摘要：
+- 将 `ws63_final` 的 TTP229 从旧的 SDO/SCL 逐位扫描改为标准 I2C 主机读流程。
+- 保持 GPIO16 / GPIO15 不变，改为对应 I2C SDA / SCL 引脚复用与上拉配置。
+- 按手册统一为 2 字节直接读取，按键位语义保持为 `1=按下`。
+- Task 层保留原有状态机与多键报警逻辑，仅同步更新采样默认值与错误日志。
+
+影响文件：
+- `src/application/mine/ws63_final/Config/ws63_final_config.h`
+- `src/application/mine/ws63_final/BSP/ws63_final_bsp.h`
+- `src/application/mine/ws63_final/BSP/ws63_final_bsp_ttp229.c`
+- `src/application/mine/ws63_final/Driver/ws63_ttp229.h`
+- `src/application/mine/ws63_final/Driver/ws63_ttp229.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_ttp229.c`
+- `src/application/mine/ws63_final/DEBUG_COMMANDS.md`
+
+验证结果：
+- 命令：`cd /home/xixi/code/fbb_ws63_20260114/src && python3 build.py ws63-liteos-app`
+- 结果：构建通过（`Build target:ws63_liteos_app success`）。
+
+后续事项：
+- 上板后优先确认 TTP229 的 `INIT/READ/WATCH` 日志与实际触摸结果一致。
+- 若需要进一步降低 I2C 读取抖动，可结合 `INT` 引脚再补事件唤醒策略。
+
 ### 2026-04-11: TTP229 持续检测命令 + LD2402 命令统一
 
 变更摘要：

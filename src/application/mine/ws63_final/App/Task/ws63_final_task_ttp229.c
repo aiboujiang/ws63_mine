@@ -31,7 +31,7 @@ static uint8_t g_ws63_ttp229_multi_alarm_active = 0U;
 static uint8_t g_ws63_ttp229_force_reinit = 0U;
 static ws63_ttp229_state_t g_ws63_ttp229_state = WS63_TTP229_STATE_INIT;
 static ws63_ttp229_sample_t g_ws63_ttp229_last_sample = {
-    .raw_code = 0xFFFFU,
+    .raw_code = 0x0000U,
     .pressed_mask = 0x0000U,
     .pressed_count = 0U,
     .multi_key = 0U
@@ -77,7 +77,7 @@ static void ws63_ttp229_reset_sample_cache(void)
     unsigned int irq_status;
 
     irq_status = ws63_ttp229_lock();
-    g_ws63_ttp229_last_sample.raw_code = 0xFFFFU;
+    g_ws63_ttp229_last_sample.raw_code = 0x0000U;
     g_ws63_ttp229_last_sample.pressed_mask = 0x0000U;
     g_ws63_ttp229_last_sample.pressed_count = 0U;
     g_ws63_ttp229_last_sample.multi_key = 0U;
@@ -149,7 +149,7 @@ static void ws63_ttp229_handle_alarm_transition(const ws63_ttp229_sample_t *samp
  * 1) INIT: 初始化硬件与驱动；
  * 2) DISABLED: 任务保活但不采样；
  * 3) READY: 周期采样并更新缓存；
- * 4) FAULT: 读失败后退避重试。
+ * 4) FAULT: I2C 读取失败后退避重试。
  */
 static void *ws63_ttp229_task_entry(const char *arg)
 {
@@ -186,7 +186,7 @@ static void *ws63_ttp229_task_entry(const char *arg)
                 if (ret == ERRCODE_SUCC) {
                     ws63_ttp229_set_ready(1U);
                     g_ws63_ttp229_state = (enabled != 0U) ? WS63_TTP229_STATE_READY : WS63_TTP229_STATE_DISABLED;
-                    osal_printk("[wk2114 final task] TTP229 init ok (SCL=GPIO16 SDO=GPIO15)\r\n");
+                    osal_printk("[wk2114 final task] TTP229 init ok (I2C SCL=GPIO16 SDA=GPIO15)\r\n");
                 } else {
                     ws63_ttp229_set_ready(0U);
                     g_ws63_ttp229_state = WS63_TTP229_STATE_FAULT;
@@ -216,7 +216,7 @@ static void *ws63_ttp229_task_entry(const char *arg)
                     if (ret != ERRCODE_SUCC) {
                         ws63_ttp229_set_ready(0U);
                         g_ws63_ttp229_state = WS63_TTP229_STATE_FAULT;
-                        osal_printk("[wk2114 final task] TTP229 read fail, ret=0x%x\r\n", (unsigned int)ret);
+                        osal_printk("[wk2114 final task] TTP229 I2C read fail, ret=0x%x\r\n", (unsigned int)ret);
                         ws63_os_sleep_ms(WS63_TTP229_INIT_RETRY_MS);
                         break;
                     }

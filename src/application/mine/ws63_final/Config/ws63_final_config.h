@@ -285,13 +285,18 @@ extern "C" {
 /* TTP229 功能开关：0=关闭，1=开启。 */
 #define WS63_TTP229_ENABLE                      1U
 
-/* TTP229 接线：SCL=GPIO16，SDO(板上标注 SDA)=GPIO15。 */
+/* TTP229 I2C 接线：SCL=GPIO16，SDA(板上标注 SDA)=GPIO15。 */
 #define WS63_TTP229_SCL_PIN                     GPIO_16
-#define WS63_TTP229_SDO_PIN                     GPIO_15
+#define WS63_TTP229_SDA_PIN                     GPIO_15
 
-/* TTP229 引脚复用模式：默认按 GPIO 输入输出模式。 */
-#define WS63_TTP229_SCL_PIN_MODE                0
-#define WS63_TTP229_SDO_PIN_MODE                0
+/* TTP229 引脚复用模式：I2C 功能复用。 */
+#define WS63_TTP229_I2C_PIN_MODE                2U
+
+/* TTP229 I2C 主机参数：使用 7bit 地址 0x65，对应规格书里的 0xCB 读地址。 */
+#define WS63_TTP229_I2C_BUS                     1U
+#define WS63_TTP229_I2C_SPEED                   100000U
+#define WS63_TTP229_I2C_ADDR                    0x65U
+#define WS63_TTP229_I2C_READ_LEN                2U
 
 /* TTP229 独立任务参数。 */
 #define WS63_TTP229_TASK_STACK_SIZE             2048U
@@ -306,16 +311,12 @@ extern "C" {
 #define WS63_TTP229_MULTI_KEY_ALARM_DEFAULT     1U
 
 /*
- * TTP229 扫描时序参数（参考现有移植代码）：
- * 1) 起始脉冲：高电平 93us，低电平 10us；
- * 2) 位时钟脉冲：高/低电平宽度；
- * 3) 一次读取结束后的间隔延时。
+ * TTP229 I2C 读数优化参数：
+ * 1) 总线读失败时进行短暂重试，降低上电抖动和偶发仲裁问题影响；
+ * 2) 重试间隔保持很短，避免影响 10ms 任务轮询节奏。
  */
-#define WS63_TTP229_START_PULSE_HIGH_US         93U
-#define WS63_TTP229_START_PULSE_LOW_US          10U
-#define WS63_TTP229_SCL_PULSE_HIGH_US           2U
-#define WS63_TTP229_SCL_PULSE_LOW_US            2U
-#define WS63_TTP229_READ_GAP_MS                 4U
+#define WS63_TTP229_READ_RETRY_MAX              3U
+#define WS63_TTP229_READ_RETRY_GAP_MS           1U
 
 #ifdef __cplusplus
 #if __cplusplus
