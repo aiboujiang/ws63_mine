@@ -15,7 +15,7 @@
 #include "zw101.h"
 
 /**
- * @brief 重新初始化 LD2402（兼容命令别名 LD2401）。
+ * @brief 重新初始化 LD2402。
  */
 errcode_t ws63_task_ld2402_reinit(void)
 {

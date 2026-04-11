@@ -59,13 +59,36 @@ ws63_final/
 
 ## 8. 任务维护记录
 
+### 2026-04-11: TTP229 持续检测命令 + LD2402 命令统一
+
+变更摘要：
+- 调试串口新增 `TTP229 WATCH ON|OFF` 命令，用于启动/停止矩阵键盘持续检测日志。
+- 持续检测复用现有 WATCH 周期调度，在固定节拍下输出 `raw/mask/count`，便于观察按键实时变化。
+- `ws63_final` 范围内彻底移除旧雷达命令前缀，统一为 `LD2402 INIT/RAW/STAT/LOG/LOGINT/LOGSTAT`。
+- 同步修正文档手册与 README 的命令口径，保证现场联调命令与帮助输出一致。
+
+影响文件：
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_debug.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task.h`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_sensor_bridge.c`
+- `src/application/mine/ws63_final/DEBUG_COMMANDS.md`
+- `src/application/mine/ws63_final/README.md`
+
+验证结果：
+- 命令：`cd /home/xixi/code/fbb_ws63_20260114/src && python3 build.py ws63-liteos-app`
+- 结果：构建通过（`Build target:ws63_liteos_app success`）。
+
+后续事项：
+- 上板建议先执行 `TTP229 WATCH ON` 再按键，确认持续检测日志正常；完成后执行 `TTP229 WATCH OFF` 关闭持续输出。
+- 旧雷达指令前缀已移除，如现场脚本仍使用旧前缀需统一替换为 `LD2402 ...`。
+
 ### 2026-04-11: LD2402 上电刷屏限制（运行态节流 + 运行时开关）
 
 变更摘要：
 - 修复 `ws63_final` 中 LD2402 上电后运行态日志持续刷屏问题：在 Driver 层对 `LD2402 processing ...` 增加时间节流，默认每 1000ms 最多输出一次。
 - 保留初始化/失败诊断日志（如 `init try`、`init failed`），确保链路故障定位能力不受影响。
 - SLE 中间件将 `uplink send success` 从“每包打印”改为“可开关 + 间隔节流 + 抑制计数”，默认关闭 success 逐包日志，失败日志保持即时输出。
-- 调试串口新增运行时控制命令：`LD2401 LOG ON|OFF`、`LD2401 LOGINT <ms>`、`LD2401 LOGSTAT`、`SLE ULOG ON|OFF`、`SLE ULOGINT <ms>`、`SLE ULOGSTAT`，无需重编译即可现场调节日志强度。
+- 调试串口新增运行时控制命令：`LD2402 LOG ON|OFF`、`LD2402 LOGINT <ms>`、`LD2402 LOGSTAT`、`SLE ULOG ON|OFF`、`SLE ULOGINT <ms>`、`SLE ULOGSTAT`，无需重编译即可现场调节日志强度。
 - 配置层新增默认策略宏，统一控制 LD2402 与 SLE success 日志初始行为。
 
 影响文件：
@@ -85,8 +108,8 @@ ws63_final/
 - 结果：构建通过（`Build target:ws63_liteos_app success`）。
 
 后续事项：
-- 上板可先执行 `LD2401 LOGSTAT` 与 `SLE ULOGSTAT` 确认默认策略，再按现场需要用 `LOGINT` 动态调整节流窗口。
-- 若需临时抓全量包级日志，可将间隔设为 `0`（例如 `LD2401 LOGINT 0` / `SLE ULOGINT 0`）。
+- 上板可先执行 `LD2402 LOGSTAT` 与 `SLE ULOGSTAT` 确认默认策略，再按现场需要用 `LOGINT` 动态调整节流窗口。
+- 若需临时抓全量包级日志，可将间隔设为 `0`（例如 `LD2402 LOGINT 0` / `SLE ULOGINT 0`）。
 
 ### 2026-04-10: WK2114 主口读路径防卡死修复（规避 uapi_uart_read 长轮询）
 
@@ -218,12 +241,12 @@ ws63_final/
 后续事项：
 - 上板优先执行 `ZW101 ZA ECHO` 与 `ZW101 ZA SEARCH`，确认回包时序与 ACK 码和手册一致，再逐步联调业务类/维护类命令。
 
-### 2026-04-09: 蜂鸣器音量调节 + LD2401/ZW101 调试命令扩展
+### 2026-04-09: 蜂鸣器音量调节 + LD2402/ZW101 调试命令扩展
 
 变更摘要：
 - 蜂鸣器新增音量能力，音量参数映射为 PWM 占空比，支持 `0~100%` 调节。
 - 调试串口新增 `BEEP VOL <0-100>` 命令，状态日志增加 `vol` 字段。
-- 新增 LD2401（兼容 LD2402）调试命令：`INIT/RAW/STAT`，支持在线下发十六进制原始帧。
+- 新增 LD2402 调试命令：`INIT/RAW/STAT`，支持在线下发十六进制原始帧。
 - 新增 ZW101 调试命令：`INIT(HANDSHAKE)/RAW/STAT`，支持握手复测与原始帧联调。
 - 任务层新增模块调试桥接接口，统一由 App/Task 层调用 Driver，维持分层边界。
 
@@ -563,7 +586,7 @@ ws63_final/
 - 固定接线配置：`SCL=GPIO16`、`SDO(板上标注 SDA)=GPIO15`，并在配置层新增时序与任务参数宏。
 - 新增 TTP229 独立任务与状态机（`INIT/DISABLED/READY/FAULT`），支持运行时启停与重初始化。
 - 统一按键语义为“位为 1 表示按下”，并新增“多键同时按下报警”机制。
-- 调试串口新增 `TTP229 INIT/STAT/READ/MASK/ENABLE/ALARM` 命令，便于现场联调与排障。
+- 调试串口新增 `TTP229 INIT/STAT/READ/MASK/WATCH/ENABLE/ALARM` 命令，便于现场联调与排障。
 
 影响文件：
 - `src/application/mine/ws63_final/Config/ws63_final_config.h`

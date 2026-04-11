@@ -174,7 +174,7 @@ uint8_t ws63_task_rgb_is_ready(void);
 uint8_t ws63_task_rgb_is_demo_enable(void);
 
 /**
- * @brief 重新初始化 LD2402（兼容命令别名 LD2401）。
+ * @brief 重新初始化 LD2402。
  *
  * @return errcode_t ERRCODE_SUCC 成功，其他失败。
  */

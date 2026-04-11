@@ -29,7 +29,10 @@
 
 #if (WS63_DEBUG_UART_ENABLE == 1U)
 static uint8_t g_ws63_debug_uart_ready = 0U;
-static uint8_t g_ws63_debug_watch_enable = 0U;
+/* 电机周期监控开关：仅控制 MOTOR WATCH ON|OFF。 */
+static uint8_t g_ws63_debug_motor_watch_enable = 0U;
+/* TTP229 周期监控开关：用于持续观察矩阵键盘按键位图变化。 */
+static uint8_t g_ws63_debug_ttp229_watch_enable = 0U;
 static uint32_t g_ws63_debug_last_watch_ms = 0U;
 static uint8_t g_ws63_debug_uart_rx_buf[WS63_DEBUG_UART_RX_BUF_SIZE] = {0};
 static char g_ws63_debug_cmd_line[WS63_DEBUG_CMD_MAX_LEN] = {0};
@@ -653,14 +656,15 @@ static void ws63_debug_print_help(void)
     ws63_debug_log("[ws63 dbg]   TTP229 STAT\r\n");
     ws63_debug_log("[ws63 dbg]   TTP229 READ\r\n");
     ws63_debug_log("[ws63 dbg]   TTP229 MASK\r\n");
+    ws63_debug_log("[ws63 dbg]   TTP229 WATCH ON|OFF\r\n");
     ws63_debug_log("[ws63 dbg]   TTP229 ENABLE ON|OFF\r\n");
     ws63_debug_log("[ws63 dbg]   TTP229 ALARM ON|OFF\r\n");
-    ws63_debug_log("[ws63 dbg]   LD2401 INIT (alias LD2402)\r\n");
-    ws63_debug_log("[ws63 dbg]   LD2401 RAW <HEX...>\r\n");
-    ws63_debug_log("[ws63 dbg]   LD2401 STAT\r\n");
-    ws63_debug_log("[ws63 dbg]   LD2401 LOG ON|OFF\r\n");
-    ws63_debug_log("[ws63 dbg]   LD2401 LOGINT <0-60000ms>\r\n");
-    ws63_debug_log("[ws63 dbg]   LD2401 LOGSTAT\r\n");
+    ws63_debug_log("[ws63 dbg]   LD2402 INIT\r\n");
+    ws63_debug_log("[ws63 dbg]   LD2402 RAW <HEX...>\r\n");
+    ws63_debug_log("[ws63 dbg]   LD2402 STAT\r\n");
+    ws63_debug_log("[ws63 dbg]   LD2402 LOG ON|OFF\r\n");
+    ws63_debug_log("[ws63 dbg]   LD2402 LOGINT <0-60000ms>\r\n");
+    ws63_debug_log("[ws63 dbg]   LD2402 LOGSTAT\r\n");
     ws63_debug_log("[ws63 dbg]   SLE ULOG ON|OFF\r\n");
     ws63_debug_log("[ws63 dbg]   SLE ULOGINT <0-60000ms>\r\n");
     ws63_debug_log("[ws63 dbg]   SLE ULOGSTAT\r\n");
@@ -744,15 +748,15 @@ static void ws63_debug_exec_command(const char *line)
     }
 
     if (strcmp(cmd, "MOTOR WATCH ON") == 0) {
-        g_ws63_debug_watch_enable = 1U;
+        g_ws63_debug_motor_watch_enable = 1U;
         g_ws63_debug_last_watch_ms = 0U;
-        ws63_debug_log("[ws63 dbg] watch enabled\r\n");
+        ws63_debug_log("[ws63 dbg] MOTOR WATCH ON\r\n");
         return;
     }
 
     if (strcmp(cmd, "MOTOR WATCH OFF") == 0) {
-        g_ws63_debug_watch_enable = 0U;
-        ws63_debug_log("[ws63 dbg] watch disabled\r\n");
+        g_ws63_debug_motor_watch_enable = 0U;
+        ws63_debug_log("[ws63 dbg] MOTOR WATCH OFF\r\n");
         return;
     }
 
@@ -861,6 +865,19 @@ static void ws63_debug_exec_command(const char *line)
         return;
     }
 
+    if (strcmp(cmd, "TTP229 WATCH ON") == 0) {
+        g_ws63_debug_ttp229_watch_enable = 1U;
+        g_ws63_debug_last_watch_ms = 0U;
+        ws63_debug_log("[ws63 dbg] TTP229 WATCH ON\r\n");
+        return;
+    }
+
+    if (strcmp(cmd, "TTP229 WATCH OFF") == 0) {
+        g_ws63_debug_ttp229_watch_enable = 0U;
+        ws63_debug_log("[ws63 dbg] TTP229 WATCH OFF\r\n");
+        return;
+    }
+
     if (strcmp(cmd, "TTP229 ENABLE ON") == 0) {
         ret = ws63_task_ttp229_set_enable(1U);
         ws63_debug_log("[ws63 dbg] TTP229 ENABLE ON ret=0x%x\r\n", (unsigned int)ret);
@@ -937,46 +954,46 @@ static void ws63_debug_exec_command(const char *line)
         return;
     }
 
-    if ((strcmp(cmd, "LD2401 INIT") == 0) || (strcmp(cmd, "LD2402 INIT") == 0)) {
+    if (strcmp(cmd, "LD2402 INIT") == 0) {
         ret = ws63_task_ld2402_reinit();
-        ws63_debug_log("[ws63 dbg] LD2401 INIT ret=0x%x\r\n", (unsigned int)ret);
+        ws63_debug_log("[ws63 dbg] LD2402 INIT ret=0x%x\r\n", (unsigned int)ret);
         return;
     }
 
-    if ((strcmp(cmd, "LD2401 STAT") == 0) || (strcmp(cmd, "LD2402 STAT") == 0)) {
-        ws63_debug_log("[ws63 dbg] LD2401(alias LD2402) subport=%u\r\n", (unsigned int)LD2402_SUBPORT);
+    if (strcmp(cmd, "LD2402 STAT") == 0) {
+        ws63_debug_log("[ws63 dbg] LD2402 subport=%u\r\n", (unsigned int)LD2402_SUBPORT);
         ws63_debug_dump_ld2402_log_status("ld2402-log");
         return;
     }
 
-    if ((strcmp(cmd, "LD2401 LOG ON") == 0) || (strcmp(cmd, "LD2402 LOG ON") == 0)) {
+    if (strcmp(cmd, "LD2402 LOG ON") == 0) {
         ret = ws63_task_ld2402_set_log_enable(1U);
-        ws63_debug_log("[ws63 dbg] LD2401 LOG ON ret=0x%x\r\n", (unsigned int)ret);
+        ws63_debug_log("[ws63 dbg] LD2402 LOG ON ret=0x%x\r\n", (unsigned int)ret);
         ws63_debug_dump_ld2402_log_status("ld2402-log");
         return;
     }
 
-    if ((strcmp(cmd, "LD2401 LOG OFF") == 0) || (strcmp(cmd, "LD2402 LOG OFF") == 0)) {
+    if (strcmp(cmd, "LD2402 LOG OFF") == 0) {
         ret = ws63_task_ld2402_set_log_enable(0U);
-        ws63_debug_log("[ws63 dbg] LD2401 LOG OFF ret=0x%x\r\n", (unsigned int)ret);
+        ws63_debug_log("[ws63 dbg] LD2402 LOG OFF ret=0x%x\r\n", (unsigned int)ret);
         ws63_debug_dump_ld2402_log_status("ld2402-log");
         return;
     }
 
-    if ((strcmp(cmd, "LD2401 LOGSTAT") == 0) || (strcmp(cmd, "LD2402 LOGSTAT") == 0)) {
+    if (strcmp(cmd, "LD2402 LOGSTAT") == 0) {
         ws63_debug_dump_ld2402_log_status("ld2402-log");
         return;
     }
 
-    if ((strncmp(cmd, "LD2401 LOGINT ", 13) == 0) || (strncmp(cmd, "LD2402 LOGINT ", 13) == 0)) {
+    if (strncmp(cmd, "LD2402 LOGINT ", 13) == 0) {
         if (!ws63_debug_parse_u32_tokens(cmd + 13, rgb_args, 4U, &rgb_argc) || (rgb_argc != 1U) ||
             (rgb_args[0] > WS63_DEBUG_SENSOR_LOG_GAP_MS_MAX)) {
-            ws63_debug_log("[ws63 dbg] usage: LD2401 LOGINT <0-60000>\r\n");
+            ws63_debug_log("[ws63 dbg] usage: LD2402 LOGINT <0-60000>\r\n");
             return;
         }
 
         ret = ws63_task_ld2402_set_log_gap_ms(rgb_args[0]);
-        ws63_debug_log("[ws63 dbg] LD2401 LOGINT %ums ret=0x%x\r\n",
+        ws63_debug_log("[ws63 dbg] LD2402 LOGINT %ums ret=0x%x\r\n",
             (unsigned int)rgb_args[0],
             (unsigned int)ret);
         ws63_debug_dump_ld2402_log_status("ld2402-log");
@@ -1017,14 +1034,14 @@ static void ws63_debug_exec_command(const char *line)
         return;
     }
 
-    if ((strncmp(cmd, "LD2401 RAW ", 10) == 0) || (strncmp(cmd, "LD2402 RAW ", 10) == 0)) {
+    if (strncmp(cmd, "LD2402 RAW ", 10) == 0) {
         if (!ws63_debug_parse_hex_bytes(cmd + 10, raw_buf, sizeof(raw_buf), &raw_len)) {
-            ws63_debug_log("[ws63 dbg] invalid LD2401 raw hex, example: FD FC FB FA\r\n");
+            ws63_debug_log("[ws63 dbg] invalid LD2402 raw hex, example: FD FC FB FA\r\n");
             return;
         }
 
         ret = ws63_task_ld2402_send_raw(raw_buf, raw_len);
-        ws63_debug_log("[ws63 dbg] LD2401 RAW len=%u ret=0x%x\r\n",
+        ws63_debug_log("[ws63 dbg] LD2402 RAW len=%u ret=0x%x\r\n",
             (unsigned int)raw_len,
             (unsigned int)ret);
         return;
@@ -1274,7 +1291,8 @@ static void ws63_debug_uart_cmd_init(void)
     errcode_t ret;
 
     g_ws63_debug_uart_ready = 0U;
-    g_ws63_debug_watch_enable = 0U;
+    g_ws63_debug_motor_watch_enable = 0U;
+    g_ws63_debug_ttp229_watch_enable = 0U;
     g_ws63_debug_cmd_line_len = 0U;
     g_ws63_debug_last_watch_ms = 0U;
     g_ws63_debug_cmd_q_head = 0U;
@@ -1335,7 +1353,8 @@ static void ws63_debug_uart_cmd_process(uint32_t now_ms)
         ws63_debug_exec_command(cmd_line);
     }
 
-    if (g_ws63_debug_watch_enable == 0U) {
+    /* 周期监控统一节拍：任一 WATCH 开启都进入同一时间窗，避免多路日志抢占。 */
+    if ((g_ws63_debug_motor_watch_enable == 0U) && (g_ws63_debug_ttp229_watch_enable == 0U)) {
         return;
     }
 
@@ -1344,7 +1363,12 @@ static void ws63_debug_uart_cmd_process(uint32_t now_ms)
     }
 
     g_ws63_debug_last_watch_ms = now_ms;
-    ws63_debug_dump_motor_status("watch");
+    if (g_ws63_debug_motor_watch_enable == 1U) {
+        ws63_debug_dump_motor_status("watch");
+    }
+    if (g_ws63_debug_ttp229_watch_enable == 1U) {
+        ws63_debug_dump_ttp229_status("watch");
+    }
 }
 #endif
 
