@@ -56,6 +56,14 @@ typedef struct {
 	uint8_t volume_percent;
 } ws63_beep_ctrl_msg_t;
 
+/* 门锁认证源：用于区分不同输入通道的认证结果。 */
+typedef enum {
+	WS63_LOCK_AUTH_SOURCE_CAMERA = 0,
+	WS63_LOCK_AUTH_SOURCE_ZW101,
+	WS63_LOCK_AUTH_SOURCE_TTP229,
+	WS63_LOCK_AUTH_SOURCE_MANUAL
+} ws63_lock_auth_source_t;
+
 /**
  * @brief 初始化 RGB 演示链路。
  */
@@ -107,6 +115,16 @@ errcode_t ws63_beep_task_start(void);
 errcode_t ws63_ttp229_task_start(void);
 
 /**
+ * @brief 启动 camera 独立任务。
+ */
+errcode_t ws63_camera_task_start(void);
+
+/**
+ * @brief 启动门锁编排任务。
+ */
+errcode_t ws63_lock_mgr_task_start(void);
+
+/**
  * @brief 向 WK2114 发送队列投递消息。
  */
 errcode_t ws63_task_post_wk2114_tx(const ws63_wk2114_tx_msg_t *msg, uint32_t timeout);
@@ -130,5 +148,27 @@ errcode_t ws63_task_recv_sle_uplink(ws63_sle_uplink_msg_t *msg, uint32_t timeout
  * @brief 查询 WK2114 驱动链路是否就绪。
  */
 uint8_t ws63_task_wk2114_is_ready(void);
+
+/**
+ * @brief 门锁认证结果上报接口。
+ *
+ * @param source 认证来源。
+ * @param passed 1=认证通过，0=认证失败。
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_lock_mgr_report_auth_result(ws63_lock_auth_source_t source, uint8_t passed);
+
+/**
+ * @brief camera 任务发送文本消息。
+ *
+ * @param payload 不含前缀的业务文本，例如 `wake distance:123`。
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_task_camera_send_message(const char *payload);
+
+/**
+ * @brief camera 子口接收回调。
+ */
+void ws63_task_camera_process_data(uint8_t sub_port, const uint8_t *data, uint16_t len);
 
 #endif

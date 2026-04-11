@@ -623,6 +623,28 @@ static void ws63_debug_dump_ld2402_log_status(const char *tag)
 }
 
 /**
+ * @brief 输出当前 LD2402 距离状态。
+ */
+static void ws63_debug_dump_ld2402_distance_status(const char *tag)
+{
+    int32_t distance_mm;
+    uint32_t tick_ms;
+    uint32_t age_ms;
+    uint32_t now_ms;
+
+    distance_mm = ws63_task_ld2402_get_distance_mm();
+    tick_ms = ws63_task_ld2402_get_distance_tick_ms();
+    now_ms = ws63_os_tick_ms();
+    age_ms = (tick_ms == 0U) ? 0U : (uint32_t)(now_ms - tick_ms);
+
+    ws63_debug_log("[ws63 dbg] %s ld2402_distance=%ld tick=%u age=%ums\r\n",
+        (tag == NULL) ? "ld2402-distance" : tag,
+        (long)distance_mm,
+        (unsigned int)tick_ms,
+        (unsigned int)age_ms);
+}
+
+/**
  * @brief 输出当前 SLE 上行 success 日志配置。
  */
 static void ws63_debug_dump_sle_uplink_log_status(const char *tag)
@@ -669,6 +691,7 @@ static void ws63_debug_print_help(void)
     ws63_debug_log("[ws63 dbg]   LD2402 INIT\r\n");
     ws63_debug_log("[ws63 dbg]   LD2402 RAW <HEX...>\r\n");
     ws63_debug_log("[ws63 dbg]   LD2402 STAT\r\n");
+    ws63_debug_log("[ws63 dbg]   LD2402 DIST\r\n");
     ws63_debug_log("[ws63 dbg]   LD2402 LOG ON|OFF\r\n");
     ws63_debug_log("[ws63 dbg]   LD2402 LOGINT <0-60000ms>\r\n");
     ws63_debug_log("[ws63 dbg]   LD2402 LOGSTAT\r\n");
@@ -977,6 +1000,12 @@ static void ws63_debug_exec_command(const char *line)
     if (strcmp(cmd, "LD2402 STAT") == 0) {
         ws63_debug_log("[ws63 dbg] LD2402 subport=%u\r\n", (unsigned int)LD2402_SUBPORT);
         ws63_debug_dump_ld2402_log_status("ld2402-log");
+        ws63_debug_dump_ld2402_distance_status("ld2402-distance");
+        return;
+    }
+
+    if (strcmp(cmd, "LD2402 DIST") == 0) {
+        ws63_debug_dump_ld2402_distance_status("ld2402-distance");
         return;
     }
 

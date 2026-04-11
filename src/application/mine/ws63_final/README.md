@@ -676,3 +676,33 @@ ws63_final/
 后续事项：
 - 上板时优先验证 `TTP229 READ` / `TTP229 WATCH ON` 的 `keys=` 输出是否与 A/B/C/D/1/2/3/*/0/# 一致。
 - 如后续补充更多按键标签，只需扩展 Task 层映射表，不影响 BSP 读码。
+
+### 2026-04-11: 智能门锁编排骨架启动（LD2402 distance + camera 子口）
+
+变更摘要：
+- LD2402 驱动开始解析 `distance:xxx` 文本输出，并把最近一次距离值暴露给任务层。
+- 新增 camera 任务，统一把业务文本封装为 `[camera]xxx` 后通过 WK2114 扩展串口 3 / 115200 发送。
+- 新增门锁编排任务骨架：按 LD2402 距离阈值进入接近窗口，并接收 camera 认证结果驱动开锁/锁定状态。
+- 调试串口新增 `LD2402 DIST`，可直接查看最近一次距离值与更新时间。
+
+影响文件：
+- `src/application/mine/ws63_final/Config/ws63_final_config.h`
+- `src/application/mine/ws63_final/Driver/ld2402.c`
+- `src/application/mine/ws63_final/Driver/ld2402.h`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task.h`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_internal.h`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_camera.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_lock_mgr.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_debug.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_sensor_bridge.c`
+- `src/application/mine/ws63_final/CMakeLists.txt`
+- `src/application/mine/ws63_final/DEBUG_COMMANDS.md`
+
+验证结果：
+- 命令：`python3 /home/xixi/code/fbb_ws63_20260114/src/build.py -c ws63-liteos-app`
+- 结果：本次改动涉及的文件静态检查通过；完整工程构建仍被仓库内既有的 driver/pwm、driver/i2c、hal/efuse、main.c 等独立错误阻断。
+
+后续事项：
+- 待补齐 ZW101 / TTP229 到 lock manager 的认证事件上报接口，再把成功/失败消息接到 SLE 路径。
+- 待确认外部 camera 模块的回包关键字后，可把 `pass/fail` 判定收敛得更严格。

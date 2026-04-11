@@ -195,6 +195,12 @@ static errcode_t ws63_init_enabled_subports(void)
             } else {
                 osal_printk("[wk2114 final task] LD2402 init fail\r\n");
             }
+        } else if ((sub_port == WS63_SLE_CAMERA_SUBPORT) && (WS63_CAMERA_ENABLE == 1U)) {
+            /* camera 子口使用扩展串口 3 / 115200，回包由 camera 子模块统一识别。 */
+            osal_printk("[wk2114 final task] CAMERA cfg sub-uart%u baud=%u\r\n",
+                (unsigned int)sub_port,
+                (unsigned int)sub_baud);
+            g_ws63_rx_cb[sub_port] = ws63_task_camera_process_data;
         }
 
         if (g_ws63_rx_cb[sub_port] == NULL) {
@@ -215,8 +221,6 @@ static void ws63_poll_and_dispatch(void)
     uint8_t rx_buf[WS63_FIFO_CHUNK_MAX];
 
     for (sub_port = 1U; sub_port <= WS63_SUBPORT_MAX; sub_port++) {
-        ws63_sle_uplink_msg_t uplink_msg;
-
         if (!ws63_is_subport_enabled(sub_port)) {
             continue;
         }
@@ -230,6 +234,8 @@ static void ws63_poll_and_dispatch(void)
              * 上行数据只做“拷贝 + 投递”，由 SLE 任务统一发送。
              * 这样可以避免 WK2114 轮询线程被 SLE 发送路径阻塞。
              */
+            ws63_sle_uplink_msg_t uplink_msg;
+
             uplink_msg.sub_port = sub_port;
             uplink_msg.len = len;
             if (memcpy_s(uplink_msg.data, sizeof(uplink_msg.data), rx_buf, len) == EOK) {
@@ -282,6 +288,7 @@ static void ws63_sle_process_uplink_queue(void)
 #endif
  }
 
+#if (WS63_SLE_CORE_ENABLE == 1U)
 /**
  * @brief 按指定子口投递下行数据到 WK2114 发送队列（自动分片）。
  */
@@ -318,6 +325,7 @@ static uint8_t ws63_enqueue_downlink_to_subport(uint8_t sub_port, const uint8_t 
 
     return sent_count;
 }
+#endif
 
 /**
  * @brief 处理 SLE 下行数据：按模块开关分发到对应子口队列。
@@ -351,12 +359,12 @@ static errcode_t ws63_sle_downlink_handler(const uint8_t *data, uint16_t len)
 }
 #endif
 
+#if (WS63_SLE_CORE_ENABLE == 1U)
 /**
  * @brief 初始化 SLE 从机桥接。
  */
 static errcode_t ws63_sle_bridge_init(void)
 {
-#if (WS63_SLE_CORE_ENABLE == 1U)
     errcode_t ret;
 
     ret = ws63_sle_init(ws63_sle_downlink_handler);
@@ -366,10 +374,9 @@ static errcode_t ws63_sle_bridge_init(void)
     }
 
     osal_printk("[wk2114 final task] sle bridge init ok\r\n");
-#endif
-
     return ERRCODE_SUCC;
 }
+#endif
 
 /**
  * @brief WK2114 通信任务入口。
@@ -613,6 +620,16 @@ void *ws63_task_entry(const char *arg)
         osal_printk("[wk2114 final task] start ttp229 task fail\r\n");
     }
 #endif
+
+#if (WS63_CAMERA_ENABLE == 1U)
+    if (ws63_camera_task_start() != ERRCODE_SUCC) {
+        osal_printk("[wk2114 final task] start camera task fail\r\n");
+    }
+#endif
+
+    if (ws63_lock_mgr_task_start() != ERRCODE_SUCC) {
+        osal_printk("[wk2114 final task] start lock mgr task fail\r\n");
+    }
 
     while (1) {
         uint32_t now_ms;

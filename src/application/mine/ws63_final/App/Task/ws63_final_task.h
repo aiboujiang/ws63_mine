@@ -220,6 +220,20 @@ errcode_t ws63_task_ld2402_set_log_gap_ms(uint32_t gap_ms);
 uint32_t ws63_task_ld2402_get_log_gap_ms(void);
 
 /**
+ * @brief 获取最近一次解析到的 LD2402 距离值。
+ *
+ * @return int32_t 最近一次距离值；若尚未解析到有效数据，则返回 -1。
+ */
+int32_t ws63_task_ld2402_get_distance_mm(void);
+
+/**
+ * @brief 获取最近一次有效距离值的更新时间。
+ *
+ * @return uint32_t 最近一次更新时的系统 Tick 毫秒值。
+ */
+uint32_t ws63_task_ld2402_get_distance_tick_ms(void);
+
+/**
  * @brief 设置 SLE 上行 success 日志开关。
  *
  * @param enable 1=开启，0=关闭。

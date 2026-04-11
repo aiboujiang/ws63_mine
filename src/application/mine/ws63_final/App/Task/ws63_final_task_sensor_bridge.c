@@ -75,6 +75,22 @@ uint32_t ws63_task_ld2402_get_log_gap_ms(void)
 }
 
 /**
+ * @brief 获取 LD2402 最近一次解析到的距离值。
+ */
+int32_t ws63_task_ld2402_get_distance_mm(void)
+{
+    return ld2402_get_last_distance_mm();
+}
+
+/**
+ * @brief 获取 LD2402 最近一次有效距离值的更新时间。
+ */
+uint32_t ws63_task_ld2402_get_distance_tick_ms(void)
+{
+    return ld2402_get_last_distance_tick_ms();
+}
+
+/**
  * @brief 设置 SLE 上行 success 日志开关。
  */
 errcode_t ws63_task_sle_uplink_log_set_enable(uint8_t enable)

@@ -12,7 +12,9 @@
 #include "ws63_final_config.h"
 #include "osal_debug.h"
 #include <stdbool.h>
+#include <stdlib.h>
 #include <stddef.h>
+#include <string.h>
 
 /* LD2402 命令/数据帧公共格式参数。 */
 #define LD2402_HEADER_LEN                 4U
@@ -54,6 +56,71 @@ static const uint8_t g_ld2402_data_tail[LD2402_TAIL_LEN] = {0xF8, 0xF7, 0xF6, 0x
 static uint8_t g_ld2402_data_log_enable = WS63_LD2402_DATA_LOG_ENABLE_DEFAULT;
 static uint32_t g_ld2402_data_log_gap_ms = WS63_LD2402_DATA_LOG_GAP_MS_DEFAULT;
 static uint32_t g_ld2402_data_last_log_ms = 0U;
+/* 最近一次解析到的 distance:xxx 输出，供门锁编排层轮询使用。 */
+static int32_t g_ld2402_last_distance_mm = -1;
+static uint32_t g_ld2402_last_distance_tick_ms = 0U;
+
+/**
+ * @brief 从串口文本中提取 `distance:xxx` 数值。
+ *
+ * LD2402 这一路在门锁场景下只接受明确的距离字段，避免把其他调试文本
+ * 误识别为有效接近事件。
+ */
+static bool ld2402_parse_distance_text(const uint8_t *data, uint16_t len, int32_t *distance_mm_out)
+{
+    const char prefix[] = "distance:";
+    char text_buf[128] = {0};
+    const char *value_ptr;
+    char value_buf[16] = {0};
+    size_t copy_len;
+    size_t i;
+    long distance_value;
+    char *end_ptr = NULL;
+
+    if ((data == NULL) || (distance_mm_out == NULL) || (len == 0U)) {
+        return false;
+    }
+
+    copy_len = (len < (uint16_t)(sizeof(text_buf) - 1U)) ? (size_t)len : (sizeof(text_buf) - 1U);
+    (void)memcpy(text_buf, data, copy_len);
+    text_buf[copy_len] = '\0';
+
+    value_ptr = strstr(text_buf, prefix);
+    if (value_ptr == NULL) {
+        return false;
+    }
+
+    value_ptr += (sizeof(prefix) - 1U);
+    for (i = 0U; (i + 1U < sizeof(value_buf)) && (value_ptr[i] != '\0'); i++) {
+        char ch = value_ptr[i];
+
+        if ((ch == '\r') || (ch == '\n') || (ch == ' ') || (ch == '\t')) {
+            break;
+        }
+        if ((i == 0U) && ((ch == '+') || (ch == '-'))) {
+            value_buf[i] = ch;
+            continue;
+        }
+        if ((ch < '0') || (ch > '9')) {
+            break;
+        }
+        value_buf[i] = ch;
+    }
+
+    value_buf[i] = '\0';
+
+    if (value_buf[0] == '\0') {
+        return false;
+    }
+
+    distance_value = strtol(value_buf, &end_ptr, 10);
+    if ((end_ptr == value_buf) || (end_ptr == NULL) || (*end_ptr != '\0')) {
+        return false;
+    }
+
+    *distance_mm_out = (int32_t)distance_value;
+    return true;
+}
 
 /**
  * @brief 检查缓冲区中的某个完整 LD2402 帧。
@@ -228,12 +295,19 @@ errcode_t ld2402_init(uint8_t sub_port)
 void ld2402_process_data(uint8_t sub_port, const uint8_t *data, uint16_t len)
 {
     uint32_t now_ms;
+    int32_t distance_mm;
 
     (void)sub_port;
-    /* 当前版本暂不解析原始负载，显式标记避免 -Werror=unused-parameter。 */
-    (void)data;
 
     if (len == 0U) {
+        return;
+    }
+
+    /* 门锁编排层只关心明确的距离值，其他调试文本仍保留原始日志路径。 */
+    if (ld2402_parse_distance_text(data, len, &distance_mm)) {
+        g_ld2402_last_distance_mm = distance_mm;
+        g_ld2402_last_distance_tick_ms = ws63_bsp_get_tick_ms();
+        osal_printk("LD2402 processing distance:%ld\r\n", (long)distance_mm);
         return;
     }
 
@@ -288,4 +362,20 @@ errcode_t ld2402_set_data_log_gap_ms(uint32_t gap_ms)
 uint32_t ld2402_get_data_log_gap_ms(void)
 {
     return g_ld2402_data_log_gap_ms;
+}
+
+/**
+ * @brief 获取最近一次解析到的距离值。
+ */
+int32_t ld2402_get_last_distance_mm(void)
+{
+    return g_ld2402_last_distance_mm;
+}
+
+/**
+ * @brief 获取最近一次有效距离值的更新时间。
+ */
+uint32_t ld2402_get_last_distance_tick_ms(void)
+{
+    return g_ld2402_last_distance_tick_ms;
 }

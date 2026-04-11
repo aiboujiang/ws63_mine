@@ -55,4 +55,18 @@ errcode_t ld2402_set_data_log_gap_ms(uint32_t gap_ms);
  */
 uint32_t ld2402_get_data_log_gap_ms(void);
 
+/**
+ * @brief 获取最近一次解析到的 LD2402 距离值。
+ *
+ * @return int32_t 最近一次距离值；若尚未解析到有效数据，则返回 -1。
+ */
+int32_t ld2402_get_last_distance_mm(void);
+
+/**
+ * @brief 获取最近一次有效距离值的时间戳（毫秒）。
+ *
+ * @return uint32_t 最近一次更新时的系统 Tick 毫秒值。
+ */
+uint32_t ld2402_get_last_distance_tick_ms(void);
+
 #endif

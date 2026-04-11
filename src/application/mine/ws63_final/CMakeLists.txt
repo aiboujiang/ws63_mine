@@ -27,6 +27,8 @@ set(SOURCES
     "App/Task/ws63_final_task_rgb.c"
     "App/Task/ws63_final_task_device_ctrl.c"
     "App/Task/ws63_final_task_sensor_bridge.c"
+    "App/Task/ws63_final_task_camera.c"
+    "App/Task/ws63_final_task_lock_mgr.c"
     "App/Task/ws63_final_task_debug.c"
     "App/Task/ws63_final_task_ttp229.c"
     "App/Main/ws63_final_main.c"

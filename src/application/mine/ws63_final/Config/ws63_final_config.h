@@ -50,7 +50,7 @@ extern "C" {
 /* 子串口默认配置。 */
 #define WS63_SUBPORT1_ENABLE    1U
 #define WS63_SUBPORT2_ENABLE    1U
-#define WS63_SUBPORT3_ENABLE    0U
+#define WS63_SUBPORT3_ENABLE    1U
 #define WS63_SUBPORT4_ENABLE    0U
 
 /* 子串口编号。 */
@@ -69,6 +69,25 @@ extern "C" {
 #define WS63_FIFO_CHUNK_MAX     16U
 #define WS63_TASK_POLL_MS       5U
 #define WS63_BOOT_DELAY_MS      1000U
+
+/* camera 人脸模块：使用 WK2114 子口 3，波特率固定 115200。 */
+#define WS63_CAMERA_ENABLE      1U
+/* camera 任务：统一发送 [camera]xxx 文本并串行处理外部回包。 */
+#define WS63_CAMERA_TASK_STACK_SIZE        2048U
+#define WS63_CAMERA_TASK_PRIORITY          26U
+#define WS63_CAMERA_CMD_QUEUE_DEPTH        8U
+
+/* 门锁编排任务参数：用于接近唤醒、认证窗口与失败锁定控制。 */
+#define WS63_LOCK_MGR_TASK_STACK_SIZE       3072U
+#define WS63_LOCK_MGR_TASK_PRIORITY         25U
+#define WS63_LOCK_MGR_TASK_POLL_MS          20U
+#define WS63_LOCK_LD2402_ARM_DISTANCE_MM_DEFAULT   1200U
+#define WS63_LOCK_AUTH_WINDOW_MS_DEFAULT            5000U
+#define WS63_LOCK_UNLOCK_DURATION_MS_DEFAULT        1500U
+#define WS63_LOCK_FAIL_THRESHOLD_DEFAULT            3U
+#define WS63_LOCK_FAIL_LOCKOUT_MS_DEFAULT          10000U
+#define WS63_LOCK_MOTOR_OPEN_DUTY_DEFAULT           40U
+#define WS63_LOCK_CAMERA_WAKE_GAP_MS_DEFAULT        500U
 
 /* 子串口触发阈值。 */
 #define WS63_RX_TRIGGER_LEVEL   0x40U
