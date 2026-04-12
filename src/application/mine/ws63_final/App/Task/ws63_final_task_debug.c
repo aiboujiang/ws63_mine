@@ -520,6 +520,83 @@ static uint8_t ws63_debug_parse_hex_bytes(const char *text,
 }
 
 /**
+ * @brief 从命令行中提取一个 token（空格/制表符分隔）。
+ */
+static char *ws63_debug_next_token(char **cursor)
+{
+    char *start;
+
+    if ((cursor == NULL) || (*cursor == NULL)) {
+        return NULL;
+    }
+
+    while ((**cursor == ' ') || (**cursor == '\t')) {
+        (*cursor)++;
+    }
+
+    if (**cursor == '\0') {
+        return NULL;
+    }
+
+    start = *cursor;
+    while ((**cursor != '\0') && (**cursor != ' ') && (**cursor != '\t')) {
+        (*cursor)++;
+    }
+
+    if (**cursor != '\0') {
+        **cursor = '\0';
+        (*cursor)++;
+    }
+
+    return start;
+}
+
+/**
+ * @brief 解析一个无符号整数字符串（支持十进制与 0x 前缀）。
+ */
+static uint8_t ws63_debug_parse_u32_value(const char *text, uint32_t *value_out)
+{
+    char *end = NULL;
+    unsigned long value;
+
+    if ((text == NULL) || (value_out == NULL)) {
+        return 0U;
+    }
+
+    value = strtoul(text, &end, 0);
+    if ((end == text) || (*ws63_debug_trim(end) != '\0')) {
+        return 0U;
+    }
+
+    *value_out = (uint32_t)value;
+    return 1U;
+}
+
+/**
+ * @brief 解析距离门限参数（单位 0.1m）。
+ */
+static uint8_t ws63_debug_parse_distance_01m(const char *text, uint16_t *distance_01m_out)
+{
+    char *end = NULL;
+    double value;
+
+    if ((text == NULL) || (distance_01m_out == NULL)) {
+        return 0U;
+    }
+
+    value = strtod(text, &end);
+    if ((end == text) || (*ws63_debug_trim(end) != '\0')) {
+        return 0U;
+    }
+    if ((value < 0.7) || (value > 10.0)) {
+        return 0U;
+    }
+
+    *distance_01m_out = (uint16_t)(value * 10.0 + 0.5);
+    return 1U;
+}
+
+/**
  * @brief 输出当前电机与编码器状态。
  */
 static void ws63_debug_dump_motor_status(const char *tag)
@@ -612,17 +689,6 @@ static void ws63_debug_dump_ttp229_status(const char *tag)
 }
 
 /**
- * @brief 输出当前 LD2402 运行日志配置。
- */
-static void ws63_debug_dump_ld2402_log_status(const char *tag)
-{
-    ws63_debug_log("[ws63 dbg] %s ld2402_log=%s gap=%ums\r\n",
-        (tag == NULL) ? "ld2402-log" : tag,
-        (ws63_task_ld2402_get_log_enable() == 1U) ? "ON" : "OFF",
-        (unsigned int)ws63_task_ld2402_get_log_gap_ms());
-}
-
-/**
  * @brief 输出当前 LD2402 距离状态。
  */
 static void ws63_debug_dump_ld2402_distance_status(const char *tag)
@@ -642,6 +708,361 @@ static void ws63_debug_dump_ld2402_distance_status(const char *tag)
         (long)distance_mm,
         (unsigned int)tick_ms,
         (unsigned int)age_ms);
+}
+
+/**
+ * @brief 输出当前 LD2402 协议状态。
+ */
+static void ws63_debug_dump_ld2402_runtime_status(const char *tag)
+{
+    ws63_debug_log("[ws63 dbg] %s ld2402=ready:%u cfg:%u log:%s gap=%ums\r\n",
+        (tag == NULL) ? "ld2402-status" : tag,
+        (unsigned int)ws63_task_ld2402_is_ready(),
+        (unsigned int)ws63_task_ld2402_is_in_config_mode(),
+        (ws63_task_ld2402_get_log_enable() == 1U) ? "ON" : "OFF",
+        (unsigned int)ws63_task_ld2402_get_log_gap_ms());
+}
+
+    /**
+     * @brief 打印调试命令帮助。
+     */
+    static void ws63_debug_print_help(void);
+
+/**
+ * @brief 执行 LD 前缀调试命令。
+ */
+static void ws63_debug_exec_ld_command(const char *cmd)
+{
+    char ld_buf[WS63_DEBUG_CMD_MAX_LEN] = {0};
+    char *cursor;
+    char *op;
+    char *arg0;
+    char *arg1;
+    char *arg2;
+    uint16_t distance_01m = 0U;
+    uint16_t progress = 0U;
+    uint16_t alarm_status = 0U;
+    uint16_t gate_bitmap = 0U;
+    uint16_t param_id = 0U;
+    uint16_t param_value_16 = 0U;
+    uint32_t param_value = 0U;
+    uint32_t power_inter = 0U;
+    uint8_t raw_buf[WS63_DEBUG_RAW_CMD_MAX_BYTES] = {0};
+    uint16_t raw_len = 0U;
+    uint8_t sn_buf[32] = {0};
+    char sn_text[64] = {0};
+    char version[32] = {0};
+    int32_t sn_hex_len;
+    errcode_t ret;
+
+    if (cmd == NULL) {
+        return;
+    }
+
+    if (strncpy_s(ld_buf, sizeof(ld_buf), cmd, sizeof(ld_buf) - 1U) != EOK) {
+        return;
+    }
+
+    cursor = ld_buf;
+    op = ws63_debug_next_token(&cursor);
+    if (op == NULL) {
+        return;
+    }
+
+    if (strcmp(op, "LD") == 0) {
+        op = ws63_debug_next_token(&cursor);
+        if (op == NULL) {
+            ws63_debug_print_help();
+            return;
+        }
+    } else {
+        return;
+    }
+
+    if (strcmp(op, "HELP") == 0) {
+        ws63_debug_print_help();
+        return;
+    }
+
+    if (strcmp(op, "INIT") == 0) {
+        ret = ws63_task_ld2402_reinit();
+        ws63_debug_log("[ws63 dbg] LD INIT ret=0x%x\r\n", (unsigned int)ret);
+        ws63_debug_dump_ld2402_runtime_status("ld-init");
+        return;
+    }
+
+    if (strcmp(op, "STAT") == 0) {
+        ws63_debug_dump_ld2402_runtime_status("ld-status");
+        ws63_debug_dump_ld2402_distance_status("ld-distance");
+        return;
+    }
+
+    if (strcmp(op, "VERSION") == 0) {
+        if (ws63_task_ld2402_get_version(version, sizeof(version)) == ERRCODE_SUCC) {
+            ws63_debug_log("[ws63 dbg] LD VERSION:%s\r\n", version);
+        } else {
+            ws63_debug_log("[ws63 dbg] LD VERSION failed\r\n");
+        }
+        return;
+    }
+
+    if (strcmp(op, "SN") == 0) {
+        if (ws63_task_ld2402_get_sn_char(sn_text, sizeof(sn_text)) == ERRCODE_SUCC) {
+            ws63_debug_log("[ws63 dbg] LD SN(char):%s\r\n", sn_text);
+            return;
+        }
+
+        sn_hex_len = ws63_task_ld2402_get_sn_hex(sn_buf, sizeof(sn_buf));
+        if (sn_hex_len <= 0) {
+            ws63_debug_log("[ws63 dbg] LD SN failed\r\n");
+            return;
+        }
+
+        {
+            uint16_t idx;
+            uint16_t pos = 0U;
+
+            for (idx = 0U; idx < (uint16_t)sn_hex_len; idx++) {
+                int32_t write_len;
+
+                if ((sizeof(sn_text) - pos) <= 1U) {
+                    break;
+                }
+
+                write_len = snprintf_s(&sn_text[pos], sizeof(sn_text) - pos,
+                    (sizeof(sn_text) - pos) - 1U, "%02X", sn_buf[idx]);
+                if (write_len <= 0) {
+                    break;
+                }
+                pos = (uint16_t)(pos + (uint16_t)write_len);
+            }
+            sn_text[pos] = '\0';
+        }
+        ws63_debug_log("[ws63 dbg] LD SN(hex):%s\r\n", sn_text);
+        return;
+    }
+
+    if (strcmp(op, "MODE") == 0) {
+        arg0 = ws63_debug_next_token(&cursor);
+        if (arg0 == NULL) {
+            ws63_debug_log("[ws63 dbg] usage: LD MODE NORMAL|ENGINEERING\r\n");
+            return;
+        }
+
+        if ((strcmp(arg0, "NORMAL") == 0) || (strcmp(arg0, "N") == 0)) {
+            ret = ws63_task_ld2402_set_normal_mode();
+            ws63_debug_log("[ws63 dbg] LD MODE NORMAL ret=0x%x\r\n", (unsigned int)ret);
+            return;
+        }
+
+        if ((strcmp(arg0, "ENGINEERING") == 0) || (strcmp(arg0, "ENG") == 0) || (strcmp(arg0, "E") == 0)) {
+            ret = ws63_task_ld2402_set_engineering_mode();
+            ws63_debug_log("[ws63 dbg] LD MODE ENGINEERING ret=0x%x\r\n", (unsigned int)ret);
+            return;
+        }
+
+        ws63_debug_log("[ws63 dbg] usage: LD MODE NORMAL|ENGINEERING\r\n");
+        return;
+    }
+
+    if (strcmp(op, "DIST") == 0) {
+        arg0 = ws63_debug_next_token(&cursor);
+        if (arg0 == NULL) {
+            ws63_debug_dump_ld2402_distance_status("ld-distance");
+            return;
+        }
+
+        if (!ws63_debug_parse_distance_01m(arg0, &distance_01m)) {
+            ws63_debug_log("[ws63 dbg] usage: LD DIST <0.7~10.0>\r\n");
+            return;
+        }
+
+        ret = ws63_task_ld2402_set_max_distance((float)distance_01m / 10.0f);
+        ws63_debug_log("[ws63 dbg] LD DIST %u.%um ret=0x%x\r\n",
+            (unsigned int)(distance_01m / 10U),
+            (unsigned int)(distance_01m % 10U),
+            (unsigned int)ret);
+        return;
+    }
+
+    if (strcmp(op, "DELAY") == 0) {
+        arg0 = ws63_debug_next_token(&cursor);
+        if ((arg0 == NULL) || (!ws63_debug_parse_u16_range(arg0, 0U, 65535U, &param_value_16))) {
+            ws63_debug_log("[ws63 dbg] usage: LD DELAY <0-65535>\r\n");
+            return;
+        }
+
+        ret = ws63_task_ld2402_set_disappear_delay(param_value_16);
+        ws63_debug_log("[ws63 dbg] LD DELAY %u ret=0x%x\r\n",
+            (unsigned int)param_value_16,
+            (unsigned int)ret);
+        return;
+    }
+
+    if (strcmp(op, "GET") == 0) {
+        arg0 = ws63_debug_next_token(&cursor);
+        if ((arg0 == NULL) || (!ws63_debug_parse_u32_value(arg0, &param_value))) {
+            ws63_debug_log("[ws63 dbg] usage: LD GET <param_id>\r\n");
+            return;
+        }
+
+        param_id = (uint16_t)param_value;
+        ret = ws63_task_ld2402_read_param(param_id, &param_value);
+        ws63_debug_log("[ws63 dbg] LD GET 0x%04x ret=0x%x val=0x%08x\r\n",
+            (unsigned int)param_id,
+            (unsigned int)ret,
+            (unsigned int)param_value);
+        return;
+    }
+
+    if (strcmp(op, "SET") == 0) {
+        arg0 = ws63_debug_next_token(&cursor);
+        arg1 = ws63_debug_next_token(&cursor);
+        if ((arg0 == NULL) || (arg1 == NULL) || (!ws63_debug_parse_u32_value(arg0, &param_value)) ||
+            (!ws63_debug_parse_u32_value(arg1, &power_inter))) {
+            ws63_debug_log("[ws63 dbg] usage: LD SET <param_id> <value>\r\n");
+            return;
+        }
+
+        ret = ws63_task_ld2402_set_param((uint16_t)param_value, power_inter);
+        ws63_debug_log("[ws63 dbg] LD SET 0x%04x=0x%08x ret=0x%x\r\n",
+            (unsigned int)param_value,
+            (unsigned int)power_inter,
+            (unsigned int)ret);
+        return;
+    }
+
+    if (strcmp(op, "SAVE") == 0) {
+        ret = ws63_task_ld2402_save_params();
+        ws63_debug_log("[ws63 dbg] LD SAVE ret=0x%x\r\n", (unsigned int)ret);
+        return;
+    }
+
+    if (strcmp(op, "GAIN") == 0) {
+        ret = ws63_task_ld2402_auto_gain_adjust();
+        ws63_debug_log("[ws63 dbg] LD GAIN ret=0x%x\r\n", (unsigned int)ret);
+        return;
+    }
+
+    if (strcmp(op, "AUTO") == 0) {
+        arg0 = ws63_debug_next_token(&cursor);
+        arg1 = ws63_debug_next_token(&cursor);
+        arg2 = ws63_debug_next_token(&cursor);
+        if ((arg0 == NULL) || (arg1 == NULL) ||
+            (!ws63_debug_parse_u16_range(arg0, 10U, 200U, &distance_01m)) ||
+            (!ws63_debug_parse_u16_range(arg1, 10U, 200U, &param_value_16))) {
+            ws63_debug_log("[ws63 dbg] usage: LD AUTO <trig10x> <hold10x> [static10x]\r\n");
+            return;
+        }
+
+        if (arg2 != NULL) {
+            if (!ws63_debug_parse_u16_range(arg2, 10U, 200U, &alarm_status)) {
+                ws63_debug_log("[ws63 dbg] usage: LD AUTO <trig10x> <hold10x> [static10x]\r\n");
+                return;
+            }
+        } else {
+            alarm_status = param_value_16;
+        }
+
+        ret = ws63_task_ld2402_start_auto_threshold(distance_01m, param_value_16, alarm_status);
+        ws63_debug_log("[ws63 dbg] LD AUTO %u/%u/%u ret=0x%x\r\n",
+            (unsigned int)distance_01m,
+            (unsigned int)param_value_16,
+            (unsigned int)alarm_status,
+            (unsigned int)ret);
+        return;
+    }
+
+    if (strcmp(op, "PROGRESS") == 0) {
+        ret = ws63_task_ld2402_get_auto_threshold_progress(&progress);
+        ws63_debug_log("[ws63 dbg] LD PROGRESS ret=0x%x progress=%u%%\r\n",
+            (unsigned int)ret,
+            (unsigned int)progress);
+        return;
+    }
+
+    if (strcmp(op, "ALARM") == 0) {
+        ret = ws63_task_ld2402_get_auto_threshold_alarm(&alarm_status, &gate_bitmap);
+        ws63_debug_log("[ws63 dbg] LD ALARM ret=0x%x status=%u bitmap=0x%04x\r\n",
+            (unsigned int)ret,
+            (unsigned int)alarm_status,
+            (unsigned int)gate_bitmap);
+        return;
+    }
+
+    if (strcmp(op, "PWR") == 0) {
+        ret = ws63_task_ld2402_get_power_interference(&power_inter);
+        ws63_debug_log("[ws63 dbg] LD PWR ret=0x%x value=%u\r\n",
+            (unsigned int)ret,
+            (unsigned int)power_inter);
+        return;
+    }
+
+    if (strcmp(op, "SAVE3F") == 0) {
+        ret = ws63_task_ld2402_refresh_save_flag();
+        if (ret == ERRCODE_SUCC) {
+            ret = ws63_task_ld2402_save_params();
+        }
+        ws63_debug_log("[ws63 dbg] LD SAVE3F ret=0x%x\r\n", (unsigned int)ret);
+        return;
+    }
+
+    if (strcmp(op, "RAW") == 0) {
+        arg0 = ws63_debug_next_token(&cursor);
+        if ((arg0 == NULL) || (!ws63_debug_parse_hex_bytes(arg0, raw_buf, sizeof(raw_buf), &raw_len))) {
+            ws63_debug_log("[ws63 dbg] usage: LD RAW <HEX...>\r\n");
+            return;
+        }
+
+        ret = ws63_task_ld2402_send_raw(raw_buf, raw_len);
+        ws63_debug_log("[ws63 dbg] LD RAW len=%u ret=0x%x\r\n",
+            (unsigned int)raw_len,
+            (unsigned int)ret);
+        return;
+    }
+
+    if ((strcmp(op, "LOG") == 0) || (strcmp(op, "LOGSTAT") == 0) || (strcmp(op, "DISTSTAT") == 0)) {
+        arg0 = ws63_debug_next_token(&cursor);
+        if ((strcmp(op, "LOGSTAT") == 0) || (arg0 == NULL)) {
+            ws63_debug_dump_ld2402_runtime_status("ld-log");
+            return;
+        }
+
+        if (strcmp(arg0, "ON") == 0) {
+            ret = ws63_task_ld2402_set_log_enable(1U);
+            ws63_debug_log("[ws63 dbg] LD LOG ON ret=0x%x\r\n", (unsigned int)ret);
+            ws63_debug_dump_ld2402_runtime_status("ld-log");
+            return;
+        }
+
+        if (strcmp(arg0, "OFF") == 0) {
+            ret = ws63_task_ld2402_set_log_enable(0U);
+            ws63_debug_log("[ws63 dbg] LD LOG OFF ret=0x%x\r\n", (unsigned int)ret);
+            ws63_debug_dump_ld2402_runtime_status("ld-log");
+            return;
+        }
+
+        ws63_debug_log("[ws63 dbg] usage: LD LOG ON|OFF|STAT\r\n");
+        return;
+    }
+
+    if (strcmp(op, "LOGINT") == 0) {
+        arg0 = ws63_debug_next_token(&cursor);
+        if ((arg0 == NULL) || (!ws63_debug_parse_u32_value(arg0, &param_value)) ||
+            (param_value > WS63_DEBUG_SENSOR_LOG_GAP_MS_MAX)) {
+            ws63_debug_log("[ws63 dbg] usage: LD LOGINT <0-60000>\r\n");
+            return;
+        }
+
+        ret = ws63_task_ld2402_set_log_gap_ms(param_value);
+        ws63_debug_log("[ws63 dbg] LD LOGINT %ums ret=0x%x\r\n",
+            (unsigned int)param_value,
+            (unsigned int)ret);
+        ws63_debug_dump_ld2402_runtime_status("ld-log");
+        return;
+    }
+
+    ws63_debug_log("[ws63 dbg] usage: LD HELP\r\n");
 }
 
 /**
@@ -688,13 +1109,27 @@ static void ws63_debug_print_help(void)
     ws63_debug_log("[ws63 dbg]   TTP229 WATCH ON|OFF\r\n");
     ws63_debug_log("[ws63 dbg]   TTP229 ENABLE ON|OFF\r\n");
     ws63_debug_log("[ws63 dbg]   TTP229 ALARM ON|OFF\r\n");
-    ws63_debug_log("[ws63 dbg]   LD2402 INIT\r\n");
-    ws63_debug_log("[ws63 dbg]   LD2402 RAW <HEX...>\r\n");
-    ws63_debug_log("[ws63 dbg]   LD2402 STAT\r\n");
-    ws63_debug_log("[ws63 dbg]   LD2402 DIST\r\n");
-    ws63_debug_log("[ws63 dbg]   LD2402 LOG ON|OFF\r\n");
-    ws63_debug_log("[ws63 dbg]   LD2402 LOGINT <0-60000ms>\r\n");
-    ws63_debug_log("[ws63 dbg]   LD2402 LOGSTAT\r\n");
+    ws63_debug_log("[ws63 dbg]   LD HELP\r\n");
+    ws63_debug_log("[ws63 dbg]   LD INIT\r\n");
+    ws63_debug_log("[ws63 dbg]   LD STAT\r\n");
+    ws63_debug_log("[ws63 dbg]   LD VERSION\r\n");
+    ws63_debug_log("[ws63 dbg]   LD SN\r\n");
+    ws63_debug_log("[ws63 dbg]   LD MODE NORMAL|ENGINEERING\r\n");
+    ws63_debug_log("[ws63 dbg]   LD DIST [0.7~10.0]\r\n");
+    ws63_debug_log("[ws63 dbg]   LD DELAY <0-65535>\r\n");
+    ws63_debug_log("[ws63 dbg]   LD GET <param_id>\r\n");
+    ws63_debug_log("[ws63 dbg]   LD SET <param_id> <value>\r\n");
+    ws63_debug_log("[ws63 dbg]   LD SAVE\r\n");
+    ws63_debug_log("[ws63 dbg]   LD GAIN\r\n");
+    ws63_debug_log("[ws63 dbg]   LD AUTO <trig10x> <hold10x> [static10x]\r\n");
+    ws63_debug_log("[ws63 dbg]   LD PROGRESS\r\n");
+    ws63_debug_log("[ws63 dbg]   LD ALARM\r\n");
+    ws63_debug_log("[ws63 dbg]   LD PWR\r\n");
+    ws63_debug_log("[ws63 dbg]   LD SAVE3F\r\n");
+    ws63_debug_log("[ws63 dbg]   LD RAW <HEX...>\r\n");
+    ws63_debug_log("[ws63 dbg]   LD LOG ON|OFF\r\n");
+    ws63_debug_log("[ws63 dbg]   LD LOGINT <0-60000ms>\r\n");
+    ws63_debug_log("[ws63 dbg]   LD LOGSTAT\r\n");
     ws63_debug_log("[ws63 dbg]   SLE ULOG ON|OFF\r\n");
     ws63_debug_log("[ws63 dbg]   SLE ULOGINT <0-60000ms>\r\n");
     ws63_debug_log("[ws63 dbg]   SLE ULOGSTAT\r\n");
@@ -755,6 +1190,11 @@ static void ws63_debug_exec_command(const char *line)
 
     if ((strcmp(cmd, "HELP") == 0) || (strcmp(cmd, "?") == 0)) {
         ws63_debug_print_help();
+        return;
+    }
+
+    if ((strncmp(cmd, "LD ", 3) == 0) || (strcmp(cmd, "LD") == 0)) {
+        ws63_debug_exec_ld_command(cmd);
         return;
     }
 
@@ -988,58 +1428,6 @@ static void ws63_debug_exec_command(const char *line)
             (unsigned int)rgb_args[2],
             (unsigned int)ret);
         ws63_debug_dump_rgb_status("rgb-set");
-        return;
-    }
-
-    if (strcmp(cmd, "LD2402 INIT") == 0) {
-        ret = ws63_task_ld2402_reinit();
-        ws63_debug_log("[ws63 dbg] LD2402 INIT ret=0x%x\r\n", (unsigned int)ret);
-        return;
-    }
-
-    if (strcmp(cmd, "LD2402 STAT") == 0) {
-        ws63_debug_log("[ws63 dbg] LD2402 subport=%u\r\n", (unsigned int)LD2402_SUBPORT);
-        ws63_debug_dump_ld2402_log_status("ld2402-log");
-        ws63_debug_dump_ld2402_distance_status("ld2402-distance");
-        return;
-    }
-
-    if (strcmp(cmd, "LD2402 DIST") == 0) {
-        ws63_debug_dump_ld2402_distance_status("ld2402-distance");
-        return;
-    }
-
-    if (strcmp(cmd, "LD2402 LOG ON") == 0) {
-        ret = ws63_task_ld2402_set_log_enable(1U);
-        ws63_debug_log("[ws63 dbg] LD2402 LOG ON ret=0x%x\r\n", (unsigned int)ret);
-        ws63_debug_dump_ld2402_log_status("ld2402-log");
-        return;
-    }
-
-    if (strcmp(cmd, "LD2402 LOG OFF") == 0) {
-        ret = ws63_task_ld2402_set_log_enable(0U);
-        ws63_debug_log("[ws63 dbg] LD2402 LOG OFF ret=0x%x\r\n", (unsigned int)ret);
-        ws63_debug_dump_ld2402_log_status("ld2402-log");
-        return;
-    }
-
-    if (strcmp(cmd, "LD2402 LOGSTAT") == 0) {
-        ws63_debug_dump_ld2402_log_status("ld2402-log");
-        return;
-    }
-
-    if (strncmp(cmd, "LD2402 LOGINT ", 13) == 0) {
-        if (!ws63_debug_parse_u32_tokens(cmd + 13, rgb_args, 4U, &rgb_argc) || (rgb_argc != 1U) ||
-            (rgb_args[0] > WS63_DEBUG_SENSOR_LOG_GAP_MS_MAX)) {
-            ws63_debug_log("[ws63 dbg] usage: LD2402 LOGINT <0-60000>\r\n");
-            return;
-        }
-
-        ret = ws63_task_ld2402_set_log_gap_ms(rgb_args[0]);
-        ws63_debug_log("[ws63 dbg] LD2402 LOGINT %ums ret=0x%x\r\n",
-            (unsigned int)rgb_args[0],
-            (unsigned int)ret);
-        ws63_debug_dump_ld2402_log_status("ld2402-log");
         return;
     }
 

@@ -55,7 +55,7 @@ static errcode_t ws63_rgb_post_ctrl_msg(const ws63_rgb_ctrl_msg_t *msg, uint32_t
 }
 
 /**
- * @brief 初始化 RGB 演示链路。
+ * @brief 初始化 RGB 硬件链路，并按默认策略决定是否进入演示。
  */
 void ws63_rgb_demo_init(void)
 {
@@ -70,10 +70,15 @@ void ws63_rgb_demo_init(void)
     }
 
     g_ws63_rgb_ready = 1U;
-    g_ws63_rgb_demo_enable = 1U;
     g_ws63_rgb_color_index = 0U;
-    g_ws63_rgb_last_switch_ms = ws63_os_tick_ms() - WS63_RGB_DEMO_INTERVAL_MS;
-    osal_printk("[wk2114 final task] rgb demo start (SPI1/GPIO1+GPIO6)\r\n");
+    g_ws63_rgb_demo_enable = (WS63_RGB_DEMO_ENABLE_DEFAULT != 0U) ? 1U : 0U;
+    if (g_ws63_rgb_demo_enable == 1U) {
+        /* 默认开启演示时，先把时间戳回拨一个周期，保证上电后立即出第一帧。 */
+        g_ws63_rgb_last_switch_ms = ws63_os_tick_ms() - WS63_RGB_DEMO_INTERVAL_MS;
+        osal_printk("[wk2114 final task] rgb demo start (SPI1/GPIO1+GPIO6)\r\n");
+    } else {
+        osal_printk("[wk2114 final task] rgb init ok, demo disabled\r\n");
+    }
 #endif
 }
 
@@ -183,6 +188,7 @@ static void *ws63_rgb_task_entry(const char *arg)
     ws63_rgb_ctrl_msg_t msg;
 
     (void)arg;
+    /* 任务启动后只做一次硬件初始化，演示模式是否运行由默认策略和调试命令决定。 */
     ws63_rgb_demo_init();
 
     while (1) {

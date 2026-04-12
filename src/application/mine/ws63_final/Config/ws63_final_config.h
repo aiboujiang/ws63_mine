@@ -234,6 +234,8 @@ extern "C" {
 #define WS63_RGB_SPI_FREQ_MHZ           4U
 #define WS63_RGB_SPI_TIMEOUT_MS         0xFFFFFFFFU
 #define WS63_RGB_DEMO_INTERVAL_MS       500U
+/* RGB 上电默认策略：0=仅初始化，不自动进入演示；1=初始化后直接演示。 */
+#define WS63_RGB_DEMO_ENABLE_DEFAULT    0U
 
 /* 日志开关：调试阶段建议开启，稳定后可关闭降低串口开销。 */
 #define WS63_RGB_LOG_ENABLE             1U

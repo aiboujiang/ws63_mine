@@ -59,6 +59,48 @@ ws63_final/
 
 ## 8. 任务维护记录
 
+### 2026-04-12: LD2402 命令别名收敛到 LD
+
+变更摘要：
+- 将 `ws63_final` 的 LD2402 调试入口收敛为 `LD ...` 前缀，去掉旧 `LD2402 ...` 兼容别名。
+- 当前可执行命令仅保留 `LD HELP/INIT/STAT/VERSION/SN/MODE/DIST/DELAY/GET/SET/SAVE/GAIN/AUTO/PROGRESS/ALARM/PWR/SAVE3F/RAW/LOG/LOGINT/LOGSTAT`。
+- Task 层仍通过 LD2402 驱动实现协议处理，但对外调试命令面只保留 `LD`，避免现场脚本继续依赖旧别名。
+- 同步更新 `DEBUG_COMMANDS.md`，移除旧前缀示例与故障排查中的 `LD2402` 命令写法。
+
+影响文件：
+- `src/application/mine/ws63_final/Driver/ld2402.c`
+- `src/application/mine/ws63_final/Driver/ld2402.h`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task.h`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_sensor_bridge.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_debug.c`
+- `src/application/mine/ws63_final/DEBUG_COMMANDS.md`
+
+验证结果：
+- 命令：`cd /home/xixi/code/fbb_ws63_20260114/src && python3 build.py ws63-liteos-app`
+- 结果：通过（`Build target:ws63_liteos_app success`）。
+
+后续事项：
+- 上板时优先确认 `LD INIT`、`LD VERSION`、`LD SN` 与 `LD STAT` 输出是否正常。
+- 现场脚本如仍调用旧前缀，需要直接切换到 `LD`，不再依赖 `LD2402` 兼容入口。
+
+### 2026-04-12: RGB 上电不再默认进入 demo，LD2402 运行态距离日志统一节流
+
+变更摘要：
+- RGB 任务上电后只做硬件初始化，不再默认进入演示循环，避免灯效在未下发命令时自动跑起来。
+- 新增 `WS63_RGB_DEMO_ENABLE_DEFAULT` 默认策略宏，便于后续按现场需要重新打开演示模式。
+- LD2402 的 `OFF` / `distance` / 普通数据包日志统一走同一条节流判断，避免距离文本分支绕过日志间隔限制。
+- 保留最近距离值与更新时间刷新逻辑，仅收紧串口输出频率，减少门锁现场刷屏。
+
+影响文件：
+- `src/application/mine/ws63_final/Config/ws63_final_config.h`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_rgb.c`
+- `src/application/mine/ws63_final/Driver/ld2402.c`
+- `src/application/mine/ws63_final/README.md`
+
+验证结果：
+- 命令：`cd /home/xixi/code/fbb_ws63_20260114/src && python3 build.py ws63-liteos-app`
+- 结果：通过（`Build target:ws63_liteos_app success`）。
+
 ### 2026-04-11: TTP229 I2C 上拉容错修复
 
 变更摘要：
@@ -233,11 +275,27 @@ ws63_final/
 
 验证结果：
 - 命令：`cd /home/xixi/code/fbb_ws63_20260114/src && python3 build.py ws63-liteos-app`
-- 结果：构建通过（`Build target:ws63_liteos_app success`）。
-
 后续事项：
 - 上板建议先执行 `ZW101 HANDSHAKE`、`ZW101 CHECKSENSOR`、`ZW101 ZA ECHO`，并结合新增 `init try` 日志判断是否为“串口无回包”。
 - 对 LD2402 建议关注 `init tryN rx_total`，若连续为 `0`，优先排查模块供电、TX/RX 交叉与子口连线。
+
+### 2026-04-12: 系统设计稿对齐现网能力
+
+变更摘要：
+- 重写根目录 [系统设计.md](/home/xixi/code/系统设计.md)，将文档从概念方案收敛为“现网能力 + 演进路线”双层结构。
+- 补齐 ws63_final 已实现的模块边界、能力矩阵、门锁状态机、认证来源与调试命令口径。
+- 明确 camera 仅作为外部视觉模块桥接，不再把本地人脸算法写成 WS63 现网能力。
+- 将本地密码哈希认证、关门检测等未落地能力移动到演进路线，避免与现网实现混写。
+
+影响文件：
+- `/home/xixi/code/系统设计.md`
+
+验证结果：
+- 对照 `src/application/mine/ws63_final/README.md`、`src/application/mine/ws63_final/DEBUG_COMMANDS.md` 以及现网任务代码完成人工核对。
+- 未执行构建；本次仅修改设计文档，未涉及源码。
+
+后续事项：
+- 如后续 ws63_final 增加密码认证或关门检测，再把演进路线中的对应条目提升为现网能力说明。
 
 ### 2026-04-10: 串口实测日志问题修复（RGB 默认可用 + STOP 符号显示）
 

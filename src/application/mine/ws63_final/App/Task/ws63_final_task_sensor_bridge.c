@@ -27,6 +27,22 @@ errcode_t ws63_task_ld2402_reinit(void)
 }
 
 /**
+ * @brief 查询 LD2402 是否已完成初始化。
+ */
+uint8_t ws63_task_ld2402_is_ready(void)
+{
+    return ld2402_is_ready();
+}
+
+/**
+ * @brief 查询 LD2402 当前是否处于配置模式。
+ */
+uint8_t ws63_task_ld2402_is_in_config_mode(void)
+{
+    return ld2402_is_in_config_mode();
+}
+
+/**
  * @brief 向 LD2402 发送原始命令帧。
  */
 errcode_t ws63_task_ld2402_send_raw(const uint8_t *data, uint16_t len)
@@ -40,6 +56,135 @@ errcode_t ws63_task_ld2402_send_raw(const uint8_t *data, uint16_t len)
     }
 
     return wk2114_subport_write(LD2402_SUBPORT, data, len);
+}
+
+/**
+ * @brief 读取 LD2402 固件版本。
+ */
+errcode_t ws63_task_ld2402_get_version(char *buf, uint16_t buf_len)
+{
+    return ld2402_get_version(buf, buf_len);
+}
+
+/**
+ * @brief 读取 LD2402 字符形式序列号。
+ */
+errcode_t ws63_task_ld2402_get_sn_char(char *buf, uint16_t buf_len)
+{
+    return ld2402_get_sn_char(buf, buf_len);
+}
+
+/**
+ * @brief 读取 LD2402 十六进制形式序列号。
+ */
+int32_t ws63_task_ld2402_get_sn_hex(uint8_t *buf, uint16_t buf_len)
+{
+    return ld2402_get_sn_hex(buf, buf_len);
+}
+
+/**
+ * @brief 读取 LD2402 单个参数值。
+ */
+errcode_t ws63_task_ld2402_read_param(uint16_t param_id, uint32_t *value)
+{
+    return ld2402_read_param(param_id, value);
+}
+
+/**
+ * @brief 写入 LD2402 单个参数值。
+ */
+errcode_t ws63_task_ld2402_set_param(uint16_t param_id, uint32_t value)
+{
+    return ld2402_set_param(param_id, value);
+}
+
+/**
+ * @brief 设置 LD2402 最大距离。
+ */
+errcode_t ws63_task_ld2402_set_max_distance(float distance_m)
+{
+    return ld2402_set_max_distance(distance_m);
+}
+
+/**
+ * @brief 设置 LD2402 目标消失延迟。
+ */
+errcode_t ws63_task_ld2402_set_disappear_delay(uint16_t seconds)
+{
+    return ld2402_set_disappear_delay(seconds);
+}
+
+/**
+ * @brief 切换 LD2402 到正常模式。
+ */
+errcode_t ws63_task_ld2402_set_normal_mode(void)
+{
+    return ld2402_set_normal_mode();
+}
+
+/**
+ * @brief 切换 LD2402 到工程模式。
+ */
+errcode_t ws63_task_ld2402_set_engineering_mode(void)
+{
+    return ld2402_set_engineering_mode();
+}
+
+/**
+ * @brief 保存 LD2402 当前参数。
+ */
+errcode_t ws63_task_ld2402_save_params(void)
+{
+    return ld2402_save_params();
+}
+
+/**
+ * @brief 触发 LD2402 自动增益调节。
+ */
+errcode_t ws63_task_ld2402_auto_gain_adjust(void)
+{
+    return ld2402_auto_gain_adjust();
+}
+
+/**
+ * @brief 开始 LD2402 自动门限生成。
+ */
+errcode_t ws63_task_ld2402_start_auto_threshold(uint16_t trig_coef_10x,
+    uint16_t hold_coef_10x, uint16_t static_coef_10x)
+{
+    return ld2402_start_auto_threshold(trig_coef_10x, hold_coef_10x, static_coef_10x);
+}
+
+/**
+ * @brief 查询 LD2402 自动门限生成进度。
+ */
+errcode_t ws63_task_ld2402_get_auto_threshold_progress(uint16_t *progress_percent)
+{
+    return ld2402_get_auto_threshold_progress(progress_percent);
+}
+
+/**
+ * @brief 查询 LD2402 自动门限干扰状态。
+ */
+errcode_t ws63_task_ld2402_get_auto_threshold_alarm(uint16_t *alarm_status, uint16_t *gate_bitmap)
+{
+    return ld2402_get_auto_threshold_alarm(alarm_status, gate_bitmap);
+}
+
+/**
+ * @brief 读取 LD2402 电源干扰参数。
+ */
+errcode_t ws63_task_ld2402_get_power_interference(uint32_t *value)
+{
+    return ld2402_get_power_interference(value);
+}
+
+/**
+ * @brief 执行 LD2402 0x003F 读后回写流程。
+ */
+errcode_t ws63_task_ld2402_refresh_save_flag(void)
+{
+    return ld2402_refresh_save_flag();
 }
 
 /**
