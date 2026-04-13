@@ -35,6 +35,8 @@ extern "C" {
  * 这里与历史兼容等待窗口保持一致，避免接近 2~3 秒边界时出现误判超时。
  */
 #define ZW101_MATCH_TIMEOUT ZW101_WAIT_UP_TIME
+/* 自动注册/自动验证类命令通常比普通命令更慢。 */
+#define ZW101_AUTO_TIMEOUT (30000)
 /* 手册推荐串口波特率。 */
 #define ZW101_DEFAULT_BAUD (57600)
 /* 未使用上电就绪字节 0x55 时的上电稳定等待（毫秒）。 */
@@ -109,6 +111,13 @@ typedef enum {
     ZW101_CMD_CHECK_SENSOR = 0x36,
     ZW101_CMD_RGB_CTRL = 0x3C,
     ZW101_CMD_SEARCH_NOW = 0x3E,
+    ZW101_CMD_ZA_GET_ECHO = 0x53,
+    ZW101_CMD_ZA_AUTO_LOGIN = 0x54,
+    ZW101_CMD_ZA_AUTO_SEARCH = 0x55,
+    ZW101_CMD_ZA_SEARCH_RES_BACK = 0x56,
+    ZW101_CMD_ZA_AUTO_LOGIN_STAB = 0x57,
+    ZW101_CMD_ZA_AUTO_SEARCH_ECHO = 0x58,
+    ZW101_CMD_ZA_PROCESS_TERMINATE = 0xAA,
     ZW101_CMD_CHECK_FINGER = ZW101_CMD_CHECK_SENSOR,
 } zw101_cmd_t;
 
@@ -210,6 +219,8 @@ typedef struct {
     /* 最近一次 ACK 载荷缓存（包含 payload[0] 的 ack_code 字节）。 */
     uint16_t ack_payload_len;
     uint8_t ack_payload[ZW101_PROTOCOL_RCV_BUFFER_SIZE];
+    /* 自动登录类命令在进度态 ACK 到达时会短暂忽略，继续等待最终结果。 */
+    bool skip_autologin_progress;
 
     /* 可选异步回调：原始包与 ACK。 */
     zw101_ack_callback_t ack_cb;

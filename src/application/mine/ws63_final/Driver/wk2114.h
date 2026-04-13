@@ -66,6 +66,24 @@ errcode_t wk2114_subport_write(uint8_t sub_port, const uint8_t *data, uint16_t l
 uint8_t wk2114_subport_read(uint8_t sub_port, uint8_t *data, uint8_t max_len);
 
 /**
+ * @brief 设置子串口休眠状态。
+ *
+ * @param sub_port 子串口号（1~4）。
+ * @param sleep_en 1=进入休眠，0=退出休眠。
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t wk2114_subport_set_sleep(uint8_t sub_port, uint8_t sleep_en);
+
+/**
+ * @brief 查询子串口是否处于休眠状态。
+ *
+ * @param sub_port 子串口号（1~4）。
+ * @param sleep_en_out 输出休眠状态（1=休眠，0=非休眠）。
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t wk2114_subport_get_sleep(uint8_t sub_port, uint8_t *sleep_en_out);
+
+/**
  * @brief 获取当前主口链路状态。
  *
  * @param status 输出结构体。

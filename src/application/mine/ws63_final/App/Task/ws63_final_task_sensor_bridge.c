@@ -7,8 +7,11 @@
 
 #include <stddef.h>
 
+#include "osal_debug.h"
+
 #include "ws63_final_common.h"
 #include "ws63_final_config.h"
+#include "ws63_final_osal.h"
 #include "ws63_final_sle.h"
 #include "wk2114.h"
 #include "ld2402.h"
@@ -260,6 +263,33 @@ uint32_t ws63_task_ld2402_get_distance_tick_ms(void)
 }
 
 /**
+ * @brief 设置 LD2402 子口通道使能状态。
+ */
+errcode_t ws63_task_ld2402_set_channel_enable(uint8_t enable)
+{
+    errcode_t ret;
+
+    if (ws63_is_subport_config_enabled(LD2402_SUBPORT) == 0U) {
+        return ERRCODE_FAIL;
+    }
+
+    ret = wk2114_subport_set_sleep(LD2402_SUBPORT, (enable != 0U) ? 0U : 1U);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+
+    return ws63_set_subport_runtime_enable(LD2402_SUBPORT, (enable != 0U) ? 1U : 0U);
+}
+
+/**
+ * @brief 查询 LD2402 子口通道是否启用。
+ */
+uint8_t ws63_task_ld2402_is_channel_enabled(void)
+{
+    return ws63_is_subport_enabled(LD2402_SUBPORT);
+}
+
+/**
  * @brief 查询 ZW101 是否已完成初始化。
  */
 static uint8_t ws63_task_zw101_is_ready(void)
@@ -282,6 +312,9 @@ errcode_t ws63_task_zw101_request_auto_identify(void)
     g_ws63_zw101_auto_identify_requested = 1U;
     g_ws63_zw101_auto_identify_cancelled = 0U;
     ws63_zw101_unlock(irq_status);
+
+    /* 指纹链路一旦被拉起，就把接近窗口往后推，给后续识别留足时间。 */
+    (void)ws63_lock_mgr_refresh_auth_window();
     return ERRCODE_SUCC;
 }
 
@@ -306,6 +339,7 @@ static void ws63_zw101_report_auto_identify_result(errcode_t ret, uint16_t match
     uint8_t passed;
 
     passed = (ret == ERRCODE_SUCC) ? 1U : 0U;
+    (void)ws63_lock_mgr_refresh_auth_window();
     if (passed != 0U) {
         osal_printk("[zw101] auto identify pass id=%u score=%u\r\n",
             (unsigned int)match_id,
@@ -352,6 +386,9 @@ static void *ws63_zw101_task_entry(const char *arg)
 
             /* 先清标志，再进入阻塞式识别，避免同一轮接近窗口重复触发。 */
             ws63_task_zw101_cancel_auto_identify_request();
+
+            /* 识别开始时刷新一次窗口，防止长耗时识别把唤醒态提前打断。 */
+            (void)ws63_lock_mgr_refresh_auth_window();
 
             osal_printk("[zw101] auto identify start\r\n");
             ret = zw101_business_auto_identify(0U, 0U, 0U, &match_id, &score);

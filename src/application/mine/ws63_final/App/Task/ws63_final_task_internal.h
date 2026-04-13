@@ -144,6 +144,20 @@ errcode_t ws63_task_post_wk2114_tx(const ws63_wk2114_tx_msg_t *msg, uint32_t tim
 errcode_t ws63_task_post_sle_uplink(const ws63_sle_uplink_msg_t *msg, uint32_t timeout);
 
 /**
+ * @brief 确保 ZW101 子口已完成惰性初始化。
+ *
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_task_ensure_zw101_ready(void);
+
+/**
+ * @brief 确保 camera 子口已完成惰性初始化。
+ *
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_task_ensure_camera_ready(void);
+
+/**
  * @brief 获取 WK2114 发送队列中的一条消息。
  */
 errcode_t ws63_task_recv_wk2114_tx(ws63_wk2114_tx_msg_t *msg, uint32_t timeout);
@@ -175,6 +189,15 @@ errcode_t ws63_lock_mgr_report_auth_result(ws63_lock_auth_source_t source, uint8
 uint8_t ws63_lock_mgr_is_armed(void);
 
 /**
+ * @brief 刷新门锁接近唤醒窗口的超时时间。
+ *
+ * 说明：仅在门锁处于 ARMED 状态时生效，用于摄像头、按键、指纹和雷达输入续命。
+ *
+ * @return errcode_t ERRCODE_SUCC 已刷新，其他失败。
+ */
+errcode_t ws63_lock_mgr_refresh_auth_window(void);
+
+/**
  * @brief 启动 ZW101 自动识别任务。
  *
  * @return errcode_t ERRCODE_SUCC 成功，其他失败。
@@ -200,6 +223,21 @@ void ws63_task_zw101_cancel_auto_identify_request(void);
  * @return errcode_t ERRCODE_SUCC 成功，其他失败。
  */
 errcode_t ws63_task_camera_send_message(const char *payload);
+
+/**
+ * @brief 设置 LD2402 子口通道使能状态。
+ *
+ * @param enable 1=启用，0=关闭。
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_task_ld2402_set_channel_enable(uint8_t enable);
+
+/**
+ * @brief 查询 LD2402 子口通道是否启用。
+ *
+ * @return uint8_t 1=启用，0=关闭。
+ */
+uint8_t ws63_task_ld2402_is_channel_enabled(void);
 
 /**
  * @brief camera 子口接收回调。

@@ -339,6 +339,21 @@ int32_t ws63_task_ld2402_get_distance_mm(void);
 uint32_t ws63_task_ld2402_get_distance_tick_ms(void);
 
 /**
+ * @brief 设置 LD2402 子口通道使能状态。
+ *
+ * @param enable 1=启用通道，0=关闭通道。
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_task_ld2402_set_channel_enable(uint8_t enable);
+
+/**
+ * @brief 查询 LD2402 子口通道是否启用。
+ *
+ * @return uint8_t 1=启用，0=关闭。
+ */
+uint8_t ws63_task_ld2402_is_channel_enabled(void);
+
+/**
  * @brief 设置 SLE 上行 success 日志开关。
  *
  * @param enable 1=开启，0=关闭。

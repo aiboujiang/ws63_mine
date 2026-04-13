@@ -13,6 +13,7 @@
 #include "systick.h"
 
 #include "LD2402/LD2402.h"
+#include "wk_zw101_test.h"
 
 /* ---------------- 硬件配置宏定义 ---------------- */
 #define WK_UART_BUS          UART_BUS_2
@@ -636,9 +637,9 @@ errcode_t mine_wk2114_uart2_ext_init(void)
     // 3. 验证通信是否正常
     osal_printk("[wk2114] verify GENA=0x%02x\r\n", g_wk_last_gena);
 
-    // 4. 初始化子串口1 并设置波特率为115200
+    // 4. 初始化子串口1 并设置为 ZW101 默认波特率 57600
     Wk_Init(1);
-    Wk_SetBaud(1, B115200);
+    Wk_SetBaud(1, B57600);
 
     // 5. 初始化子串口2用于 LD2402，真正握手由任务线程在轮询启动后执行
     Wk_Init(WK_LD2402_SUB_PORT);
@@ -672,8 +673,15 @@ static void *wk2114_task_func(const char *arg)
         osal_printk("[wk2114] ld2402 link check failed\r\n");
     }
 
+    ret = wk_zw101_test_init();
+    if (ret != ERRCODE_SUCC) {
+        osal_printk("[wk2114] zw101 test init failed, ret=0x%x\r\n", (unsigned int)ret);
+    }
+
     while (1) {
         wk_ld2402_poll_rx_once();
+        /* ZW101 测试模块内部会处理 UART0 命令输入与子串口1收包。 */
+        wk_zw101_test_process();
         osal_msleep(WK_LD2402_RX_POLL_MS);
     }
     return NULL;

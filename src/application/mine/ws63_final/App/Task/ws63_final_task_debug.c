@@ -1186,8 +1186,6 @@ static void ws63_debug_exec_command(const char *line)
         return;
     }
 
-    ws63_debug_log("[ws63 dbg] cmd<=%s\r\n", cmd);
-
     if ((strcmp(cmd, "HELP") == 0) || (strcmp(cmd, "?") == 0)) {
         ws63_debug_print_help();
         return;
@@ -1747,12 +1745,6 @@ static void ws63_debug_uart_cmd_init(void)
     }
 
     g_ws63_debug_uart_ready = 1U;
-    ws63_debug_log("[ws63 dbg] uart ready bus=%u baud=%u tx=%u rx=%u\r\n",
-        (unsigned int)WS63_DEBUG_UART_BUS,
-        (unsigned int)WS63_DEBUG_UART_BAUD,
-        (unsigned int)WS63_DEBUG_UART_TX_PIN,
-        (unsigned int)WS63_DEBUG_UART_RX_PIN);
-    ws63_debug_print_help();
 }
 
 /**

@@ -23,6 +23,8 @@
 #define WS63_CAMERA_SEND_RETRY_GAP_MS 20U
 /* camera 回包缓存长度：只保留一条最近回包，供调试和状态机观察。 */
 #define WS63_CAMERA_REPLY_TEXT_MAX 96U
+/* camera 分数阈值：score>=0.75 判定为通过（定点千分比，避免浮点依赖）。 */
+#define WS63_CAMERA_SCORE_PASS_MILLI 750U
 
 typedef enum {
     WS63_CAMERA_CMD_SEND_TEXT = 0,
@@ -37,6 +39,9 @@ static unsigned long g_ws63_camera_cmd_queue = 0UL;
 static uint8_t g_ws63_camera_task_started = 0U;
 static char g_ws63_camera_last_reply[WS63_CAMERA_REPLY_TEXT_MAX] = {0};
 static uint32_t g_ws63_camera_last_reply_ms = 0U;
+/* camera 接收重组缓冲：处理 WK2114 分包导致的半包文本。 */
+static char g_ws63_camera_rx_assembled[WS63_CAMERA_REPLY_TEXT_MAX] = {0};
+static uint16_t g_ws63_camera_rx_assembled_len = 0U;
 
 /**
  * @brief camera 状态锁。
@@ -98,24 +103,122 @@ static uint8_t ws63_camera_text_contains_ci(const char *text, const char *needle
 }
 
 /**
+ * @brief 从回包文本中解析 score 小数字段（如 score=0.82 / score:0.75）。
+ *
+ * 解析结果使用千分比：
+ * 1) 0.75 -> 750；
+ * 2) 1.00 -> 1000；
+ * 3) 非法格式返回失败。
+ */
+static uint8_t ws63_camera_parse_score_milli(const char *text, uint16_t *score_milli_out)
+{
+    size_t i;
+    size_t text_len;
+    const char *p;
+    const char *comma;
+    uint8_t need_kv_sep = 0U;
+    uint32_t int_part = 0U;
+    uint32_t frac_part = 0U;
+    uint32_t frac_base = 1000U;
+    uint8_t has_digit = 0U;
+    uint8_t frac_digit_count = 0U;
+
+    if ((text == NULL) || (score_milli_out == NULL)) {
+        return 0U;
+    }
+
+    text_len = strlen(text);
+    if (text_len == 0U) {
+        return 0U;
+    }
+
+    p = NULL;
+    for (i = 0U; i + 4U < text_len; i++) {
+        if ((tolower((unsigned char)text[i]) == 's') &&
+            (tolower((unsigned char)text[i + 1U]) == 'c') &&
+            (tolower((unsigned char)text[i + 2U]) == 'o') &&
+            (tolower((unsigned char)text[i + 3U]) == 'r') &&
+            (tolower((unsigned char)text[i + 4U]) == 'e')) {
+            p = &text[i + 5U];
+            need_kv_sep = 1U;
+            break;
+        }
+    }
+
+    if (p == NULL) {
+        /* 兼容另一类回包格式："[name,0.77]"，分数位于逗号后。 */
+        comma = strrchr(text, ',');
+        if (comma == NULL) {
+            return 0U;
+        }
+        p = comma + 1;
+    }
+
+    while ((*p == ' ') || (*p == '\t')) {
+        p++;
+    }
+    if (need_kv_sep != 0U) {
+        if ((*p != '=') && (*p != ':')) {
+            return 0U;
+        }
+        p++;
+        while ((*p == ' ') || (*p == '\t')) {
+            p++;
+        }
+    }
+
+    while ((*p >= '0') && (*p <= '9')) {
+        has_digit = 1U;
+        int_part = int_part * 10U + (uint32_t)(*p - '0');
+        p++;
+    }
+
+    if (*p == '.') {
+        p++;
+        while ((*p >= '0') && (*p <= '9') && (frac_digit_count < 3U)) {
+            frac_part = frac_part * 10U + (uint32_t)(*p - '0');
+            frac_digit_count++;
+            frac_base /= 10U;
+            p++;
+            has_digit = 1U;
+        }
+        while ((*p >= '0') && (*p <= '9')) {
+            p++;
+        }
+    }
+
+    if (has_digit == 0U) {
+        return 0U;
+    }
+
+    if (int_part > 1U) {
+        return 0U;
+    }
+
+    frac_part *= frac_base;
+    *score_milli_out = (uint16_t)(int_part * 1000U + frac_part);
+    return 1U;
+}
+
+/**
  * @brief 保存最近一次 camera 回包文本。
  *
  * 只保留可打印字符，避免二进制回包污染调试口。
  */
-static void ws63_camera_store_reply(const uint8_t *data, uint16_t len)
+static void ws63_camera_store_reply_text(const char *text)
 {
     char reply_buf[WS63_CAMERA_REPLY_TEXT_MAX] = {0};
     size_t copy_len;
     size_t i;
     unsigned int irq_status;
 
-    if ((data == NULL) || (len == 0U)) {
+    if ((text == NULL) || (text[0] == '\0')) {
         return;
     }
 
-    copy_len = (len < (uint16_t)(sizeof(reply_buf) - 1U)) ? (size_t)len : (sizeof(reply_buf) - 1U);
+    copy_len = strnlen(text, sizeof(reply_buf) - 1U);
     for (i = 0U; i < copy_len; i++) {
-        uint8_t ch = data[i];
+        uint8_t ch = (uint8_t)text[i];
 
         if ((ch < 0x20U) && (ch != '\r') && (ch != '\n') && (ch != '\t')) {
             reply_buf[i] = '?';
@@ -146,8 +249,18 @@ static void ws63_camera_store_reply(const uint8_t *data, uint16_t len)
  */
 static void ws63_camera_try_report_auth_result(const char *reply_text)
 {
+    uint16_t score_milli;
+
     if (reply_text == NULL) {
         return;
+    }
+
+    if (ws63_camera_parse_score_milli(reply_text, &score_milli) != 0U) {
+        if (score_milli >= WS63_CAMERA_SCORE_PASS_MILLI) {
+            osal_printk("[camera] score pass, score=%u/1000\r\n", (unsigned int)score_milli);
+            (void)ws63_lock_mgr_report_auth_result(WS63_LOCK_AUTH_SOURCE_CAMERA, 1U);
+            return;
+        }
     }
 
     if ((ws63_camera_text_contains_ci(reply_text, "pass") != 0U) ||
@@ -167,26 +280,81 @@ static void ws63_camera_try_report_auth_result(const char *reply_text)
 }
 
 /**
+ * @brief 处理一条完整 camera 文本回包。
+ */
+static void ws63_camera_handle_full_reply(const char *reply_text)
+{
+    if ((reply_text == NULL) || (reply_text[0] == '\0')) {
+        return;
+    }
+
+    ws63_camera_store_reply_text(reply_text);
+    osal_printk("[camera] rx %s\r\n", reply_text);
+    ws63_camera_try_report_auth_result(reply_text);
+}
+
+/**
+ * @brief 把子口数据追加到重组缓冲，并按结束符产出完整文本。
+ */
+static void ws63_camera_feed_rx_bytes(const uint8_t *data, uint16_t len)
+{
+    uint16_t i;
+
+    if ((data == NULL) || (len == 0U)) {
+        return;
+    }
+
+    for (i = 0U; i < len; i++) {
+        uint8_t ch = data[i];
+
+        if ((ch == '\r') || (ch == '\n')) {
+            if (g_ws63_camera_rx_assembled_len > 0U) {
+                g_ws63_camera_rx_assembled[g_ws63_camera_rx_assembled_len] = '\0';
+                ws63_camera_handle_full_reply(g_ws63_camera_rx_assembled);
+                g_ws63_camera_rx_assembled_len = 0U;
+                g_ws63_camera_rx_assembled[0] = '\0';
+            }
+            continue;
+        }
+
+        if (g_ws63_camera_rx_assembled_len >= (uint16_t)(sizeof(g_ws63_camera_rx_assembled) - 1U)) {
+            /* 避免异常长文本一直占用缓冲，直接丢弃当前半包并重新同步。 */
+            g_ws63_camera_rx_assembled_len = 0U;
+            g_ws63_camera_rx_assembled[0] = '\0';
+            osal_printk("[camera] rx fragment overflow, drop partial\r\n");
+        }
+
+        if ((ch < 0x20U) && (ch != '\t')) {
+            g_ws63_camera_rx_assembled[g_ws63_camera_rx_assembled_len++] = '?';
+        } else {
+            g_ws63_camera_rx_assembled[g_ws63_camera_rx_assembled_len++] = (char)ch;
+        }
+
+        if (ch == ']') {
+            /* Noah_Xiang,0.77 这类协议以 ']' 结束，收到即产出，解决分包问题。 */
+            g_ws63_camera_rx_assembled[g_ws63_camera_rx_assembled_len] = '\0';
+            ws63_camera_handle_full_reply(g_ws63_camera_rx_assembled);
+            g_ws63_camera_rx_assembled_len = 0U;
+            g_ws63_camera_rx_assembled[0] = '\0';
+        }
+    }
+}
+
+/**
  * @brief camera 接收回调：保存最近回包并尝试识别认证结果。
  */
 void ws63_task_camera_process_data(uint8_t sub_port, const uint8_t *data, uint16_t len)
 {
-    char reply_text[WS63_CAMERA_REPLY_TEXT_MAX] = {0};
-    size_t copy_len;
-
     (void)sub_port;
 
     if ((data == NULL) || (len == 0U)) {
         return;
     }
 
-    copy_len = (len < (uint16_t)(sizeof(reply_text) - 1U)) ? (size_t)len : (sizeof(reply_text) - 1U);
-    (void)memcpy_s(reply_text, sizeof(reply_text), data, copy_len);
-    reply_text[copy_len] = '\0';
+    /* camera 有任意有效输入就续命，避免人脸链路处理时被唤醒窗口提前切回。 */
+    (void)ws63_lock_mgr_refresh_auth_window();
 
-    ws63_camera_store_reply(data, len);
-    osal_printk("[camera] rx %s\r\n", reply_text);
-    ws63_camera_try_report_auth_result(reply_text);
+    ws63_camera_feed_rx_bytes(data, len);
 }
 
 /**

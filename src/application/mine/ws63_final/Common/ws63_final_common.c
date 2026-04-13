@@ -7,6 +7,24 @@
 
 #include "ws63_final_config.h"
 
+/* 子串口默认启用状态（来自编译配置）。 */
+static const uint8_t g_ws63_subport_enable_cfg[5] = {
+    0U,
+    WS63_SUBPORT1_ENABLE,
+    WS63_SUBPORT2_ENABLE,
+    WS63_SUBPORT3_ENABLE,
+    WS63_SUBPORT4_ENABLE
+};
+
+/* 子串口运行态启用状态（可被任务层动态调度）。 */
+static uint8_t g_ws63_subport_enable_runtime[5] = {
+    0U,
+    WS63_SUBPORT1_ENABLE,
+    WS63_SUBPORT2_ENABLE,
+    WS63_SUBPORT3_ENABLE,
+    WS63_SUBPORT4_ENABLE
+};
+
 /**
  * @brief 计算 WK2114 BAUD1/BAUD0/PRES。
  */
@@ -56,18 +74,51 @@ uint8_t ws63_is_subport_valid(uint8_t sub_port)
  */
 uint8_t ws63_is_subport_enabled(uint8_t sub_port)
 {
-    switch (sub_port) {
-        case 1U:
-            return WS63_SUBPORT1_ENABLE;
-        case 2U:
-            return WS63_SUBPORT2_ENABLE;
-        case 3U:
-            return WS63_SUBPORT3_ENABLE;
-        case 4U:
-            return WS63_SUBPORT4_ENABLE;
-        default:
-            return 0U;
+    if (!ws63_is_subport_valid(sub_port)) {
+        return 0U;
     }
+
+    return g_ws63_subport_enable_runtime[sub_port];
+}
+
+/**
+ * @brief 查询子串口在配置中的默认启用状态。
+ */
+uint8_t ws63_is_subport_config_enabled(uint8_t sub_port)
+{
+    if (!ws63_is_subport_valid(sub_port)) {
+        return 0U;
+    }
+
+    return g_ws63_subport_enable_cfg[sub_port];
+}
+
+/**
+ * @brief 重置子串口运行态启用状态为配置默认值。
+ */
+void ws63_reset_subport_runtime_enable(void)
+{
+    g_ws63_subport_enable_runtime[1U] = g_ws63_subport_enable_cfg[1U];
+    g_ws63_subport_enable_runtime[2U] = g_ws63_subport_enable_cfg[2U];
+    g_ws63_subport_enable_runtime[3U] = g_ws63_subport_enable_cfg[3U];
+    g_ws63_subport_enable_runtime[4U] = g_ws63_subport_enable_cfg[4U];
+}
+
+/**
+ * @brief 设置子串口运行态启用状态。
+ */
+errcode_t ws63_set_subport_runtime_enable(uint8_t sub_port, uint8_t enable)
+{
+    if (!ws63_is_subport_valid(sub_port)) {
+        return ERRCODE_INVALID_PARAM;
+    }
+
+    if ((enable != 0U) && (g_ws63_subport_enable_cfg[sub_port] == 0U)) {
+        return ERRCODE_FAIL;
+    }
+
+    g_ws63_subport_enable_runtime[sub_port] = (enable != 0U) ? 1U : 0U;
+    return ERRCODE_SUCC;
 }
 
 /**

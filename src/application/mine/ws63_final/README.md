@@ -60,6 +60,47 @@ ws63_final/
 
 ## 8. 任务维护记录
 
+### 2026-04-13: camera 分包重组修复（兼容 [name,score] 半包）
+
+变更摘要：
+- 修复 camera 子口收包被 WK2114 分片时的误判问题：新增接收重组缓冲，支持把 `"[Noah_Xiang,0.77"` + `"]"` 这类半包拼成完整帧后再判定。
+- 回包产出规则增加 `]` 结束符识别，并继续兼容 `\r\n` 结束符，避免协议结束符不统一导致漏判。
+- `score` 解析增强：除 `score=0.77 / score:0.77` 外，新增兼容 `"[name,0.77]"` 结构；仍按 `score>=0.75` 判定通过。
+- 保持原有关键字判定（pass/success/ok/allow/fail/deny/error/timeout）作为兜底，不改变上层门锁状态机接口。
+
+影响文件：
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_camera.c`
+- `src/application/mine/ws63_final/README.md`
+
+验证结果：
+- 命令：`cd /home/xixi/code/fbb_ws63_20260114/src && python3 build.py ws63-liteos-app`
+- 结果：构建通过，日志包含 `Build target:ws63_liteos_app success` 与 `packet success!`。
+
+### 2026-04-13: 门锁三项运行态修复与构建完成
+
+变更摘要：
+- 限制唤醒后的 LD2402 距离日志刷屏，避免在门锁有效窗口内持续输出无关 `distance` 信息。
+- 稳定 TTP229 密码输入生命周期，避免 `123456` 在状态抖动下被截断成后半段输入。
+- 增加 ZW101 指纹自动识别任务与请求/取消流程，确保门锁进入接近窗口后会实际拉起检测。
+- 修正新加任务桥接代码的缺失依赖，完成 `ws63-liteos-app` 端到端构建。
+
+影响文件：
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_lock_mgr.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_ttp229.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_sensor_bridge.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_internal.h`
+- `src/application/mine/ws63_final/Driver/zw101.c`
+- `src/application/mine/ws63_final/Driver/zw101.h`
+- `src/application/mine/ws63_final/README.md`
+
+验证结果：
+- 命令：`cd /home/xixi/code/fbb_ws63_20260114/src && python3 build.py ws63-liteos-app`
+- 结果：通过，日志最后显示 `Build target:ws63_liteos_app success` 与 `packet success!`。
+
+后续事项：
+- 上板后建议重点观察唤醒后 LD2402、TTP229、ZW101 三条链路的现场日志，确认门锁状态机与检测窗口完全对齐。
+
 ### 2026-04-12: LD2402 命令别名收敛到 LD
 
 变更摘要：
@@ -765,3 +806,23 @@ ws63_final/
 后续事项：
 - ZW101 现在会在接近窗口内由独立任务触发自动识别；TTP229 会保留前缀输入并在 `#` 提交时再做 armed 判定。
 - 待确认外部 camera 模块的回包关键字后，可把 `pass/fail` 判定收敛得更严格。
+
+### 2026-04-13: ZW101 续命窗口统一 + 调试启动日志静默
+
+变更摘要：
+- 将门锁接近唤醒窗口默认值从 20s 调整为 10s，并新增统一的窗口续命接口。
+- camera、TTP229、ZW101 识别结果与 LD2402 距离小于 80mm 的有效输入都会刷新唤醒窗口。
+- 去掉调试串口初始化时自动打印的 `[ws63 dbg]` HELP 列表与命令回显，保留手动 HELP 与命令结果日志。
+
+影响文件：
+- `src/application/mine/ws63_final/Config/ws63_final_config.h`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_internal.h`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_lock_mgr.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_camera.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_ttp229.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_sensor_bridge.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_debug.c`
+
+验证结果：
+- 命令：`cd /home/xixi/code/fbb_ws63_20260114/src && CMAKE_BUILD_PARALLEL_LEVEL=1 python3 build.py -c ws63-liteos-app`
+- 结果：通过，`Build target:ws63_liteos_app success`。

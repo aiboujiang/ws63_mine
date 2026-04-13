@@ -200,6 +200,15 @@ LD SAVE3F
    - 数据预览：最近一条主口 RX/TX 命令帧（ASCII 可见字符 + 截断显示）。
    - 统计信息：RX/TX 最近长度与累计次数。
    - 通道信息：当前子串口号与波特率（例如 `CH:U1 B:115200`）。
+5. ZW101 独立测试（WK2114 子串口1）：
+   - 通信路径：`WS63 UART2 -> WK2114 -> SubPort1 -> ZW101`。
+   - 子串口1默认波特率：`57600`（对齐 ZW101 手册默认值）。
+   - 调试口：`UART0`，命令前缀固定 `ZW101`。
+   - 支持命令：
+     - `ZW101 ENROLL <id> [times]`
+     - `ZW101 VERIFY [score] [id]`
+     - `ZW101 DEL <id> [count]`
+   - 说明：命令执行过程中模块会输出 ACK 码与释义，便于现场定位失败原因。
 
 ## 9.1 WK2114 最终版分层框架（可选）
 
@@ -266,6 +275,21 @@ ws63_final/
 3. 变更记录使用时间倒序，便于追溯。
 
 ## 14. 变更记录
+
+### 2026-04-13
+
+1. 在 `application/mine/wk2114_uart2_ext` 新增 ZW101 独立测试子模块，固定走 WK2114 子串口1链路。
+2. 新增 UART0 文本命令解析，仅保留 `ZW101 ENROLL/VERIFY/DEL` 三条核心测试命令。
+3. 子串口1波特率改为 `57600`，并新增握手+传感器检测重探测流程，避免上电阶段偶发未就绪。
+4. 保留现有 LD2402 子串口2路径，不改其协议流程，仅在主循环中并行调用 ZW101 测试处理。
+5. 影响文件：
+   - `src/application/mine/wk2114_uart2_ext/src/wk_zw101_test.c`
+   - `src/application/mine/wk2114_uart2_ext/inc/wk_zw101_test.h`
+   - `src/application/mine/wk2114_uart2_ext/src/mine_wk2114_uart2_ext.c`
+   - `src/application/mine/wk2114_uart2_ext/CMakeLists.txt`
+   - `src/application/mine/README.md`
+6. 验证命令：`cd /home/xixi/code/fbb_ws63_20260114/src && python3 build.py ws63-liteos-app`。
+7. 验证结果：构建通过，日志包含 `Build target:ws63_liteos_app success` 与 `packet success!`。
 
 ### 2026-03-31
 

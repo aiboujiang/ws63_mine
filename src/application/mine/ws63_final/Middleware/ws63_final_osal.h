@@ -51,6 +51,30 @@ errcode_t ws63_os_msg_queue_create(const char *name,
     uint16_t queue_len, uint16_t msg_size, unsigned long *queue_id);
 
 /**
+ * @brief 创建互斥锁。
+ *
+ * @param mutex_id 输出互斥锁句柄。
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_os_mutex_create(unsigned long *mutex_id);
+
+/**
+ * @brief 尝试获取互斥锁。
+ *
+ * @param mutex_id 互斥锁句柄。
+ * @param timeout  超时参数（Tick）。
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_os_mutex_lock(unsigned long mutex_id, uint32_t timeout);
+
+/**
+ * @brief 释放互斥锁。
+ *
+ * @param mutex_id 互斥锁句柄。
+ */
+void ws63_os_mutex_unlock(unsigned long mutex_id);
+
+/**
  * @brief 向消息队列发送一条拷贝消息。
  *
  * @param queue_id 队列句柄。

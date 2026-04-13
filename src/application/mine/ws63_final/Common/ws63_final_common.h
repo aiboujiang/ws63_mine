@@ -49,6 +49,32 @@ uint8_t ws63_is_subport_valid(uint8_t sub_port);
 uint8_t ws63_is_subport_enabled(uint8_t sub_port);
 
 /**
+ * @brief 查询子串口在配置中的默认启用状态。
+ *
+ * @param sub_port 子串口号。
+ * @return uint8_t 1=配置启用，0=配置禁用。
+ */
+uint8_t ws63_is_subport_config_enabled(uint8_t sub_port);
+
+/**
+ * @brief 重置子串口运行态启用状态为配置默认值。
+ */
+void ws63_reset_subport_runtime_enable(void);
+
+/**
+ * @brief 设置子串口运行态启用状态。
+ *
+ * 说明：
+ * 1) 仅改变运行态门控，不修改编译配置；
+ * 2) 对配置禁用的子口，不允许运行态强制启用。
+ *
+ * @param sub_port 子串口号。
+ * @param enable   1=启用，0=禁用。
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_set_subport_runtime_enable(uint8_t sub_port, uint8_t enable);
+
+/**
  * @brief 读取子串口配置波特率。
  *
  * @param sub_port 子串口号。

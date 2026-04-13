@@ -82,12 +82,14 @@ extern "C" {
 #define WS63_LOCK_MGR_TASK_PRIORITY         25U
 #define WS63_LOCK_MGR_TASK_POLL_MS          20U
 #define WS63_LOCK_LD2402_ARM_DISTANCE_MM_DEFAULT   80U
-/* 认证窗口默认延长到 20s，避免短暂停顿时过早退出接近流程。 */
-#define WS63_LOCK_AUTH_WINDOW_MS_DEFAULT            20000U
+/* 认证窗口默认 10s，窗口内任何输入都会续命一次。 */
+#define WS63_LOCK_AUTH_WINDOW_MS_DEFAULT            10000U
 #define WS63_LOCK_UNLOCK_DURATION_MS_DEFAULT        1500U
+#define WS63_LOCK_HOLD_OPEN_MS_DEFAULT              5000U
 #define WS63_LOCK_FAIL_THRESHOLD_DEFAULT            3U
 #define WS63_LOCK_FAIL_LOCKOUT_MS_DEFAULT          10000U
 #define WS63_LOCK_MOTOR_OPEN_DUTY_DEFAULT           40U
+#define WS63_LOCK_MOTOR_CLOSE_DUTY_DEFAULT          40U
 #define WS63_LOCK_CAMERA_WAKE_GAP_MS_DEFAULT        500U
 
 /* TTP229 密码解锁配置。 */

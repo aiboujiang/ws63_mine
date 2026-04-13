@@ -33,6 +33,7 @@ static unsigned long g_ws63_sle_uplink_queue = 0UL;
 static uint8_t g_ws63_wk2114_ready = 0U;
 static uint8_t g_ws63_wk2114_task_started = 0U;
 static uint8_t g_ws63_sle_task_started = 0U;
+static uint8_t g_ws63_subport_inited[WS63_SUBPORT_MAX + 1U] = {0};
 
 /**
  * @brief 设置 WK2114 链路就绪状态。
@@ -158,54 +159,70 @@ static void ws63_default_rx_callback(uint8_t sub_port, const uint8_t *data, uint
 }
 
 /**
+ * @brief 初始化单个子串口并按设备类型绑定回调。
+ */
+static errcode_t ws63_init_subport_with_device(uint8_t sub_port)
+{
+    uint32_t sub_baud;
+    errcode_t ret;
+
+    if (!ws63_is_subport_enabled(sub_port)) {
+        return ERRCODE_FAIL;
+    }
+
+    if (!ws63_is_subport_valid(sub_port)) {
+        return ERRCODE_INVALID_PARAM;
+    }
+
+    if (g_ws63_subport_inited[sub_port] != 0U) {
+        return ERRCODE_SUCC;
+    }
+
+    sub_baud = ws63_get_subport_baud(sub_port);
+    ret = wk2114_subport_init(sub_port, sub_baud);
+    if (ret != ERRCODE_SUCC) {
+        osal_printk("[wk2114 final task] sub-uart%u init fail\r\n", (unsigned int)sub_port);
+        return ret;
+    }
+
+    if ((sub_port == ZW101_SUBPORT) && (WS63_SLE_ZW101_ENABLE == 1U)) {
+        osal_printk("[wk2114 final task] ZW101 cfg sub-uart%u baud=%u\r\n",
+            (unsigned int)sub_port,
+            (unsigned int)sub_baud);
+        if (zw101_init(sub_port) == ERRCODE_SUCC) {
+            g_ws63_rx_cb[sub_port] = zw101_process_data;
+        } else {
+            osal_printk("[wk2114 final task] ZW101 init fail\r\n");
+        }
+    } else if ((sub_port == LD2402_SUBPORT) && (WS63_SLE_LD2402_ENABLE == 1U)) {
+        if (ld2402_init(sub_port) == ERRCODE_SUCC) {
+            g_ws63_rx_cb[sub_port] = ld2402_process_data;
+        } else {
+            osal_printk("[wk2114 final task] LD2402 init fail\r\n");
+        }
+    } else if ((sub_port == WS63_SLE_CAMERA_SUBPORT) && (WS63_CAMERA_ENABLE == 1U)) {
+        osal_printk("[wk2114 final task] CAMERA cfg sub-uart%u baud=%u\r\n",
+            (unsigned int)sub_port,
+            (unsigned int)sub_baud);
+        g_ws63_rx_cb[sub_port] = ws63_task_camera_process_data;
+    }
+
+    if (g_ws63_rx_cb[sub_port] == NULL) {
+        g_ws63_rx_cb[sub_port] = ws63_default_rx_callback;
+    }
+
+    g_ws63_subport_inited[sub_port] = 1U;
+    return ERRCODE_SUCC;
+}
+
+/**
  * @brief 按配置初始化所有启用的子串口。
  */
 static errcode_t ws63_init_enabled_subports(void)
 {
-    uint8_t sub_port;
-    uint32_t sub_baud;
-    errcode_t ret;
-
-    for (sub_port = 1U; sub_port <= WS63_SUBPORT_MAX; sub_port++) {
-        if (!ws63_is_subport_enabled(sub_port)) {
-            continue;
-        }
-
-        sub_baud = ws63_get_subport_baud(sub_port);
-        ret = wk2114_subport_init(sub_port, sub_baud);
-        if (ret != ERRCODE_SUCC) {
-            osal_printk("[wk2114 final task] sub-uart%u init fail\r\n", (unsigned int)sub_port);
-            return ret;
-        }
-
-        /* 针对不同外设进行初始化和回调绑定。 */
-        if ((sub_port == ZW101_SUBPORT) && (WS63_SLE_ZW101_ENABLE == 1U)) {
-            /* 启动时输出 ZW101 绑定子口与波特率，便于现场核对配置是否生效。 */
-            osal_printk("[wk2114 final task] ZW101 cfg sub-uart%u baud=%u\r\n",
-                (unsigned int)sub_port,
-                (unsigned int)sub_baud);
-            if (zw101_init(sub_port) == ERRCODE_SUCC) {
-                g_ws63_rx_cb[sub_port] = zw101_process_data;
-            } else {
-                osal_printk("[wk2114 final task] ZW101 init fail\r\n");
-            }
-        } else if ((sub_port == LD2402_SUBPORT) && (WS63_SLE_LD2402_ENABLE == 1U)) {
-            if (ld2402_init(sub_port) == ERRCODE_SUCC) {
-                g_ws63_rx_cb[sub_port] = ld2402_process_data;
-            } else {
-                osal_printk("[wk2114 final task] LD2402 init fail\r\n");
-            }
-        } else if ((sub_port == WS63_SLE_CAMERA_SUBPORT) && (WS63_CAMERA_ENABLE == 1U)) {
-            /* camera 子口使用扩展串口 3 / 115200，回包由 camera 子模块统一识别。 */
-            osal_printk("[wk2114 final task] CAMERA cfg sub-uart%u baud=%u\r\n",
-                (unsigned int)sub_port,
-                (unsigned int)sub_baud);
-            g_ws63_rx_cb[sub_port] = ws63_task_camera_process_data;
-        }
-
-        if (g_ws63_rx_cb[sub_port] == NULL) {
-            g_ws63_rx_cb[sub_port] = ws63_default_rx_callback;
-        }
+    /* 首次启动仅拉起 LD2402 子口，降低与 ZW101/camera 的并发冲突概率。 */
+    if ((WS63_SLE_LD2402_ENABLE == 1U) && (ws63_is_subport_enabled(LD2402_SUBPORT) != 0U)) {
+        return ws63_init_subport_with_device(LD2402_SUBPORT);
     }
 
     return ERRCODE_SUCC;
@@ -401,6 +418,15 @@ static void *ws63_wk2114_task_entry(const char *arg)
                 (unsigned int)status.matched,
                 (unsigned int)status.last_gena);
 
+            /* 每次链路重建都重置一次子口初始化标记与运行态门控。 */
+            (void)memset_s(g_ws63_subport_inited,
+                sizeof(g_ws63_subport_inited),
+                0,
+                sizeof(g_ws63_subport_inited));
+            ws63_reset_subport_runtime_enable();
+            (void)ws63_set_subport_runtime_enable(ZW101_SUBPORT, 0U);
+            (void)ws63_set_subport_runtime_enable(WS63_SLE_CAMERA_SUBPORT, 0U);
+
             if (ws63_init_enabled_subports() != ERRCODE_SUCC) {
                 ws63_set_wk2114_ready(0U);
                 ws63_os_sleep_ms(WS63_WK2114_RETRY_GAP_MS);
@@ -539,6 +565,46 @@ errcode_t ws63_task_register_rx_callback(uint8_t sub_port, ws63_rx_callback_t ca
 }
 
 /**
+ * @brief 确保 ZW101 子口已初始化（惰性初始化）。
+ */
+errcode_t ws63_task_ensure_zw101_ready(void)
+{
+    if (ws63_task_wk2114_is_ready() == 0U) {
+        return ERRCODE_FAIL;
+    }
+
+    if ((WS63_SLE_ZW101_ENABLE != 1U) || (ws63_is_subport_config_enabled(ZW101_SUBPORT) == 0U)) {
+        return ERRCODE_FAIL;
+    }
+
+    if (ws63_set_subport_runtime_enable(ZW101_SUBPORT, 1U) != ERRCODE_SUCC) {
+        return ERRCODE_FAIL;
+    }
+
+    return ws63_init_subport_with_device(ZW101_SUBPORT);
+}
+
+/**
+ * @brief 确保 camera 子口已初始化（惰性初始化）。
+ */
+errcode_t ws63_task_ensure_camera_ready(void)
+{
+    if (ws63_task_wk2114_is_ready() == 0U) {
+        return ERRCODE_FAIL;
+    }
+
+    if ((WS63_CAMERA_ENABLE != 1U) || (ws63_is_subport_config_enabled(WS63_SLE_CAMERA_SUBPORT) == 0U)) {
+        return ERRCODE_FAIL;
+    }
+
+    if (ws63_set_subport_runtime_enable(WS63_SLE_CAMERA_SUBPORT, 1U) != ERRCODE_SUCC) {
+        return ERRCODE_FAIL;
+    }
+
+    return ws63_init_subport_with_device(WS63_SLE_CAMERA_SUBPORT);
+}
+
+/**
  * @brief 通过子串口发送数据（队列化，避免跨线程直接写硬件）。
  */
 errcode_t ws63_task_send(uint8_t sub_port, const uint8_t *data, uint16_t len)
@@ -598,6 +664,11 @@ void *ws63_task_entry(const char *arg)
 
     /* 在线调试串口：用于电机命令控测与状态日志输出。 */
     ws63_task_debug_init();
+
+    /* 每次管理任务启动都先把运行态子口门控恢复到配置默认值。 */
+    ws63_reset_subport_runtime_enable();
+    (void)ws63_set_subport_runtime_enable(ZW101_SUBPORT, 0U);
+    (void)ws63_set_subport_runtime_enable(WS63_SLE_CAMERA_SUBPORT, 0U);
 
     if (ws63_start_sle_task() != ERRCODE_SUCC) {
         osal_printk("[wk2114 final task] start sle task fail\r\n");

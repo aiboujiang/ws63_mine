@@ -6,7 +6,9 @@ set(COMPONENT_NAME "mine_wk2114_uart2_ext")
 
 set(SOURCES
     "src/mine_wk2114_uart2_ext.c"
+    "src/wk_zw101_test.c"
     "../common/LD2402/LD2402.c"
+    "../common/ZW101/zw101_protocol.c"
 )
 
 set(PUBLIC_HEADER

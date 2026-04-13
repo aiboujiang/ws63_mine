@@ -289,6 +289,9 @@ static void ws63_ttp229_handle_password_input(const ws63_ttp229_sample_t *sample
 
     now_ms = ws63_os_tick_ms();
     armed = ws63_lock_mgr_is_armed();
+    if (sample->pressed_mask != 0U) {
+        (void)ws63_lock_mgr_refresh_auth_window();
+    }
     if ((g_ws63_ttp229_password_session_active != 0U) &&
         (g_ws63_ttp229_password_deadline_ms != 0U) &&
         (now_ms >= g_ws63_ttp229_password_deadline_ms)) {

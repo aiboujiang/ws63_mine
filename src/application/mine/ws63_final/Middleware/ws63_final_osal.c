@@ -116,6 +116,61 @@ errcode_t ws63_os_msg_queue_recv(unsigned long queue_id,
 }
 
 /**
+ * @brief ´´½¨»¥³âËø¡£
+ */
+errcode_t ws63_os_mutex_create(unsigned long *mutex_id)
+{
+    osal_mutex *mutex;
+
+    if (mutex_id == NULL) {
+        return ERRCODE_INVALID_PARAM;
+    }
+
+    mutex = osal_kmalloc(sizeof(osal_mutex), OSAL_GFP_KERNEL);
+    if (mutex == NULL) {
+        return ERRCODE_FAIL;
+    }
+
+    if (osal_mutex_init(mutex) != OSAL_SUCCESS) {
+        osal_kfree(mutex);
+        return ERRCODE_FAIL;
+    }
+
+    *mutex_id = (unsigned long)(uintptr_t)mutex;
+    return ERRCODE_SUCC;
+}
+
+/**
+ * @brief ³¢ÊÔ»ñÈ¡»¥³âËø¡£
+ */
+errcode_t ws63_os_mutex_lock(unsigned long mutex_id, uint32_t timeout)
+{
+    osal_mutex *mutex = (osal_mutex *)(uintptr_t)mutex_id;
+
+    if (mutex == NULL) {
+        return ERRCODE_INVALID_PARAM;
+    }
+
+    if (osal_mutex_lock_timeout(mutex, (unsigned int)timeout) != OSAL_SUCCESS) {
+        return ERRCODE_FAIL;
+    }
+
+    return ERRCODE_SUCC;
+}
+
+/**
+ * @brief ÊÍ·Å»¥³âËø¡£
+ */
+void ws63_os_mutex_unlock(unsigned long mutex_id)
+{
+    osal_mutex *mutex = (osal_mutex *)(uintptr_t)mutex_id;
+
+    if (mutex != NULL) {
+        osal_mutex_unlock(mutex);
+    }
+}
+
+/**
  * @brief É¾³ýÏûÏ¢¶ÓÁÐ¡£
  */
 void ws63_os_msg_queue_delete(unsigned long queue_id)

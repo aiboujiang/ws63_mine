@@ -10,6 +10,7 @@
 #include "ws63_final_bsp.h"
 #include "ws63_final_common.h"
 #include "ws63_final_config.h"
+#include "ws63_final_osal.h"
 
 /* 全局寄存器。 */
 #define WK2XXX_GENA  0x00U
@@ -107,6 +108,8 @@
 
 /* 主口单字节接收超时重试上限，避免异常场景长时间阻塞。 */
 #define WK2XXX_RECV_BYTE_RETRY_MAX 20
+
+static unsigned long g_wk2114_mutex = 0UL;
 
 /* 静态寄存器访问函数前置声明（供初始化校验逻辑复用）。 */
 static void wk2114_write_greg(uint8_t greg, uint8_t data);
@@ -431,8 +434,14 @@ static uint8_t wk2114_recv_byte(void)
  */
 static void wk2114_write_greg(uint8_t greg, uint8_t data)
 {
+    if (g_wk2114_mutex != 0UL) {
+        (void)ws63_os_mutex_lock(g_wk2114_mutex, WS63_OS_WAIT_FOREVER);
+    }
     wk2114_send_byte(greg);
     wk2114_send_byte(data);
+    if (g_wk2114_mutex != 0UL) {
+        ws63_os_mutex_unlock(g_wk2114_mutex);
+    }
 }
 
 /**
@@ -440,13 +449,21 @@ static void wk2114_write_greg(uint8_t greg, uint8_t data)
  */
 static uint8_t wk2114_read_greg(uint8_t greg)
 {
+    uint8_t val;
+    if (g_wk2114_mutex != 0UL) {
+        (void)ws63_os_mutex_lock(g_wk2114_mutex, WS63_OS_WAIT_FOREVER);
+    }
     /*
      * 读寄存器前先清主口接收缓存，避免上一次通信残留字节污染本次回读。
      * 该操作只影响主口软件缓冲，不改变 WK2114 寄存器状态。
      */
     (void)ws63_bsp_host_uart_flush_rx();
     wk2114_send_byte((uint8_t)(0x40U | greg));
-    return wk2114_recv_byte();
+    val = wk2114_recv_byte();
+    if (g_wk2114_mutex != 0UL) {
+        ws63_os_mutex_unlock(g_wk2114_mutex);
+    }
+    return val;
 }
 
 /**
@@ -455,8 +472,14 @@ static uint8_t wk2114_read_greg(uint8_t greg)
 static void wk2114_write_sreg(uint8_t sub_port, uint8_t sreg, uint8_t data)
 {
     uint8_t cmd = (uint8_t)(((sub_port - 1U) << 4) | sreg);
+    if (g_wk2114_mutex != 0UL) {
+        (void)ws63_os_mutex_lock(g_wk2114_mutex, WS63_OS_WAIT_FOREVER);
+    }
     wk2114_send_byte(cmd);
     wk2114_send_byte(data);
+    if (g_wk2114_mutex != 0UL) {
+        ws63_os_mutex_unlock(g_wk2114_mutex);
+    }
 }
 
 /**
@@ -465,11 +488,19 @@ static void wk2114_write_sreg(uint8_t sub_port, uint8_t sreg, uint8_t data)
 static uint8_t wk2114_read_sreg(uint8_t sub_port, uint8_t sreg)
 {
     uint8_t cmd = (uint8_t)(0x40U | ((sub_port - 1U) << 4) | sreg);
+    uint8_t val;
 
+    if (g_wk2114_mutex != 0UL) {
+        (void)ws63_os_mutex_lock(g_wk2114_mutex, WS63_OS_WAIT_FOREVER);
+    }
     /* 子串口寄存器读同样在发读命令前清空残留接收数据。 */
     (void)ws63_bsp_host_uart_flush_rx();
     wk2114_send_byte(cmd);
-    return wk2114_recv_byte();
+    val = wk2114_recv_byte();
+    if (g_wk2114_mutex != 0UL) {
+        ws63_os_mutex_unlock(g_wk2114_mutex);
+    }
+    return val;
 }
 
 /**
@@ -481,9 +512,16 @@ static void wk2114_write_fifo_chunk(uint8_t sub_port, const uint8_t *data, uint8
     uint8_t cmd;
 
     cmd = (uint8_t)(0x80U | ((sub_port - 1U) << 4) | (len - 1U));
+    
+    if (g_wk2114_mutex != 0UL) {
+        (void)ws63_os_mutex_lock(g_wk2114_mutex, WS63_OS_WAIT_FOREVER);
+    }
     wk2114_send_byte(cmd);
     for (idx = 0U; idx < len; idx++) {
         wk2114_send_byte(data[idx]);
+    }
+    if (g_wk2114_mutex != 0UL) {
+        ws63_os_mutex_unlock(g_wk2114_mutex);
     }
 }
 
@@ -496,9 +534,15 @@ static void wk2114_read_fifo_chunk(uint8_t sub_port, uint8_t *data, uint8_t len)
     uint8_t cmd;
 
     cmd = (uint8_t)(0xC0U | ((sub_port - 1U) << 4) | (len - 1U));
+    if (g_wk2114_mutex != 0UL) {
+        (void)ws63_os_mutex_lock(g_wk2114_mutex, WS63_OS_WAIT_FOREVER);
+    }
     wk2114_send_byte(cmd);
     for (idx = 0U; idx < len; idx++) {
         data[idx] = wk2114_recv_byte();
+    }
+    if (g_wk2114_mutex != 0UL) {
+        ws63_os_mutex_unlock(g_wk2114_mutex);
     }
 }
 
@@ -565,6 +609,10 @@ static void wk2114_auto_baud(void)
 errcode_t wk2114_init(void)
 {
     errcode_t ret;
+
+    if (g_wk2114_mutex == 0UL) {
+        (void)ws63_os_mutex_create(&g_wk2114_mutex);
+    }
 
     ws63_bsp_reset_init();
     ret = ws63_bsp_host_uart_init(g_wk2114_host_rx_buffer,
@@ -731,6 +779,56 @@ uint8_t wk2114_subport_read(uint8_t sub_port, uint8_t *data, uint8_t max_len)
 
     wk2114_read_fifo_chunk(sub_port, data, rx_cnt);
     return rx_cnt;
+}
+
+/**
+ * @brief 设置子串口休眠状态。
+ *
+ * 切换策略：
+ * 1) 休眠时仅置位 SLEEPEN，并关闭 TXEN/RXEN，避免冲突链路继续收发；
+ * 2) 唤醒时清除 SLEEPEN 并恢复 TXEN/RXEN，再清 FIFO 避免残留旧数据干扰协议解析。
+ */
+errcode_t wk2114_subport_set_sleep(uint8_t sub_port, uint8_t sleep_en)
+{
+    uint8_t scr;
+
+    if (!ws63_is_subport_valid(sub_port)) {
+        return ERRCODE_INVALID_PARAM;
+    }
+
+    wk2114_write_sreg(sub_port, WK2XXX_SPAGE, 0U);
+    scr = wk2114_read_sreg(sub_port, WK2XXX_SCR);
+
+    if (sleep_en != 0U) {
+        scr = (uint8_t)(scr | WK2XXX_SLEEPEN);
+        scr = (uint8_t)(scr & (~WK2XXX_TXEN));
+        scr = (uint8_t)(scr & (~WK2XXX_RXEN));
+        wk2114_write_sreg(sub_port, WK2XXX_SCR, scr);
+        return ERRCODE_SUCC;
+    }
+
+    scr = (uint8_t)(scr & (~WK2XXX_SLEEPEN));
+    scr = (uint8_t)(scr | WK2XXX_TXEN | WK2XXX_RXEN);
+    wk2114_write_sreg(sub_port, WK2XXX_SCR, scr);
+    wk2114_write_sreg(sub_port, WK2XXX_FCR, 0xFFU);
+    return ERRCODE_SUCC;
+}
+
+/**
+ * @brief 查询子串口是否处于休眠状态。
+ */
+errcode_t wk2114_subport_get_sleep(uint8_t sub_port, uint8_t *sleep_en_out)
+{
+    uint8_t scr;
+
+    if ((!ws63_is_subport_valid(sub_port)) || (sleep_en_out == NULL)) {
+        return ERRCODE_INVALID_PARAM;
+    }
+
+    wk2114_write_sreg(sub_port, WK2XXX_SPAGE, 0U);
+    scr = wk2114_read_sreg(sub_port, WK2XXX_SCR);
+    *sleep_en_out = ((scr & WK2XXX_SLEEPEN) != 0U) ? 1U : 0U;
+    return ERRCODE_SUCC;
 }
 
 /**

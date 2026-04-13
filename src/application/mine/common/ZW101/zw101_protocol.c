@@ -91,6 +91,12 @@ static uint16_t zw101_get_packet_data_size(const uint8_t *packet, uint16_t size)
     return (uint16_t)(((uint16_t)packet[7] << 8) | packet[8]);
 }
 
+/* 自动登录/自动登记流程中，部分固件会先返回进度态 ACK。 */
+static bool zw101_is_autologin_progress_ack(uint8_t ack_code)
+{
+    return ((ack_code == 0x56U) || (ack_code == 0x57U));
+}
+
 /* 初始化运行时上下文，并绑定 HAL 回调。 */
 void zw101_init(zw101_context_t *ctx, const zw101_hal_t *hal)
 {
@@ -176,7 +182,6 @@ int zw101_send_command(zw101_context_t *ctx, uint8_t cmd, const uint8_t *params,
     ctx->ack_done = false;
     ctx->ack_code = 0xFF;
     ctx->ack_payload_len = 0;
-
     if (ctx->hal.uart_send(ctx->cmd_buf, frame_size) != 0) {
         ctx->waiting_ack = false;
         return -1;
@@ -265,6 +270,19 @@ int zw101_pkg_handle(zw101_context_t *ctx, const uint8_t *data, uint16_t size)
     }
 
     if (finish_waiting_ack && (payload_len > 0)) {
+        if (ctx->skip_autologin_progress && zw101_is_autologin_progress_ack(payload[0])) {
+            /* 自动登录类命令在进度态只刷新回调，不结束等待。 */
+            if (ctx->ack_cb != NULL) {
+                evt.cmd = ctx->ack_cmd;
+                evt.ack_code = payload[0];
+                evt.pkg_identification = pkg_identification;
+                evt.payload = payload;
+                evt.payload_len = payload_len;
+                ctx->ack_cb(&evt);
+            }
+            return 0;
+        }
+
         ctx->ack_code = payload[0];
         /* 缓存最近一次 ACK 载荷，供同步命令在 wait_ack 返回后解析扩展字段。 */
         ctx->ack_payload_len = 0;
@@ -414,7 +432,6 @@ static int zw101_send_variable_cmd(zw101_context_t *ctx, const uint8_t *base_cmd
     ctx->ack_done = false;
     ctx->ack_code = 0xFF;
     ctx->ack_payload_len = 0;
-
     if (ctx->hal.uart_send(ctx->cmd_buf, cmd_size) != 0) {
         ctx->waiting_ack = false;
         return -1;
