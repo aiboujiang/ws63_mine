@@ -621,6 +621,10 @@ void *ws63_task_entry(const char *arg)
     }
 #endif
 
+    if (ws63_zw101_task_start() != ERRCODE_SUCC) {
+        osal_printk("[wk2114 final task] start zw101 task fail\r\n");
+    }
+
 #if (WS63_CAMERA_ENABLE == 1U)
     if (ws63_camera_task_start() != ERRCODE_SUCC) {
         osal_printk("[wk2114 final task] start camera task fail\r\n");

@@ -52,6 +52,8 @@ static uint32_t g_ws63_lock_feedback_deadline_ms = 0U;
 static uint8_t g_ws63_lock_fail_count = 0U;
 static uint8_t g_ws63_lock_feedback_mode = 0U;
 static uint8_t g_ws63_lock_camera_active = 0U;
+static uint8_t g_ws63_lock_ld2402_log_forced_off = 0U;
+static uint8_t g_ws63_lock_ld2402_log_prev_enable = 0U;
 
 /**
  * @brief 生成门锁状态文本，便于调试日志输出。
@@ -192,6 +194,40 @@ static void ws63_lock_mgr_clear_feedback(void)
 }
 
 /**
+ * @brief 切换 LD2402 运行态日志的静默模式。
+ *
+ * 说明：接近唤醒后只保留状态迁移日志，避免 distance 刷屏占满串口。
+ */
+static void ws63_lock_mgr_set_ld2402_quiet_mode(uint8_t enable)
+{
+    uint8_t current_enable;
+
+    if (enable != 0U) {
+        if (g_ws63_lock_ld2402_log_forced_off != 0U) {
+            return;
+        }
+
+        current_enable = ws63_task_ld2402_get_log_enable();
+        g_ws63_lock_ld2402_log_prev_enable = current_enable;
+        g_ws63_lock_ld2402_log_forced_off = 1U;
+        if (current_enable != 0U) {
+            (void)ws63_task_ld2402_set_log_enable(0U);
+        }
+        return;
+    }
+
+    if (g_ws63_lock_ld2402_log_forced_off == 0U) {
+        return;
+    }
+
+    if (g_ws63_lock_ld2402_log_prev_enable != 0U) {
+        (void)ws63_task_ld2402_set_log_enable(1U);
+    }
+    g_ws63_lock_ld2402_log_prev_enable = 0U;
+    g_ws63_lock_ld2402_log_forced_off = 0U;
+}
+
+/**
  * @brief 处理一条门锁认证事件。
  */
 static void ws63_lock_mgr_handle_event(const ws63_lock_event_t *event, uint32_t now_ms)
@@ -206,6 +242,7 @@ static void ws63_lock_mgr_handle_event(const ws63_lock_event_t *event, uint32_t 
 
     if (event->passed != 0U) {
         if (g_ws63_lock_state == WS63_LOCK_STATE_ARMED) {
+            ws63_task_zw101_cancel_auto_identify_request();
             ws63_lock_mgr_start_unlock(now_ms, event->source);
         } else {
             osal_printk("[lock mgr] auth pass ignored, state=%s source=%u\r\n",
@@ -221,6 +258,7 @@ static void ws63_lock_mgr_handle_event(const ws63_lock_event_t *event, uint32_t 
             (unsigned int)event->source,
             (unsigned int)g_ws63_lock_fail_count);
         if (g_ws63_lock_fail_count >= WS63_LOCK_FAIL_THRESHOLD_DEFAULT) {
+            ws63_task_zw101_cancel_auto_identify_request();
             ws63_lock_mgr_start_lockout(now_ms);
         }
     }
@@ -273,7 +311,9 @@ static void *ws63_lock_mgr_task_entry(const char *arg)
                 g_ws63_lock_auth_window_deadline_ms = now_ms + WS63_LOCK_AUTH_WINDOW_MS_DEFAULT;
                 g_ws63_lock_state = WS63_LOCK_STATE_ARMED;
                 osal_printk("[lock mgr] armed\r\n");
+                ws63_lock_mgr_set_ld2402_quiet_mode(1U);
                 ws63_lock_mgr_try_send_camera_action();
+                (void)ws63_task_zw101_request_auto_identify();
             }
         } else if (g_ws63_lock_state == WS63_LOCK_STATE_ARMED) {
             if ((distance_mm >= 0) &&
@@ -284,15 +324,18 @@ static void *ws63_lock_mgr_task_entry(const char *arg)
 
             if (now_ms >= g_ws63_lock_auth_window_deadline_ms) {
                 osal_printk("[lock mgr] auth window timeout\r\n");
+                ws63_task_zw101_cancel_auto_identify_request();
                 ws63_lock_mgr_try_send_camera_close();
                 g_ws63_lock_state = WS63_LOCK_STATE_IDLE;
                 g_ws63_lock_fail_count = 0U;
+                ws63_lock_mgr_set_ld2402_quiet_mode(0U);
             }
         } else if (g_ws63_lock_state == WS63_LOCK_STATE_UNLOCKING) {
             if (now_ms >= g_ws63_lock_unlock_deadline_ms) {
                 (void)ws63_task_motor_coast_stop();
                 ws63_lock_mgr_clear_feedback();
                 g_ws63_lock_state = WS63_LOCK_STATE_IDLE;
+                ws63_lock_mgr_set_ld2402_quiet_mode(0U);
                 osal_printk("[lock mgr] unlock finished\r\n");
             } else if ((g_ws63_lock_feedback_mode == 1U) && (now_ms >= g_ws63_lock_feedback_deadline_ms)) {
                 (void)ws63_task_buzzer_off();
@@ -305,6 +348,8 @@ static void *ws63_lock_mgr_task_entry(const char *arg)
                 ws63_lock_mgr_clear_feedback();
                 g_ws63_lock_fail_count = 0U;
                 g_ws63_lock_state = WS63_LOCK_STATE_IDLE;
+                ws63_task_zw101_cancel_auto_identify_request();
+                ws63_lock_mgr_set_ld2402_quiet_mode(0U);
                 osal_printk("[lock mgr] lockout clear\r\n");
             } else if ((g_ws63_lock_feedback_mode == 2U) && (now_ms >= g_ws63_lock_feedback_deadline_ms)) {
                 (void)ws63_task_buzzer_off();

@@ -39,6 +39,13 @@ typedef struct {
 errcode_t zw101_init(uint8_t sub_port);
 
 /**
+ * @brief 查询 ZW101 驱动是否已完成初始化。
+ *
+ * @return uint8_t 1=就绪，0=未就绪。
+ */
+uint8_t zw101_is_ready(void);
+
+/**
  * @brief 喂入 ZW101 接收数据流。
  *
  * @param sub_port 子串口号。

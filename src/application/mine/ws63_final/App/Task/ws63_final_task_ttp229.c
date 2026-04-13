@@ -43,6 +43,7 @@ static uint8_t g_ws63_ttp229_password_session_active = 0U;
 static uint8_t g_ws63_ttp229_password_len = 0U;
 static uint8_t g_ws63_ttp229_password_overflow = 0U;
 static uint16_t g_ws63_ttp229_password_last_mask = 0U;
+static uint32_t g_ws63_ttp229_password_deadline_ms = 0U;
 static char g_ws63_ttp229_password_buf[WS63_TTP229_PASSWORD_LEN + 1U] = {0};
 
 /*
@@ -228,6 +229,7 @@ static void ws63_ttp229_password_reset(void)
     g_ws63_ttp229_password_len = 0U;
     g_ws63_ttp229_password_overflow = 0U;
     g_ws63_ttp229_password_last_mask = 0U;
+    g_ws63_ttp229_password_deadline_ms = 0U;
     g_ws63_ttp229_password_session_active = 0U;
     ws63_ttp229_unlock(irq_status);
 }
@@ -238,7 +240,9 @@ static void ws63_ttp229_password_reset(void)
 static void ws63_ttp229_password_start_session(void)
 {
     unsigned int irq_status;
+    uint32_t now_ms;
 
+    now_ms = ws63_os_tick_ms();
     irq_status = ws63_ttp229_lock();
     (void)memset_s(g_ws63_ttp229_password_buf,
         sizeof(g_ws63_ttp229_password_buf),
@@ -247,6 +251,7 @@ static void ws63_ttp229_password_start_session(void)
     g_ws63_ttp229_password_len = 0U;
     g_ws63_ttp229_password_overflow = 0U;
     g_ws63_ttp229_password_last_mask = 0U;
+    g_ws63_ttp229_password_deadline_ms = now_ms + WS63_LOCK_AUTH_WINDOW_MS_DEFAULT;
     g_ws63_ttp229_password_session_active = 1U;
     ws63_ttp229_unlock(irq_status);
 }
@@ -276,16 +281,22 @@ static void ws63_ttp229_handle_password_input(const ws63_ttp229_sample_t *sample
 {
     char key_text[8] = {0};
     uint8_t armed;
+    uint32_t now_ms;
 
     if (sample == NULL) {
         return;
     }
 
+    now_ms = ws63_os_tick_ms();
     armed = ws63_lock_mgr_is_armed();
-    if (armed == 0U) {
-        if (g_ws63_ttp229_password_session_active != 0U) {
-            ws63_ttp229_password_stop_session();
-        }
+    if ((g_ws63_ttp229_password_session_active != 0U) &&
+        (g_ws63_ttp229_password_deadline_ms != 0U) &&
+        (now_ms >= g_ws63_ttp229_password_deadline_ms)) {
+        ws63_ttp229_password_stop_session();
+    }
+
+    if (sample->pressed_mask == 0U) {
+        g_ws63_ttp229_password_last_mask = 0U;
         return;
     }
 
@@ -293,10 +304,7 @@ static void ws63_ttp229_handle_password_input(const ws63_ttp229_sample_t *sample
         ws63_ttp229_password_start_session();
     }
 
-    if (sample->pressed_mask == 0U) {
-        g_ws63_ttp229_password_last_mask = 0U;
-        return;
-    }
+    g_ws63_ttp229_password_deadline_ms = now_ms + WS63_LOCK_AUTH_WINDOW_MS_DEFAULT;
 
     if (sample->pressed_mask == g_ws63_ttp229_password_last_mask) {
         return;
@@ -325,6 +333,10 @@ static void ws63_ttp229_handle_password_input(const ws63_ttp229_sample_t *sample
     }
 
     if ((key_text[0] == '#') && (key_text[1] == '\0')) {
+        if (armed == 0U) {
+            return;
+        }
+
         uint8_t passed = 0U;
 
         if ((g_ws63_ttp229_password_overflow == 0U) &&

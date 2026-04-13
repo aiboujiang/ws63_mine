@@ -7,7 +7,6 @@
 #define WS63_FINAL_TASK_INTERNAL_H
 
 #include <stdint.h>
-
 #include "ws63_final_config.h"
 #include "ws63_final_task.h"
 
@@ -174,6 +173,25 @@ errcode_t ws63_lock_mgr_report_auth_result(ws63_lock_auth_source_t source, uint8
  * @return uint8_t 1=正在接近唤醒，0=未唤醒。
  */
 uint8_t ws63_lock_mgr_is_armed(void);
+
+/**
+ * @brief 启动 ZW101 自动识别任务。
+ *
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_zw101_task_start(void);
+
+/**
+ * @brief 请求 ZW101 自动识别任务执行一次识别。
+ *
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_task_zw101_request_auto_identify(void);
+
+/**
+ * @brief 取消尚未开始的 ZW101 自动识别请求。
+ */
+void ws63_task_zw101_cancel_auto_identify_request(void);
 
 /**
  * @brief camera 任务发送文本消息。

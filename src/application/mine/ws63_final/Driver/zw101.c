@@ -588,6 +588,14 @@ errcode_t zw101_init(uint8_t sub_port)
     return ERRCODE_FAIL;
 }
 
+/**
+ * @brief 查询 ZW101 驱动是否已进入可用状态。
+ */
+uint8_t zw101_is_ready(void)
+{
+    return g_zw101_ready;
+}
+
 void zw101_process_data(uint8_t sub_port, const uint8_t *data, uint16_t len)
 {
     uint8_t frame[ZW101_FRAME_BUF_SIZE] = {0};
