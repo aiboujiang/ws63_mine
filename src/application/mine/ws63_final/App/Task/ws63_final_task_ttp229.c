@@ -8,6 +8,8 @@
 #include "osal_debug.h"
 #include "securec.h"
 
+#include <string.h>
+
 #include "ws63_final_config.h"
 #include "ws63_final_osal.h"
 #include "ws63_ttp229.h"
@@ -37,6 +39,11 @@ static ws63_ttp229_sample_t g_ws63_ttp229_last_sample = {
     .pressed_count = 0U,
     .multi_key = 0U
 };
+static uint8_t g_ws63_ttp229_password_session_active = 0U;
+static uint8_t g_ws63_ttp229_password_len = 0U;
+static uint8_t g_ws63_ttp229_password_overflow = 0U;
+static uint16_t g_ws63_ttp229_password_last_mask = 0U;
+static char g_ws63_ttp229_password_buf[WS63_TTP229_PASSWORD_LEN + 1U] = {0};
 
 /*
  * 实测得到的按键位图映射。
@@ -207,6 +214,134 @@ static void ws63_ttp229_set_ready(uint8_t ready)
 }
 
 /**
+ * @brief 清空 TTP229 密码输入缓存。
+ */
+static void ws63_ttp229_password_reset(void)
+{
+    unsigned int irq_status;
+
+    irq_status = ws63_ttp229_lock();
+    (void)memset_s(g_ws63_ttp229_password_buf,
+        sizeof(g_ws63_ttp229_password_buf),
+        0,
+        sizeof(g_ws63_ttp229_password_buf));
+    g_ws63_ttp229_password_len = 0U;
+    g_ws63_ttp229_password_overflow = 0U;
+    g_ws63_ttp229_password_last_mask = 0U;
+    g_ws63_ttp229_password_session_active = 0U;
+    ws63_ttp229_unlock(irq_status);
+}
+
+/**
+ * @brief 开启一次新的密码输入会话。
+ */
+static void ws63_ttp229_password_start_session(void)
+{
+    unsigned int irq_status;
+
+    irq_status = ws63_ttp229_lock();
+    (void)memset_s(g_ws63_ttp229_password_buf,
+        sizeof(g_ws63_ttp229_password_buf),
+        0,
+        sizeof(g_ws63_ttp229_password_buf));
+    g_ws63_ttp229_password_len = 0U;
+    g_ws63_ttp229_password_overflow = 0U;
+    g_ws63_ttp229_password_last_mask = 0U;
+    g_ws63_ttp229_password_session_active = 1U;
+    ws63_ttp229_unlock(irq_status);
+}
+
+/**
+ * @brief 停止当前密码输入会话。
+ */
+static void ws63_ttp229_password_stop_session(void)
+{
+    ws63_ttp229_password_reset();
+}
+
+/**
+ * @brief 播放按键轻提示音。
+ */
+static void ws63_ttp229_password_beep(void)
+{
+    (void)ws63_task_buzzer_beep_tone(WS63_TTP229_KEY_PROMPT_BEEP_FREQ_HZ,
+        WS63_TTP229_KEY_PROMPT_BEEP_VOLUME_PERCENT,
+        WS63_TTP229_KEY_PROMPT_BEEP_MS);
+}
+
+/**
+ * @brief 处理 TTP229 密码输入。
+ */
+static void ws63_ttp229_handle_password_input(const ws63_ttp229_sample_t *sample)
+{
+    char key_text[8] = {0};
+    uint8_t armed;
+
+    if (sample == NULL) {
+        return;
+    }
+
+    armed = ws63_lock_mgr_is_armed();
+    if (armed == 0U) {
+        if (g_ws63_ttp229_password_session_active != 0U) {
+            ws63_ttp229_password_stop_session();
+        }
+        return;
+    }
+
+    if (g_ws63_ttp229_password_session_active == 0U) {
+        ws63_ttp229_password_start_session();
+    }
+
+    if (sample->pressed_mask == 0U) {
+        g_ws63_ttp229_password_last_mask = 0U;
+        return;
+    }
+
+    if (sample->pressed_mask == g_ws63_ttp229_password_last_mask) {
+        return;
+    }
+
+    g_ws63_ttp229_password_last_mask = sample->pressed_mask;
+
+    if (sample->pressed_count != 1U) {
+        return;
+    }
+
+    if (ws63_ttp229_format_pressed_text(sample->pressed_mask, key_text, sizeof(key_text)) != ERRCODE_SUCC) {
+        return;
+    }
+
+    if ((key_text[0] >= '0') && (key_text[0] <= '9') && (key_text[1] == '\0')) {
+        if ((g_ws63_ttp229_password_len < WS63_TTP229_PASSWORD_LEN) && (g_ws63_ttp229_password_overflow == 0U)) {
+            g_ws63_ttp229_password_buf[g_ws63_ttp229_password_len] = key_text[0];
+            g_ws63_ttp229_password_len++;
+            g_ws63_ttp229_password_buf[g_ws63_ttp229_password_len] = '\0';
+            ws63_ttp229_password_beep();
+        } else {
+            g_ws63_ttp229_password_overflow = 1U;
+        }
+        return;
+    }
+
+    if ((key_text[0] == '#') && (key_text[1] == '\0')) {
+        uint8_t passed = 0U;
+
+        if ((g_ws63_ttp229_password_overflow == 0U) &&
+            (g_ws63_ttp229_password_len == WS63_TTP229_PASSWORD_LEN) &&
+            (strcmp(g_ws63_ttp229_password_buf, WS63_TTP229_PASSWORD_TEXT) == 0)) {
+            passed = 1U;
+        }
+
+        osal_printk("[wk2114 final task] TTP229 password %s, input=%s\r\n",
+            (passed != 0U) ? "pass" : "fail",
+            g_ws63_ttp229_password_buf);
+        (void)ws63_lock_mgr_report_auth_result(WS63_LOCK_AUTH_SOURCE_TTP229, passed);
+        ws63_ttp229_password_stop_session();
+    }
+}
+
+/**
  * @brief 处理多键报警状态变化，避免持续重复刷屏。
  */
 static void ws63_ttp229_handle_alarm_transition(const ws63_ttp229_sample_t *sample)
@@ -271,6 +406,7 @@ static void *ws63_ttp229_task_entry(const char *arg)
     (void)arg;
 
     ws63_ttp229_reset_sample_cache();
+    ws63_ttp229_password_stop_session();
     ws63_ttp229_set_ready(0U);
 
     while (1) {
@@ -291,6 +427,7 @@ static void *ws63_ttp229_task_entry(const char *arg)
             g_ws63_ttp229_state = WS63_TTP229_STATE_INIT;
             ws63_ttp229_set_ready(0U);
             ws63_ttp229_reset_sample_cache();
+            ws63_ttp229_password_stop_session();
         }
 
         switch (g_ws63_ttp229_state) {
@@ -313,12 +450,14 @@ static void *ws63_ttp229_task_entry(const char *arg)
                 if (enabled != 0U) {
                     g_ws63_ttp229_state = WS63_TTP229_STATE_INIT;
                 }
+                ws63_ttp229_password_stop_session();
                 ws63_os_sleep_ms(WS63_TTP229_TASK_POLL_MS);
                 break;
             case WS63_TTP229_STATE_READY:
                 if (enabled == 0U) {
                     g_ws63_ttp229_state = WS63_TTP229_STATE_DISABLED;
                     ws63_ttp229_reset_sample_cache();
+                    ws63_ttp229_password_stop_session();
                     ws63_os_sleep_ms(WS63_TTP229_TASK_POLL_MS);
                     break;
                 }
@@ -338,6 +477,7 @@ static void *ws63_ttp229_task_entry(const char *arg)
 
                     ws63_ttp229_update_sample(&sample);
                     ws63_ttp229_handle_alarm_transition(&sample);
+                    ws63_ttp229_handle_password_input(&sample);
                 }
 
                 ws63_os_sleep_ms(WS63_TTP229_TASK_POLL_MS);

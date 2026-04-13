@@ -108,6 +108,16 @@ void ws63_task_buzzer_init(void);
 errcode_t ws63_beep_task_start(void);
 
 /**
+ * @brief 播放一次短促提示音。
+ *
+ * @param freq_hz 目标频率（Hz）。
+ * @param volume_percent 目标音量（占空比百分比）。
+ * @param duration_ms 持续时间（毫秒）。
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_task_buzzer_beep_tone(uint16_t freq_hz, uint8_t volume_percent, uint32_t duration_ms);
+
+/**
  * @brief 启动 TTP229 独立任务。
  *
  * @return errcode_t ERRCODE_SUCC 成功，其他失败。
@@ -159,9 +169,16 @@ uint8_t ws63_task_wk2114_is_ready(void);
 errcode_t ws63_lock_mgr_report_auth_result(ws63_lock_auth_source_t source, uint8_t passed);
 
 /**
+ * @brief 查询门锁当前是否处于接近唤醒窗口。
+ *
+ * @return uint8_t 1=正在接近唤醒，0=未唤醒。
+ */
+uint8_t ws63_lock_mgr_is_armed(void);
+
+/**
  * @brief camera 任务发送文本消息。
  *
- * @param payload 不含前缀的业务文本，例如 `wake distance:123`。
+ * @param payload 不含前缀的业务文本，例如 `action` 或 `Die`。
  * @return errcode_t ERRCODE_SUCC 成功，其他失败。
  */
 errcode_t ws63_task_camera_send_message(const char *payload);

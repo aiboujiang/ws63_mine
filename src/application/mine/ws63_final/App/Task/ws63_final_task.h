@@ -92,6 +92,16 @@ errcode_t ws63_task_motor_set_duty(uint8_t duty_percent);
 errcode_t ws63_task_buzzer_on(uint16_t freq_hz);
 
 /**
+ * @brief 播放一次短促提示音。
+ *
+ * @param freq_hz 目标频率（Hz）。
+ * @param volume_percent 目标音量（占空比百分比）。
+ * @param duration_ms 持续时间（毫秒）。
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_task_buzzer_beep_tone(uint16_t freq_hz, uint8_t volume_percent, uint32_t duration_ms);
+
+/**
  * @brief 关闭蜂鸣器。
  *
  * @return errcode_t ERRCODE_SUCC 成功，其他失败。

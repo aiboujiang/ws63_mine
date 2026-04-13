@@ -17,10 +17,11 @@
 #include "ws63_final_osal.h"
 
 #if (WS63_CAMERA_ENABLE == 1U)
-/* camera 唤醒消息最小间隔：避免连续接近时反复下发。 */
-#define WS63_LOCK_CAMERA_WAKE_GAP_MS  WS63_LOCK_CAMERA_WAKE_GAP_MS_DEFAULT
 /* 距离更新有效期：如果雷达长时间没有新距离，则认为接近事件已过期。 */
 #define WS63_LOCK_DISTANCE_STALE_MS   1000U
+/* camera 启停控制文本：仅在接近/离开时各发送一次。 */
+#define WS63_LOCK_CAMERA_ACTION_TEXT  "action"
+#define WS63_LOCK_CAMERA_CLOSE_TEXT    "Die"
 
 typedef enum {
     WS63_LOCK_STATE_INIT = 0,
@@ -44,14 +45,13 @@ static unsigned long g_ws63_lock_event_queue = 0UL;
 static uint8_t g_ws63_lock_task_started = 0U;
 static ws63_lock_state_t g_ws63_lock_state = WS63_LOCK_STATE_INIT;
 static uint32_t g_ws63_lock_last_distance_tick_ms = 0U;
-static int32_t g_ws63_lock_last_distance_mm = -1;
 static uint32_t g_ws63_lock_auth_window_deadline_ms = 0U;
 static uint32_t g_ws63_lock_unlock_deadline_ms = 0U;
 static uint32_t g_ws63_lock_lockout_deadline_ms = 0U;
-static uint32_t g_ws63_lock_last_camera_wake_ms = 0U;
 static uint32_t g_ws63_lock_feedback_deadline_ms = 0U;
 static uint8_t g_ws63_lock_fail_count = 0U;
 static uint8_t g_ws63_lock_feedback_mode = 0U;
+static uint8_t g_ws63_lock_camera_active = 0U;
 
 /**
  * @brief 生成门锁状态文本，便于调试日志输出。
@@ -94,30 +94,51 @@ errcode_t ws63_lock_mgr_report_auth_result(ws63_lock_auth_source_t source, uint8
 }
 
 /**
- * @brief camera 距离唤醒：只在接近窗口内发送一次。
+ * @brief 查询门锁是否处于接近唤醒窗口。
  */
-static void ws63_lock_mgr_try_send_camera_wake(uint32_t now_ms, int32_t distance_mm)
+uint8_t ws63_lock_mgr_is_armed(void)
 {
-    char wake_text[48] = {0};
-    int32_t ret;
+    unsigned int irq_status;
+    uint8_t armed;
 
-    if ((distance_mm < 0) ||
-        ((uint32_t)(now_ms - g_ws63_lock_last_camera_wake_ms) < WS63_LOCK_CAMERA_WAKE_GAP_MS)) {
+    irq_status = ws63_os_irq_lock();
+    armed = (g_ws63_lock_state == WS63_LOCK_STATE_ARMED) ? 1U : 0U;
+    ws63_os_irq_unlock(irq_status);
+
+    return armed;
+}
+
+/**
+ * @brief 向 camera 发送接近唤醒命令。
+ */
+static void ws63_lock_mgr_try_send_camera_action(void)
+{
+    if (g_ws63_lock_camera_active != 0U) {
         return;
     }
 
-    ret = snprintf_s(wake_text,
-        sizeof(wake_text),
-        sizeof(wake_text) - 1U,
-        "wake distance:%ld",
-        (long)distance_mm);
-    if (ret < 0) {
+    if (ws63_task_camera_send_message(WS63_LOCK_CAMERA_ACTION_TEXT) == ERRCODE_SUCC) {
+        g_ws63_lock_camera_active = 1U;
+        osal_printk("[lock mgr] camera action sent\r\n");
+    } else {
+        osal_printk("[lock mgr] camera action send fail\r\n");
+    }
+}
+
+/**
+ * @brief 向 camera 发送关闭命令。
+ */
+static void ws63_lock_mgr_try_send_camera_close(void)
+{
+    if (g_ws63_lock_camera_active == 0U) {
         return;
     }
 
-    if (ws63_task_camera_send_message(wake_text) == ERRCODE_SUCC) {
-        g_ws63_lock_last_camera_wake_ms = now_ms;
-        osal_printk("[lock mgr] camera wake sent, distance=%ld\r\n", (long)distance_mm);
+    if (ws63_task_camera_send_message(WS63_LOCK_CAMERA_CLOSE_TEXT) == ERRCODE_SUCC) {
+        g_ws63_lock_camera_active = 0U;
+        osal_printk("[lock mgr] camera Die sent\r\n");
+    } else {
+        osal_printk("[lock mgr] camera Die send fail\r\n");
     }
 }
 
@@ -126,6 +147,7 @@ static void ws63_lock_mgr_try_send_camera_wake(uint32_t now_ms, int32_t distance
  */
 static void ws63_lock_mgr_start_unlock(uint32_t now_ms, ws63_lock_auth_source_t source)
 {
+    ws63_lock_mgr_try_send_camera_close();
     (void)ws63_task_motor_forward(WS63_LOCK_MOTOR_OPEN_DUTY_DEFAULT);
     (void)ws63_task_buzzer_on(2200U);
     (void)ws63_task_rgb_set_color(0U, 180U, 0U);
@@ -144,6 +166,7 @@ static void ws63_lock_mgr_start_unlock(uint32_t now_ms, ws63_lock_auth_source_t 
  */
 static void ws63_lock_mgr_start_lockout(uint32_t now_ms)
 {
+    ws63_lock_mgr_try_send_camera_close();
     (void)ws63_task_motor_brake_stop();
     (void)ws63_task_buzzer_on(1200U);
     (void)ws63_task_rgb_set_color(220U, 0U, 0U);
@@ -207,10 +230,10 @@ static void ws63_lock_mgr_handle_event(const ws63_lock_event_t *event, uint32_t 
  * @brief 门锁编排任务主循环。
  *
  * 状态机说明：
- * 1) IDLE：等待 LD2402 距离进入阈值；
- * 2) ARMED：已经检测到接近，等待 camera / ZW101 / TTP229 任一认证结果；
+ * 1) IDLE：等待 LD2402 距离进入 80mm 接近阈值；
+ * 2) ARMED：已经检测到接近，发送 camera action 并等待 camera / ZW101 / TTP229 任一认证结果；
  * 3) UNLOCKING：电机执行开锁动作，超时后自动停转；
- * 4) LOCKOUT：连续失败后进入锁定窗口，窗口结束后重新回到 IDLE。
+ * 4) LOCKOUT：连续失败后进入锁定窗口，窗口结束后重新回到 IDLE 并关闭 camera。
  */
 static void *ws63_lock_mgr_task_entry(const char *arg)
 {
@@ -243,27 +266,25 @@ static void *ws63_lock_mgr_task_entry(const char *arg)
 
         if (g_ws63_lock_state == WS63_LOCK_STATE_IDLE) {
             if ((distance_mm >= 0) &&
-                ((uint32_t)distance_mm <= WS63_LOCK_LD2402_ARM_DISTANCE_MM_DEFAULT) &&
+                ((uint32_t)distance_mm < WS63_LOCK_LD2402_ARM_DISTANCE_MM_DEFAULT) &&
                 (distance_tick_ms != g_ws63_lock_last_distance_tick_ms) &&
                 ((uint32_t)(now_ms - distance_tick_ms) <= WS63_LOCK_DISTANCE_STALE_MS)) {
                 g_ws63_lock_last_distance_tick_ms = distance_tick_ms;
-                g_ws63_lock_last_distance_mm = distance_mm;
                 g_ws63_lock_auth_window_deadline_ms = now_ms + WS63_LOCK_AUTH_WINDOW_MS_DEFAULT;
                 g_ws63_lock_state = WS63_LOCK_STATE_ARMED;
-                osal_printk("[lock mgr] armed, distance=%ld\r\n", (long)distance_mm);
-                ws63_lock_mgr_try_send_camera_wake(now_ms, distance_mm);
+                osal_printk("[lock mgr] armed\r\n");
+                ws63_lock_mgr_try_send_camera_action();
             }
         } else if (g_ws63_lock_state == WS63_LOCK_STATE_ARMED) {
             if ((distance_mm >= 0) &&
-                ((uint32_t)distance_mm <= WS63_LOCK_LD2402_ARM_DISTANCE_MM_DEFAULT) &&
+                ((uint32_t)distance_mm < WS63_LOCK_LD2402_ARM_DISTANCE_MM_DEFAULT) &&
                 (distance_tick_ms != g_ws63_lock_last_distance_tick_ms)) {
                 g_ws63_lock_last_distance_tick_ms = distance_tick_ms;
-                g_ws63_lock_last_distance_mm = distance_mm;
-                ws63_lock_mgr_try_send_camera_wake(now_ms, distance_mm);
             }
 
             if (now_ms >= g_ws63_lock_auth_window_deadline_ms) {
                 osal_printk("[lock mgr] auth window timeout\r\n");
+                ws63_lock_mgr_try_send_camera_close();
                 g_ws63_lock_state = WS63_LOCK_STATE_IDLE;
                 g_ws63_lock_fail_count = 0U;
             }

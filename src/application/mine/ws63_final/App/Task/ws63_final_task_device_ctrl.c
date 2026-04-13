@@ -335,6 +335,50 @@ errcode_t ws63_task_buzzer_on(uint16_t freq_hz)
 }
 
 /**
+ * @brief 播放一次短促提示音。
+ *
+ * 提示音采用“先降音量、再发声、再恢复音量”的顺序，避免和解锁/锁定反馈音混淆。
+ */
+errcode_t ws63_task_buzzer_beep_tone(uint16_t freq_hz, uint8_t volume_percent, uint32_t duration_ms)
+{
+#if (WS63_BEEP_ENABLE != 1U)
+    (void)freq_hz;
+    (void)volume_percent;
+    (void)duration_ms;
+    return ERRCODE_FAIL;
+#else
+    errcode_t ret;
+    uint8_t previous_volume;
+
+    if (g_ws63_beep_task_started == 0U) {
+        return ERRCODE_FAIL;
+    }
+
+    if (duration_ms == 0U) {
+        duration_ms = 1U;
+    }
+
+    previous_volume = ws63_task_buzzer_get_volume();
+
+    ret = ws63_task_buzzer_set_volume(volume_percent);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+
+    ret = ws63_task_buzzer_on(freq_hz);
+    if (ret != ERRCODE_SUCC) {
+        (void)ws63_task_buzzer_set_volume(previous_volume);
+        return ret;
+    }
+
+    ws63_os_sleep_ms(duration_ms);
+    (void)ws63_task_buzzer_off();
+    (void)ws63_task_buzzer_set_volume(previous_volume);
+    return ERRCODE_SUCC;
+#endif
+}
+
+/**
  * @brief 设置蜂鸣器音量。
  */
 errcode_t ws63_task_buzzer_set_volume(uint8_t volume_percent)

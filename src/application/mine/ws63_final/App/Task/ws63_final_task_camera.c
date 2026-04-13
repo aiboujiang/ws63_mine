@@ -192,7 +192,7 @@ void ws63_task_camera_process_data(uint8_t sub_port, const uint8_t *data, uint16
 /**
  * @brief 向 camera 子口发送一条业务文本。
  *
- * @param payload 不含前缀的业务文本，例如 `wake distance:123`。
+ * @param payload 不含前缀的业务文本，例如 `action` 或 `Die`。
  * @return errcode_t ERRCODE_SUCC 成功，其他失败。
  */
 errcode_t ws63_task_camera_send_message(const char *payload)
