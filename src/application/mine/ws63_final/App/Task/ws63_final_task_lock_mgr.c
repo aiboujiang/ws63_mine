@@ -29,7 +29,9 @@ typedef enum {
     WS63_LOCK_STATE_INIT = 0,
     WS63_LOCK_STATE_IDLE,
     WS63_LOCK_STATE_ARMED,
-    WS63_LOCK_STATE_UNLOCKING
+    WS63_LOCK_STATE_UNLOCKING,
+    WS63_LOCK_STATE_HOLD_OPEN,
+    WS63_LOCK_STATE_LOCKING
 } ws63_lock_state_t;
 
 typedef enum {
@@ -52,6 +54,8 @@ static uint8_t g_ws63_lock_ld2402_log_forced_off = 0U;
 static uint8_t g_ws63_lock_debug_suspended = 0U;
 static uint32_t g_ws63_lock_auth_window_deadline_ms = 0U;
 static uint32_t g_ws63_lock_unlock_deadline_ms = 0U;
+static uint32_t g_ws63_lock_hold_deadline_ms = 0U;
+static uint32_t g_ws63_lock_locking_deadline_ms = 0U;
 static uint32_t g_ws63_lock_feedback_deadline_ms = 0U;
 static uint32_t g_ws63_lock_last_distance_tick_ms = 0U;
 static uint16_t g_ws63_lock_last_finger_id = 0U;
@@ -183,6 +187,10 @@ static const char *ws63_lock_mgr_state_to_text(ws63_lock_state_t state)
             return "ARMED";
         case WS63_LOCK_STATE_UNLOCKING:
             return "UNLOCKING";
+        case WS63_LOCK_STATE_HOLD_OPEN:
+            return "HOLD_OPEN";
+        case WS63_LOCK_STATE_LOCKING:
+            return "LOCKING";
         case WS63_LOCK_STATE_INIT:
         default:
             return "INIT";
@@ -635,15 +643,29 @@ static void *ws63_lock_mgr_task_entry(const char *arg)
         } else if (g_ws63_lock_state == WS63_LOCK_STATE_UNLOCKING) {
             if (now_ms >= g_ws63_lock_unlock_deadline_ms) {
                 (void)ws63_task_motor_coast_stop();
-                ws63_lock_mgr_clear_feedback();
-                g_ws63_lock_state = WS63_LOCK_STATE_IDLE;
-                ws63_lock_mgr_set_ld2402_quiet_mode(0U);
-                ws63_lock_mgr_set_ld2402_channel(1U);
-                osal_printk("[lock mgr] unlock finished\r\n");
+                g_ws63_lock_state = WS63_LOCK_STATE_HOLD_OPEN;
+                g_ws63_lock_hold_deadline_ms = now_ms + WS63_LOCK_HOLD_OPEN_MS_DEFAULT;
+                osal_printk("[lock mgr] unlock finished, entering hold open\r\n");
             } else if ((g_ws63_lock_feedback_mode == 1U) && (now_ms >= g_ws63_lock_feedback_deadline_ms)) {
                 (void)ws63_task_buzzer_off();
                 (void)ws63_task_rgb_off();
                 g_ws63_lock_feedback_mode = 0U;
+            }
+        } else if (g_ws63_lock_state == WS63_LOCK_STATE_HOLD_OPEN) {
+            ws63_lock_mgr_clear_feedback();
+            if (now_ms >= g_ws63_lock_hold_deadline_ms) {
+                (void)ws63_task_motor_reverse(WS63_LOCK_MOTOR_CLOSE_DUTY_DEFAULT);
+                g_ws63_lock_state = WS63_LOCK_STATE_LOCKING;
+                g_ws63_lock_locking_deadline_ms = now_ms + WS63_LOCK_UNLOCK_DURATION_MS_DEFAULT;
+                osal_printk("[lock mgr] hold open finished, entering locking (auto relock)\r\n");
+            }
+        } else if (g_ws63_lock_state == WS63_LOCK_STATE_LOCKING) {
+            if (now_ms >= g_ws63_lock_locking_deadline_ms) {
+                (void)ws63_task_motor_coast_stop();
+                g_ws63_lock_state = WS63_LOCK_STATE_IDLE;
+                ws63_lock_mgr_set_ld2402_quiet_mode(0U);
+                ws63_lock_mgr_set_ld2402_channel(1U);
+                osal_printk("[lock mgr] locking finished, back to IDLE\r\n");
             }
         }
 
