@@ -237,7 +237,12 @@ static bool ld2402_update_from_data_frames(const uint8_t *data, uint16_t len)
         if (data[pos + 6U] == 0U) {
             g_ld2402_last_distance_mm = -1;
         } else {
-            g_ld2402_last_distance_mm = (int32_t)ld2402_read_uint16_le(&data[pos + 7U]) * 10;
+            int32_t parsed_distance_mm = (int32_t)ld2402_read_uint16_le(&data[pos + 7U]) * 10;
+            if (parsed_distance_mm < 40) {
+                /* 过滤掉距离小于 40 的怪异数据，直接丢弃不响应 */
+                continue;
+            }
+            g_ld2402_last_distance_mm = parsed_distance_mm;
         }
         g_ld2402_last_distance_tick_ms = ws63_bsp_get_tick_ms();
         updated = true;
@@ -759,6 +764,13 @@ void ld2402_process_data(uint8_t sub_port, const uint8_t *data, uint16_t len)
 
     /* 门锁编排层只关心明确的距离值，调试打印交给统一节流逻辑控制。 */
     if (ld2402_parse_distance_text(data, len, &distance_mm)) {
+        if (distance_mm < 40) {
+            /* 过滤掉距离小于 40 的怪异数据，直接丢弃不响应 */
+            if (ld2402_can_print_processing_log(now_ms)) {
+                osal_printk("LD2402 dropping anomalous distance:%ld\r\n", (long)distance_mm);
+            }
+            return;
+        }
         g_ld2402_last_distance_mm = distance_mm;
         g_ld2402_last_distance_tick_ms = ws63_bsp_get_tick_ms();
         if (ld2402_can_print_processing_log(now_ms)) {
