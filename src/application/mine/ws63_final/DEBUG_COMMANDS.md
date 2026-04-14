@@ -2,14 +2,14 @@
 
 ## 1. 适用范围
 
-本手册适用于 `ws63_final` 模块中的电机、编码器、蜂鸣器、RGB、TTP229、camera、LD2402 与 ZW101 在线控测命令。
+本手册适用于 `ws63_final` 模块中的电机、编码器、蜂鸣器、RGB、VK36N16I、camera、LD2402 与 ZW101 在线控测命令。
 
 目标：
 - 通过主机侧 SLE 下行实时控制电机正反转、停止、刹车与占空比。
 - 通过主机侧 SLE 下行实时查看编码器 RPM、窗口增量与累计计数。
 - 通过主机侧 SLE 下行实时控制蜂鸣器开关与频率。
 - 通过主机侧 SLE 下行实时控制 RGB 颜色、开关与演示模式。
-- 通过主机侧 SLE 下行实时读取 TTP229 按键掩码并控制状态机/报警开关。
+- 通过主机侧 SLE 下行实时读取 VK36N16I 按键掩码并控制状态机/报警开关。
 - 通过主机侧 SLE 下行在线触发 camera 人脸新增/查询/删除联调。
 - 通过主机侧 SLE 下行在线触发 LD2402/ZW101 初始化与业务命令联调。
 - 通过主机侧 SLE 下行在线验证 ZW101 重构能力链路（ENROLL/VERIFY/ECHO/LIST/DEL/CLEAR/CANCEL）。
@@ -150,32 +150,32 @@
 - `RGB STAT`
   - 功能：查询 RGB 驱动就绪状态与演示模式状态。
 
-### 3.7 TTP229 调试命令
+### 3.7 VK36N16I 调试命令
 
-- `TTP229 INIT`
-  - 功能：触发 TTP229 状态机重初始化。
+- `VK36N16I INIT`
+  - 功能：触发 VK36N16I 状态机重初始化。
 
-- `TTP229 STAT`
-  - 功能：查询 TTP229 当前就绪状态、使能状态、报警状态、原始码、按下掩码与可读键名。
+- `VK36N16I STAT`
+  - 功能：查询 VK36N16I 当前就绪状态、使能状态、报警状态、原始码、按下掩码与可读键名。
 
-- `TTP229 READ`
+- `VK36N16I READ`
   - 功能：读取并输出最近一次采样缓存（`raw/mask/count/keys`）。
 
-- `TTP229 MASK`
+- `VK36N16I MASK`
   - 功能：`READ` 命令别名。
 
-- `TTP229 WATCH ON|OFF`
-  - 功能：开启或关闭 TTP229 持续检测日志。
+- `VK36N16I WATCH ON|OFF`
+  - 功能：开启或关闭 VK36N16I 持续检测日志。
   - 说明：开启后按固定周期持续输出 `raw/mask/count`，便于观察按键触发过程。
 
-- `TTP229 ENABLE ON|OFF`
-  - 功能：控制 TTP229 状态机启停。
+- `VK36N16I ENABLE ON|OFF`
+  - 功能：控制 VK36N16I 状态机启停。
 
-- `TTP229 ALARM ON|OFF`
+- `VK36N16I ALARM ON|OFF`
   - 功能：控制“多键同时按下报警”开关。
 
 说明：
-- TTP229 底层已切换为 I2C 读取，GPIO16 / GPIO15 分别作为 SDA / SCL 使用。
+- VK36N16I 底层已切换为 I2C 读取，GPIO16 / GPIO15 分别作为 SDA / SCL 使用。
 - 当前按键语义已统一为“位为 1 表示按下”。
 - 实测物理键位映射为：A=0x1000、B=0x2000、C=0x4000、D=0x8000、1=0x0001、2=0x0010、3=0x0100、*=0x0008、0=0x0080、#=0x0800。
 - 调试输出里的 `keys=` 会按上述映射把多键组合成 A+B 这种文本，未知位则保留为十六进制，方便排查异常输入。
@@ -370,9 +370,9 @@
 7. 发送 `MOTOR WATCH OFF` 结束监控。
 8. 发送 `BEEP ON 2000` + `BEEP VOL 30`，验证蜂鸣器频率与音量调节。
 9. 发送 `RGB INIT`、`RGB SET 255 0 0`、`RGB DEMO ON`，验证 RGB 固定色与演示模式切换。
-10. 发送 `TTP229 STAT`、`TTP229 READ`，验证触摸键盘采样与位图语义（位1=按下）。
-11. 发送 `TTP229 WATCH ON` 并按键，观察持续输出的 `raw/mask/count` 是否随按键变化。
-12. 发送 `TTP229 WATCH OFF`，确认持续输出停止。
+10. 发送 `VK36N16I STAT`、`VK36N16I READ`，验证触摸键盘采样与位图语义（位1=按下）。
+11. 发送 `VK36N16I WATCH ON` 并按键，观察持续输出的 `raw/mask/count` 是否随按键变化。
+12. 发送 `VK36N16I WATCH OFF`，确认持续输出停止。
 13. 同时按下两个触摸键，观察是否出现多键报警日志。
 14. 发送 `LD INIT`、`ZW INIT`，验证两类模块调试链路。
 15. 发送 `ZW ECHO`、`ZW VERIFY`，验证 VERIFY 认证链路。
@@ -426,7 +426,7 @@
   - 说明：通常是演示模式仍处于开启状态；可先执行 `RGB DEMO OFF` 再设置固定颜色。
   - 排查：若命令返回失败，检查 `WS63_RGB_ENABLE` 是否开启并确认 SPI1 引脚连接。
 
-- 现象：`TTP229 STAT` 中 `mask` 始终为 `0x0000` 或 `0xFFFF`。
+- 现象：`VK36N16I STAT` 中 `mask` 始终为 `0x0000` 或 `0xFFFF`。
   - 排查：确认接线为 `SCL->GPIO16`、`SDO(板上标注SDA)->GPIO15`，并检查供电与地线。
   - 排查：若接线无误，按规格书复核时序参数（起始脉冲/时钟脉冲）是否匹配当前模组。
 
@@ -488,13 +488,13 @@
 - `src/application/mine/ws63_final/App/Task/ws63_final_task.c`
 - `src/application/mine/ws63_final/Config/ws63_final_config.h`
 - `src/application/mine/ws63_final/BSP/ws63_final_bsp.c`
-- `src/application/mine/ws63_final/BSP/ws63_final_bsp_ttp229.c`
+- `src/application/mine/ws63_final/BSP/ws63_final_bsp_vk36n16i.c`
 - `src/application/mine/ws63_final/BSP/ws63_final_bsp_beep.c`
 - `src/application/mine/ws63_final/Driver/ws63_buzzer.c`
-- `src/application/mine/ws63_final/Driver/ws63_ttp229.c`
+- `src/application/mine/ws63_final/Driver/ws63_vk36n16i.c`
 - `src/application/mine/ws63_final/App/Task/ws63_final_task_rgb.c`
 - `src/application/mine/ws63_final/App/Task/ws63_final_task_debug.c`
-- `src/application/mine/ws63_final/App/Task/ws63_final_task_ttp229.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_vk36n16i.c`
 - `src/application/mine/ws63_final/App/Task/ws63_final_task_sensor_bridge.c`
 - `src/application/mine/ws63_final/App/Task/ws63_final_task_lock_mgr.c`
 - `src/application/mine/ws63_final/Driver/zw101.c`

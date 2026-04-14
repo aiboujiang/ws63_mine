@@ -73,7 +73,7 @@ static void ws63_lock_mgr_set_ld2402_channel(uint8_t enable);
 static const char *ws63_lock_mgr_source_to_text(ws63_lock_auth_source_t source)
 {
     switch (source) {
-        case WS63_LOCK_AUTH_SOURCE_TTP229:
+        case WS63_LOCK_AUTH_SOURCE_VK36N16I:
             return "key";
         case WS63_LOCK_AUTH_SOURCE_ZW101:
             return "finger";
@@ -202,15 +202,15 @@ static const char *ws63_lock_mgr_state_to_text(ws63_lock_state_t state)
  */
 static void ws63_lock_mgr_play_fail_prompt(void)
 {
-    (void)ws63_task_buzzer_beep_tone(WS63_TTP229_KEY_PROMPT_BEEP_FREQ_HZ,
-        WS63_TTP229_KEY_PROMPT_BEEP_VOLUME_PERCENT,
-        WS63_TTP229_KEY_PROMPT_BEEP_MS);
+    (void)ws63_task_buzzer_beep_tone(WS63_VK36N16I_KEY_PROMPT_BEEP_FREQ_HZ,
+        WS63_VK36N16I_KEY_PROMPT_BEEP_VOLUME_PERCENT,
+        WS63_VK36N16I_KEY_PROMPT_BEEP_MS);
 }
 
 /**
  * @brief 在认证失败时统一触发蜂鸣和 RGB 红灯提示。
  *
- * 说明：来源任务（TTP229/ZW101）只负责上报认证失败；门锁编排层统一做声光反馈，
+ * 说明：来源任务（VK36N16I/ZW101）只负责上报认证失败；门锁编排层统一做声光反馈，
  *       避免不同来源之间提示行为不一致。
  */
 static void ws63_lock_mgr_start_fail_feedback(uint32_t now_ms)
@@ -218,7 +218,7 @@ static void ws63_lock_mgr_start_fail_feedback(uint32_t now_ms)
     ws63_lock_mgr_play_fail_prompt();
     (void)ws63_task_rgb_set_color(220U, 0U, 0U);
     g_ws63_lock_feedback_mode = 2U;
-    g_ws63_lock_feedback_deadline_ms = now_ms + WS63_TTP229_KEY_PROMPT_BEEP_MS;
+    g_ws63_lock_feedback_deadline_ms = now_ms + WS63_VK36N16I_KEY_PROMPT_BEEP_MS;
 }
 
 /**
@@ -484,7 +484,7 @@ static void ws63_lock_mgr_set_ld2402_channel(uint8_t enable)
  *
  * 策略：
  * 1) 本模块不再维护跨来源全局失败锁定；
- * 2) 失败 5 次封禁由来源任务各自维护（TTP229/ZW101）；
+ * 2) 失败 5 次封禁由来源任务各自维护（VK36N16I/ZW101）；
  * 3) 认证失败的蜂鸣 + RGB 提示在这里统一触发。
  */
 static void ws63_lock_mgr_handle_event(const ws63_lock_event_t *event, uint32_t now_ms)
@@ -538,7 +538,7 @@ static void ws63_lock_mgr_handle_event(const ws63_lock_event_t *event, uint32_t 
  *
  * 状态机说明：
  * 1) IDLE：等待 LD2402 距离进入 80mm 接近阈值；
- * 2) ARMED：已经检测到接近，发送 camera action 并等待 camera / ZW101 / TTP229 任一认证结果；
+ * 2) ARMED：已经检测到接近，发送 camera action 并等待 camera / ZW101 / VK36N16I 任一认证结果；
  * 3) UNLOCKING：电机执行开锁动作，超时后自动停转。
  */
 static void *ws63_lock_mgr_task_entry(const char *arg)

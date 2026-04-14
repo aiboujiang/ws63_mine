@@ -1,10 +1,10 @@
 /**
- * @file ws63_ttp229.h
- * @brief WS63 TTP229 驱动层接口。
+ * @file ws63_vk36n16i.h
+ * @brief WS63 VK36N16I 驱动层接口。
  */
 
-#ifndef WS63_TTP229_H
-#define WS63_TTP229_H
+#ifndef WS63_VK36N16I_H
+#define WS63_VK36N16I_H
 
 #include <stdint.h>
 
@@ -17,7 +17,7 @@ extern "C" {
 #endif
 
 /**
- * @brief TTP229 一次采样结果。
+ * @brief VK36N16I 一次采样结果。
  *
  * 说明：
  * 1) raw_code 为芯片通过 I2C 直接读回的 16 位原始键值；
@@ -28,22 +28,22 @@ typedef struct {
     uint16_t pressed_mask;
     uint8_t pressed_count;
     uint8_t multi_key;
-} ws63_ttp229_sample_t;
+} ws63_vk36n16i_sample_t;
 
 /**
- * @brief 初始化 TTP229 驱动。
+ * @brief 初始化 VK36N16I 驱动。
  *
  * @return errcode_t ERRCODE_SUCC 成功，其他失败。
  */
-errcode_t ws63_ttp229_init(void);
+errcode_t ws63_vk36n16i_init(void);
 
 /**
- * @brief 读取一次 TTP229 按键状态。
+ * @brief 读取一次 VK36N16I 按键状态。
  *
  * @param sample 输出采样结果。
  * @return errcode_t ERRCODE_SUCC 成功，其他失败。
  */
-errcode_t ws63_ttp229_read_sample(ws63_ttp229_sample_t *sample);
+errcode_t ws63_vk36n16i_read_sample(ws63_vk36n16i_sample_t *sample);
 
 /**
  * @brief 统计按下按键数量。
@@ -51,7 +51,7 @@ errcode_t ws63_ttp229_read_sample(ws63_ttp229_sample_t *sample);
  * @param pressed_mask 位图（位为1表示按下）。
  * @return uint8_t 按下键数（0~16）。
  */
-uint8_t ws63_ttp229_count_pressed(uint16_t pressed_mask);
+uint8_t ws63_vk36n16i_count_pressed(uint16_t pressed_mask);
 
 #ifdef __cplusplus
 #if __cplusplus

@@ -481,79 +481,79 @@ errcode_t ws63_task_zw101_clear(uint8_t *ack_out);
 errcode_t ws63_task_zw101_cancel(uint8_t *ack_out);
 
 /**
- * @brief 触发 TTP229 状态机重初始化。
+ * @brief 触发 VK36N16I 状态机重初始化。
  *
  * @return errcode_t ERRCODE_SUCC 成功，其他失败。
  */
-errcode_t ws63_task_ttp229_reinit(void);
+errcode_t ws63_task_vk36n16i_reinit(void);
 
 /**
- * @brief 设置 TTP229 状态机使能。
+ * @brief 设置 VK36N16I 状态机使能。
  *
  * @param enable 1=启用采样，0=暂停采样。
  * @return errcode_t ERRCODE_SUCC 成功，其他失败。
  */
-errcode_t ws63_task_ttp229_set_enable(uint8_t enable);
+errcode_t ws63_task_vk36n16i_set_enable(uint8_t enable);
 
 /**
- * @brief 查询 TTP229 驱动是否就绪。
+ * @brief 查询 VK36N16I 驱动是否就绪。
  *
  * @return uint8_t 1=就绪，0=未就绪。
  */
-uint8_t ws63_task_ttp229_is_ready(void);
+uint8_t ws63_task_vk36n16i_is_ready(void);
 
 /**
- * @brief 查询 TTP229 状态机是否启用。
+ * @brief 查询 VK36N16I 状态机是否启用。
  *
  * @return uint8_t 1=启用，0=关闭。
  */
-uint8_t ws63_task_ttp229_is_enabled(void);
+uint8_t ws63_task_vk36n16i_is_enabled(void);
 
 /**
- * @brief 设置 TTP229 多键报警开关。
+ * @brief 设置 VK36N16I 多键报警开关。
  *
  * @param enable 1=开启报警，0=关闭报警。
  * @return errcode_t ERRCODE_SUCC 成功，其他失败。
  */
-errcode_t ws63_task_ttp229_set_multi_key_alarm(uint8_t enable);
+errcode_t ws63_task_vk36n16i_set_multi_key_alarm(uint8_t enable);
 
 /**
- * @brief 查询 TTP229 多键报警是否开启。
+ * @brief 查询 VK36N16I 多键报警是否开启。
  *
  * @return uint8_t 1=开启，0=关闭。
  */
-uint8_t ws63_task_ttp229_is_multi_key_alarm_enable(void);
+uint8_t ws63_task_vk36n16i_is_multi_key_alarm_enable(void);
 
 /**
  * @brief 查询当前是否处于多键报警状态。
  *
  * @return uint8_t 1=处于报警，0=未报警。
  */
-uint8_t ws63_task_ttp229_is_multi_key_active(void);
+uint8_t ws63_task_vk36n16i_is_multi_key_active(void);
 
 /**
- * @brief 获取 TTP229 最近一次原始 16 位码。
+ * @brief 获取 VK36N16I 最近一次原始 16 位码。
  *
  * @return uint16_t 原始码值。
  */
-uint16_t ws63_task_ttp229_get_raw_code(void);
+uint16_t ws63_task_vk36n16i_get_raw_code(void);
 
 /**
- * @brief 获取 TTP229 最近一次按下掩码（位1=按下）。
+ * @brief 获取 VK36N16I 最近一次按下掩码（位1=按下）。
  *
  * @return uint16_t 按下掩码。
  */
-uint16_t ws63_task_ttp229_get_pressed_mask(void);
+uint16_t ws63_task_vk36n16i_get_pressed_mask(void);
 
 /**
- * @brief 获取 TTP229 最近一次按下按键数量。
+ * @brief 获取 VK36N16I 最近一次按下按键数量。
  *
  * @return uint8_t 按键数量（0~16）。
  */
-uint8_t ws63_task_ttp229_get_pressed_count(void);
+uint8_t ws63_task_vk36n16i_get_pressed_count(void);
 
 /**
- * @brief Get the latest TTP229 key label text.
+ * @brief Get the latest VK36N16I key label text.
  *
  * The text follows the measured board mapping and keeps multi-key presses as
  * additive labels, for example A+B when both keys are pressed.
@@ -562,7 +562,7 @@ uint8_t ws63_task_ttp229_get_pressed_count(void);
  * @param text_len Output buffer length.
  * @return errcode_t ERRCODE_SUCC 成功，其他失败。
  */
-errcode_t ws63_task_ttp229_get_pressed_text(char *text, uint16_t text_len);
+errcode_t ws63_task_vk36n16i_get_pressed_text(char *text, uint16_t text_len);
 
 /**
  * @brief 获取编码器最新 RPM。

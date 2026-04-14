@@ -243,27 +243,27 @@ errcode_t ws63_bsp_beep_start(uint16_t freq_hz, uint8_t volume_percent);
 errcode_t ws63_bsp_beep_stop(void);
 
 /**
- * @brief 初始化 TTP229 I2C 相关引脚与总线资源。
+ * @brief 初始化 VK36N16I I2C 相关引脚与总线资源。
  *
  * @return errcode_t ERRCODE_SUCC 成功，其他失败。
  */
-errcode_t ws63_bsp_ttp229_init(void);
+errcode_t ws63_bsp_vk36n16i_init(void);
 
 /**
- * @brief 通过 TTP229 I2C 总线读取键值数据。
+ * @brief 通过 VK36N16I I2C 总线读取键值数据。
  *
  * @param data 输出缓冲区，至少 2 字节。
  * @param len  读取长度，必须不小于 2 字节。
  * @return errcode_t ERRCODE_SUCC 成功，其他失败。
  */
-errcode_t ws63_bsp_ttp229_read_bytes(uint8_t *data, uint16_t len);
+errcode_t ws63_bsp_vk36n16i_read_bytes(uint8_t *data, uint16_t len);
 
 /**
- * @brief TTP229 毫秒级延时。
+ * @brief VK36N16I 毫秒级延时。
  *
  * @param ms 延时毫秒。
  */
-void ws63_bsp_ttp229_delay_ms(uint32_t ms);
+void ws63_bsp_vk36n16i_delay_ms(uint32_t ms);
 
 #ifdef __cplusplus
 #if __cplusplus

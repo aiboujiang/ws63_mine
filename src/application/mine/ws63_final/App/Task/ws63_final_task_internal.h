@@ -60,7 +60,7 @@ typedef struct {
 typedef enum {
 	WS63_LOCK_AUTH_SOURCE_CAMERA = 0,
 	WS63_LOCK_AUTH_SOURCE_ZW101,
-	WS63_LOCK_AUTH_SOURCE_TTP229,
+	WS63_LOCK_AUTH_SOURCE_VK36N16I,
 	WS63_LOCK_AUTH_SOURCE_MANUAL
 } ws63_lock_auth_source_t;
 
@@ -118,11 +118,11 @@ errcode_t ws63_beep_task_start(void);
 errcode_t ws63_task_buzzer_beep_tone(uint16_t freq_hz, uint8_t volume_percent, uint32_t duration_ms);
 
 /**
- * @brief 启动 TTP229 独立任务。
+ * @brief 启动 VK36N16I 独立任务。
  *
  * @return errcode_t ERRCODE_SUCC 成功，其他失败。
  */
-errcode_t ws63_ttp229_task_start(void);
+errcode_t ws63_vk36n16i_task_start(void);
 
 /**
  * @brief 启动 camera 独立任务。
@@ -275,11 +275,11 @@ void ws63_task_zw101_cancel_verify_request(void);
 uint8_t ws63_task_zw101_get_last_verify_ack(void);
 
 /**
- * @brief 查询 TTP229 是否已在当前 armed 周期内被失败封禁。
+ * @brief 查询 VK36N16I 是否已在当前 armed 周期内被失败封禁。
  *
  * @return uint8_t 1=已封禁，0=仍可继续输入。
  */
-uint8_t ws63_task_ttp229_is_password_disabled(void);
+uint8_t ws63_task_vk36n16i_is_password_disabled(void);
 
 /**
  * @brief camera 任务发送文本消息。

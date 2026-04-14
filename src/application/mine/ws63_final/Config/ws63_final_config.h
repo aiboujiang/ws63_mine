@@ -236,75 +236,75 @@ extern "C" {
 
 
 /* ============================================================================ */
-/*                             【7. 触摸键盘 TTP229 配置】                      */
+/*                             【7. 触摸键盘 VK36N16I 配置】                      */
 /* ============================================================================ */
 
-/* TTP229 触摸键盘功能使能总开关 */
-#define WS63_TTP229_ENABLE 1U
+/* VK36N16I 触摸键盘功能使能总开关 */
+#define WS63_VK36N16I_ENABLE 1U
 
-/* TTP229 模拟 I2C SCL引脚 */
-#define WS63_TTP229_SCL_PIN GPIO_16
+/* VK36N16I 模拟 I2C SCL引脚 */
+#define WS63_VK36N16I_SCL_PIN GPIO_16
 
-/* TTP229 模拟 I2C SDA引脚 */
-#define WS63_TTP229_SDA_PIN GPIO_15
+/* VK36N16I 模拟 I2C SDA引脚 */
+#define WS63_VK36N16I_SDA_PIN GPIO_15
 
-/* TTP229 I2C接口复用模式 */
-#define WS63_TTP229_I2C_PIN_MODE 2U
+/* VK36N16I I2C接口复用模式 */
+#define WS63_VK36N16I_I2C_PIN_MODE 2U
 
-/* TTP229 挂载的物理 I2C 总线编号 */
-#define WS63_TTP229_I2C_BUS 1U
+/* VK36N16I 挂载的物理 I2C 总线编号 */
+#define WS63_VK36N16I_I2C_BUS 1U
 
-/* TTP229 I2C 总线速率（赫兹） */
-#define WS63_TTP229_I2C_SPEED 100000U
+/* VK36N16I I2C 总线速率（赫兹） */
+#define WS63_VK36N16I_I2C_SPEED 100000U
 
-/* TTP229 硬件地址（7bit = 0x65） */
-#define WS63_TTP229_I2C_ADDR 0x65U
+/* VK36N16I 硬件地址（7bit = 0x65） */
+#define WS63_VK36N16I_I2C_ADDR 0x65U
 
 /* 每次读取 I2C 地址的字节长度 */
-#define WS63_TTP229_I2C_READ_LEN 2U
+#define WS63_VK36N16I_I2C_READ_LEN 2U
 
-/* TTP229 工作任务栈大小 */
-#define WS63_TTP229_TASK_STACK_SIZE 2048U
+/* VK36N16I 工作任务栈大小 */
+#define WS63_VK36N16I_TASK_STACK_SIZE 2048U
 
-/* TTP229 工作任务优先级 */
-#define WS63_TTP229_TASK_PRIORITY 27U
+/* VK36N16I 工作任务优先级 */
+#define WS63_VK36N16I_TASK_PRIORITY 27U
 
-/* TTP229 主事件轮询周期（毫秒） */
-#define WS63_TTP229_TASK_POLL_MS 10U
+/* VK36N16I 主事件轮询周期（毫秒） */
+#define WS63_VK36N16I_TASK_POLL_MS 10U
 
 /* 初始化失败时的退避重试时间（毫秒） */
-#define WS63_TTP229_INIT_RETRY_MS 500U
+#define WS63_VK36N16I_INIT_RETRY_MS 500U
 
-/* TTP229 状态机初始化默认使能 */
-#define WS63_TTP229_ENABLE_DEFAULT 1U
+/* VK36N16I 状态机初始化默认使能 */
+#define WS63_VK36N16I_ENABLE_DEFAULT 1U
 
 /* 开启多键防误触报警功能：2键或以上同时按下时报警 */
-#define WS63_TTP229_MULTI_KEY_ALARM_DEFAULT 1U
+#define WS63_VK36N16I_MULTI_KEY_ALARM_DEFAULT 1U
 
 /* I2C 读数发生偶发错误时的尝试重复次数 */
-#define WS63_TTP229_READ_RETRY_MAX 3U
+#define WS63_VK36N16I_READ_RETRY_MAX 3U
 
 /* I2C 读取重试间隔（不能太大以免影响 10ms 轮询节奏） */
-#define WS63_TTP229_READ_RETRY_GAP_MS 1U
+#define WS63_VK36N16I_READ_RETRY_GAP_MS 1U
 
 /* ---------------- 键盘密码与防爆破 ---------------- */
-/* TTP229 内置比对的静态密码文本 */
-#define WS63_TTP229_PASSWORD_TEXT "123456"
+/* VK36N16I 内置比对的静态密码文本 */
+#define WS63_VK36N16I_PASSWORD_TEXT "123456"
 
-/* TTP229 内置静态密码文本对应的长度 */
-#define WS63_TTP229_PASSWORD_LEN 6U
+/* VK36N16I 内置静态密码文本对应的长度 */
+#define WS63_VK36N16I_PASSWORD_LEN 6U
 
 /* 连续密码输入错误的封禁惩罚阈值（当前唤醒周期内） */
-#define WS63_TTP229_PASSWORD_FAIL_DISABLE_THRESHOLD 5U
+#define WS63_VK36N16I_PASSWORD_FAIL_DISABLE_THRESHOLD 5U
 
 /* 按键被有效识别后的反馈蜂鸣器频率（赫兹） */
-#define WS63_TTP229_KEY_PROMPT_BEEP_FREQ_HZ 1200U
+#define WS63_VK36N16I_KEY_PROMPT_BEEP_FREQ_HZ 1200U
 
 /* 按键反馈蜂鸣器的相对响度百分比 (0-100) */
-#define WS63_TTP229_KEY_PROMPT_BEEP_VOLUME_PERCENT 12U
+#define WS63_VK36N16I_KEY_PROMPT_BEEP_VOLUME_PERCENT 12U
 
 /* 按键反馈蜂鸣器的发声持续时间（毫秒） */
-#define WS63_TTP229_KEY_PROMPT_BEEP_MS 20U
+#define WS63_VK36N16I_KEY_PROMPT_BEEP_MS 20U
 
 
 /* ============================================================================ */

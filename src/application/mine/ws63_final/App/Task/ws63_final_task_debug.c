@@ -33,8 +33,8 @@
 static uint8_t g_ws63_debug_uart_ready = 0U;
 /* 电机周期监控开关：仅控制 MOTOR WATCH ON|OFF。 */
 static uint8_t g_ws63_debug_motor_watch_enable = 0U;
-/* TTP229 周期监控开关：用于持续观察矩阵键盘按键位图变化。 */
-static uint8_t g_ws63_debug_ttp229_watch_enable = 0U;
+/* VK36N16I 周期监控开关：用于持续观察矩阵键盘按键位图变化。 */
+static uint8_t g_ws63_debug_vk36n16i_watch_enable = 0U;
 static uint32_t g_ws63_debug_last_watch_ms = 0U;
 #if (WS63_DEBUG_LOCAL_UART_IO_ENABLE == 1U)
 static uint8_t g_ws63_debug_uart_rx_buf[WS63_DEBUG_UART_RX_BUF_SIZE] = {0};
@@ -772,30 +772,30 @@ static void ws63_debug_dump_rgb_status(const char *tag)
 }
 
 /**
- * @brief 输出当前 TTP229 状态。
+ * @brief 输出当前 VK36N16I 状态。
  */
-static void ws63_debug_dump_ttp229_status(const char *tag)
+static void ws63_debug_dump_vk36n16i_status(const char *tag)
 {
-#if (WS63_TTP229_ENABLE == 1U)
+#if (WS63_VK36N16I_ENABLE == 1U)
     char key_text[64] = {0};
 
-    if (ws63_task_ttp229_get_pressed_text(key_text, sizeof(key_text)) != ERRCODE_SUCC) {
+    if (ws63_task_vk36n16i_get_pressed_text(key_text, sizeof(key_text)) != ERRCODE_SUCC) {
         (void)strncpy_s(key_text, sizeof(key_text), "ERR", 3U);
     }
 
-    ws63_debug_log("[ws63 dbg] %s ttp229=%s enable=%s alarm=%s active=%s raw=0x%04x mask=0x%04x count=%u keys=%s\r\n",
-        (tag == NULL) ? "ttp229" : tag,
-        (ws63_task_ttp229_is_ready() == 1U) ? "READY" : "NOT_READY",
-        (ws63_task_ttp229_is_enabled() == 1U) ? "ON" : "OFF",
-        (ws63_task_ttp229_is_multi_key_alarm_enable() == 1U) ? "ON" : "OFF",
-        (ws63_task_ttp229_is_multi_key_active() == 1U) ? "ON" : "OFF",
-        (unsigned int)ws63_task_ttp229_get_raw_code(),
-        (unsigned int)ws63_task_ttp229_get_pressed_mask(),
-        (unsigned int)ws63_task_ttp229_get_pressed_count(),
+    ws63_debug_log("[ws63 dbg] %s vk36n16i=%s enable=%s alarm=%s active=%s raw=0x%04x mask=0x%04x count=%u keys=%s\r\n",
+        (tag == NULL) ? "vk36n16i" : tag,
+        (ws63_task_vk36n16i_is_ready() == 1U) ? "READY" : "NOT_READY",
+        (ws63_task_vk36n16i_is_enabled() == 1U) ? "ON" : "OFF",
+        (ws63_task_vk36n16i_is_multi_key_alarm_enable() == 1U) ? "ON" : "OFF",
+        (ws63_task_vk36n16i_is_multi_key_active() == 1U) ? "ON" : "OFF",
+        (unsigned int)ws63_task_vk36n16i_get_raw_code(),
+        (unsigned int)ws63_task_vk36n16i_get_pressed_mask(),
+        (unsigned int)ws63_task_vk36n16i_get_pressed_count(),
         key_text);
 #else
-    ws63_debug_log("[ws63 dbg] %s ttp229=DISABLED\r\n",
-        (tag == NULL) ? "ttp229" : tag);
+    ws63_debug_log("[ws63 dbg] %s vk36n16i=DISABLED\r\n",
+        (tag == NULL) ? "vk36n16i" : tag);
 #endif
 }
 
@@ -1509,13 +1509,13 @@ static void ws63_debug_print_help(void)
     ws63_debug_log("[ws63 dbg]   RGB OFF\r\n");
     ws63_debug_log("[ws63 dbg]   RGB DEMO ON|OFF\r\n");
     ws63_debug_log("[ws63 dbg]   RGB STAT\r\n");
-    ws63_debug_log("[ws63 dbg]   TTP229 INIT\r\n");
-    ws63_debug_log("[ws63 dbg]   TTP229 STAT\r\n");
-    ws63_debug_log("[ws63 dbg]   TTP229 READ\r\n");
-    ws63_debug_log("[ws63 dbg]   TTP229 MASK\r\n");
-    ws63_debug_log("[ws63 dbg]   TTP229 WATCH ON|OFF\r\n");
-    ws63_debug_log("[ws63 dbg]   TTP229 ENABLE ON|OFF\r\n");
-    ws63_debug_log("[ws63 dbg]   TTP229 ALARM ON|OFF\r\n");
+    ws63_debug_log("[ws63 dbg]   VK36N16I INIT\r\n");
+    ws63_debug_log("[ws63 dbg]   VK36N16I STAT\r\n");
+    ws63_debug_log("[ws63 dbg]   VK36N16I READ\r\n");
+    ws63_debug_log("[ws63 dbg]   VK36N16I MASK\r\n");
+    ws63_debug_log("[ws63 dbg]   VK36N16I WATCH ON|OFF\r\n");
+    ws63_debug_log("[ws63 dbg]   VK36N16I ENABLE ON|OFF\r\n");
+    ws63_debug_log("[ws63 dbg]   VK36N16I ALARM ON|OFF\r\n");
     ws63_debug_log("[ws63 dbg]   [camera]add <id>\r\n");
     ws63_debug_log("[ws63 dbg]   [camera]List\r\n");
     ws63_debug_log("[ws63 dbg]   [camera]Del <id>\r\n");
@@ -1747,71 +1747,71 @@ static void ws63_debug_exec_command(const char *line)
         return;
     }
 
-    if (strcmp(cmd, "TTP229 INIT") == 0) {
-        ret = ws63_task_ttp229_reinit();
-        ws63_debug_log("[ws63 dbg] TTP229 INIT ret=0x%x\r\n", (unsigned int)ret);
-        ws63_debug_dump_ttp229_status("ttp229-init");
+    if (strcmp(cmd, "VK36N16I INIT") == 0) {
+        ret = ws63_task_vk36n16i_reinit();
+        ws63_debug_log("[ws63 dbg] VK36N16I INIT ret=0x%x\r\n", (unsigned int)ret);
+        ws63_debug_dump_vk36n16i_status("vk36n16i-init");
         return;
     }
 
-    if (strcmp(cmd, "TTP229 STAT") == 0) {
-        ws63_debug_dump_ttp229_status("ttp229-query");
+    if (strcmp(cmd, "VK36N16I STAT") == 0) {
+        ws63_debug_dump_vk36n16i_status("vk36n16i-query");
         return;
     }
 
-    if ((strcmp(cmd, "TTP229 READ") == 0) || (strcmp(cmd, "TTP229 MASK") == 0)) {
+    if ((strcmp(cmd, "VK36N16I READ") == 0) || (strcmp(cmd, "VK36N16I MASK") == 0)) {
         char key_text[64] = {0};
 
-        if (ws63_task_ttp229_get_pressed_text(key_text, sizeof(key_text)) != ERRCODE_SUCC) {
+        if (ws63_task_vk36n16i_get_pressed_text(key_text, sizeof(key_text)) != ERRCODE_SUCC) {
             (void)strncpy_s(key_text, sizeof(key_text), "ERR", 3U);
         }
 
-        ws63_debug_log("[ws63 dbg] TTP229 raw=0x%04x mask=0x%04x count=%u keys=%s\r\n",
-            (unsigned int)ws63_task_ttp229_get_raw_code(),
-            (unsigned int)ws63_task_ttp229_get_pressed_mask(),
-            (unsigned int)ws63_task_ttp229_get_pressed_count(),
+        ws63_debug_log("[ws63 dbg] VK36N16I raw=0x%04x mask=0x%04x count=%u keys=%s\r\n",
+            (unsigned int)ws63_task_vk36n16i_get_raw_code(),
+            (unsigned int)ws63_task_vk36n16i_get_pressed_mask(),
+            (unsigned int)ws63_task_vk36n16i_get_pressed_count(),
             key_text);
         return;
     }
 
-    if (strcmp(cmd, "TTP229 WATCH ON") == 0) {
-        g_ws63_debug_ttp229_watch_enable = 1U;
+    if (strcmp(cmd, "VK36N16I WATCH ON") == 0) {
+        g_ws63_debug_vk36n16i_watch_enable = 1U;
         g_ws63_debug_last_watch_ms = 0U;
-        ws63_debug_log("[ws63 dbg] TTP229 WATCH ON\r\n");
+        ws63_debug_log("[ws63 dbg] VK36N16I WATCH ON\r\n");
         return;
     }
 
-    if (strcmp(cmd, "TTP229 WATCH OFF") == 0) {
-        g_ws63_debug_ttp229_watch_enable = 0U;
-        ws63_debug_log("[ws63 dbg] TTP229 WATCH OFF\r\n");
+    if (strcmp(cmd, "VK36N16I WATCH OFF") == 0) {
+        g_ws63_debug_vk36n16i_watch_enable = 0U;
+        ws63_debug_log("[ws63 dbg] VK36N16I WATCH OFF\r\n");
         return;
     }
 
-    if (strcmp(cmd, "TTP229 ENABLE ON") == 0) {
-        ret = ws63_task_ttp229_set_enable(1U);
-        ws63_debug_log("[ws63 dbg] TTP229 ENABLE ON ret=0x%x\r\n", (unsigned int)ret);
-        ws63_debug_dump_ttp229_status("ttp229-enable");
+    if (strcmp(cmd, "VK36N16I ENABLE ON") == 0) {
+        ret = ws63_task_vk36n16i_set_enable(1U);
+        ws63_debug_log("[ws63 dbg] VK36N16I ENABLE ON ret=0x%x\r\n", (unsigned int)ret);
+        ws63_debug_dump_vk36n16i_status("vk36n16i-enable");
         return;
     }
 
-    if (strcmp(cmd, "TTP229 ENABLE OFF") == 0) {
-        ret = ws63_task_ttp229_set_enable(0U);
-        ws63_debug_log("[ws63 dbg] TTP229 ENABLE OFF ret=0x%x\r\n", (unsigned int)ret);
-        ws63_debug_dump_ttp229_status("ttp229-enable");
+    if (strcmp(cmd, "VK36N16I ENABLE OFF") == 0) {
+        ret = ws63_task_vk36n16i_set_enable(0U);
+        ws63_debug_log("[ws63 dbg] VK36N16I ENABLE OFF ret=0x%x\r\n", (unsigned int)ret);
+        ws63_debug_dump_vk36n16i_status("vk36n16i-enable");
         return;
     }
 
-    if (strcmp(cmd, "TTP229 ALARM ON") == 0) {
-        ret = ws63_task_ttp229_set_multi_key_alarm(1U);
-        ws63_debug_log("[ws63 dbg] TTP229 ALARM ON ret=0x%x\r\n", (unsigned int)ret);
-        ws63_debug_dump_ttp229_status("ttp229-alarm");
+    if (strcmp(cmd, "VK36N16I ALARM ON") == 0) {
+        ret = ws63_task_vk36n16i_set_multi_key_alarm(1U);
+        ws63_debug_log("[ws63 dbg] VK36N16I ALARM ON ret=0x%x\r\n", (unsigned int)ret);
+        ws63_debug_dump_vk36n16i_status("vk36n16i-alarm");
         return;
     }
 
-    if (strcmp(cmd, "TTP229 ALARM OFF") == 0) {
-        ret = ws63_task_ttp229_set_multi_key_alarm(0U);
-        ws63_debug_log("[ws63 dbg] TTP229 ALARM OFF ret=0x%x\r\n", (unsigned int)ret);
-        ws63_debug_dump_ttp229_status("ttp229-alarm");
+    if (strcmp(cmd, "VK36N16I ALARM OFF") == 0) {
+        ret = ws63_task_vk36n16i_set_multi_key_alarm(0U);
+        ws63_debug_log("[ws63 dbg] VK36N16I ALARM OFF ret=0x%x\r\n", (unsigned int)ret);
+        ws63_debug_dump_vk36n16i_status("vk36n16i-alarm");
         return;
     }
 
@@ -2116,7 +2116,7 @@ static void ws63_debug_uart_cmd_init(void)
 
     g_ws63_debug_uart_ready = 0U;
     g_ws63_debug_motor_watch_enable = 0U;
-    g_ws63_debug_ttp229_watch_enable = 0U;
+    g_ws63_debug_vk36n16i_watch_enable = 0U;
     g_ws63_debug_cmd_line_len = 0U;
     g_ws63_debug_last_watch_ms = 0U;
     g_ws63_debug_cmd_q_head = 0U;
@@ -2172,7 +2172,7 @@ static void ws63_debug_uart_cmd_process(uint32_t now_ms)
     }
 
     /* 周期监控统一节拍：任一 WATCH 开启都进入同一时间窗，避免多路日志抢占。 */
-    if ((g_ws63_debug_motor_watch_enable == 0U) && (g_ws63_debug_ttp229_watch_enable == 0U)) {
+    if ((g_ws63_debug_motor_watch_enable == 0U) && (g_ws63_debug_vk36n16i_watch_enable == 0U)) {
         return;
     }
 
@@ -2184,8 +2184,8 @@ static void ws63_debug_uart_cmd_process(uint32_t now_ms)
     if (g_ws63_debug_motor_watch_enable == 1U) {
         ws63_debug_dump_motor_status("watch");
     }
-    if (g_ws63_debug_ttp229_watch_enable == 1U) {
-        ws63_debug_dump_ttp229_status("watch");
+    if (g_ws63_debug_vk36n16i_watch_enable == 1U) {
+        ws63_debug_dump_vk36n16i_status("watch");
     }
 }
 

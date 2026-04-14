@@ -19,7 +19,7 @@ for fp in task_files:
         
         # Replace occurrences
         content = re.sub(lock_func + r'\s*\(\s*\)', 'WS63_FINAL_IRQ_LOCK()', content)
-        # Note the usage is like ws63_ttp229_unlock(irq_status) 
+        # Note the usage is like ws63_vk36n16i_unlock(irq_status) 
         content = re.sub(unlock_func + r'\s*\(\s*([^)]+)\s*\)', r'WS63_FINAL_IRQ_UNLOCK(\1)', content)
         
         with open(fp, 'w', encoding='latin-1') as f:
