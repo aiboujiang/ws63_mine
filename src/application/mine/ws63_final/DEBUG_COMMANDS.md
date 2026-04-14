@@ -525,6 +525,7 @@
 - 修复主机侧执行 `camera add <id>` / `camera Del <id>` 后摄像头偶发无反应、需再发 `camera List` 才开始采集的问题。
 - 调试命令链路新增 `ADD` 与 `DEL` 专用流程：先发送 `action` 唤醒采集态，再等待唤醒间隔，随后发送 `add <id>` 或 `Del <id>`，最后自动补一条 `List` 完成刷新/触发。
 - `camera` 调试命令统一改为走 `ws63_task_camera_send_message()` 队列发送，复用 camera 任务的串行与重试机制，避免冷启动阶段首包不稳定。
+- 新增详细日志：调试层会打印 `CAMERA cmd raw/op/send begin/ready/send result`，camera 任务会打印 `queue recv/tx try/tx ok/tx fail`，camera 回包会打印 `rx chunk/full reply/uplink queued`，主机侧会打印 `[mine host][CAMERA]` 预览。
 
 影响文件：
 - `src/application/mine/ws63_final/App/Task/ws63_final_task_debug.c`
@@ -538,4 +539,5 @@
 - 先执行 `camera add 333`，观察是否直接进入采集流程，无需再补发 `camera List`。
 - 再执行 `camera Del 333`，观察是否可直接生效，无需先发 `camera List`。
 - 当前实现会在 ADD/DEL 后自动补发 `camera List`，用于兼容 camera 固件把 List 作为最终触发动作的情况。
+- 若现场仍异常，请优先对照 `CAMERA send begin`、`queue recv`、`rx chunk`、`full reply`、`uplink queued` 这些日志判断卡点。
 - 如需手动控制生命周期，仍可使用 `camera start` / `camera die`。
