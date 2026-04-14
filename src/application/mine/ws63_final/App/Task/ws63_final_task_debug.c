@@ -859,6 +859,36 @@ static errcode_t ws63_debug_send_camera_add_command(uint32_t camera_id)
 }
 
 /**
+ * @brief 执行 camera DEL 调试命令（先唤醒，再发 Del）。
+ *
+ * 说明：部分 camera 固件在休眠态下首条 Del 也可能不响应，
+ * 这里与 ADD 保持一致的“action 预唤醒 + 延时”流程，避免现场需要先发 List 才生效。
+ */
+static errcode_t ws63_debug_send_camera_del_command(uint32_t camera_id)
+{
+    char payload[WS63_DEBUG_CMD_MAX_LEN] = {0};
+    int32_t ret;
+    errcode_t send_ret;
+
+    send_ret = ws63_debug_send_camera_command("action");
+    if (send_ret != ERRCODE_SUCC) {
+        ws63_debug_log("[ws63 dbg] CAMERA del pre-action fail ret=0x%x\r\n", (unsigned int)send_ret);
+        return send_ret;
+    }
+
+    /* 与 ADD 统一使用同一唤醒间隔，保持调试行为一致。 */
+    ws63_os_sleep_ms(WS63_LOCK_CAMERA_WAKE_GAP_MS_DEFAULT);
+
+    ret = snprintf_s(payload, sizeof(payload), sizeof(payload) - 1U, "Del %u", (unsigned int)camera_id);
+    if (ret < 0) {
+        ws63_debug_log("[ws63 dbg] CAMERA del format fail\r\n");
+        return ERRCODE_FAIL;
+    }
+
+    return ws63_debug_send_camera_command(payload);
+}
+
+/**
  * @brief 向 camera 子口发送一条人脸管理调试命令。
  *
  * 这里统一把上层指令整理成 `[camera]...` 格式，再交给 WK2114 子口发送，
@@ -918,9 +948,7 @@ static void ws63_debug_exec_camera_command(const char *cmd)
     char *cursor;
     char *op;
     char *arg0;
-    char payload[WS63_DEBUG_CMD_MAX_LEN] = {0};
     uint32_t camera_id = 0U;
-    errcode_t ret;
 
     if (cmd == NULL) {
         return;
@@ -968,13 +996,7 @@ static void ws63_debug_exec_camera_command(const char *cmd)
             return;
         }
 
-        ret = snprintf_s(payload, sizeof(payload), sizeof(payload) - 1U, "Del %u", (unsigned int)camera_id);
-        if (ret < 0) {
-            ws63_debug_log("[ws63 dbg] CAMERA del format fail\r\n");
-            return;
-        }
-
-        (void)ws63_debug_send_camera_command(payload);
+        (void)ws63_debug_send_camera_del_command(camera_id);
         return;
     }
 
