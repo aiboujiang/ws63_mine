@@ -52,6 +52,36 @@ static unsigned int ws63_camera_lock(void)
 }
 
 /**
+ * @brief 将一条完整 camera 文本回包投递到 SLE 上行队列。
+ *
+ * 说明：
+ * 1) 仅在回包完成重组后上行，避免主机侧出现 [CAMERA] 分包重复标签；
+ * 2) 复用 Task 层统一上行队列，不在接收回调里直接走 SLE 发送路径。
+ */
+static void ws63_camera_post_uplink_reply(const char *reply_text)
+{
+    ws63_sle_uplink_msg_t msg;
+    uint16_t text_len;
+
+    if ((reply_text == NULL) || (reply_text[0] == '\0')) {
+        return;
+    }
+
+    text_len = (uint16_t)strlen(reply_text);
+    if ((text_len == 0U) || (text_len > WS63_TASK_QUEUE_PAYLOAD_MAX)) {
+        return;
+    }
+
+    msg.sub_port = WS63_SLE_CAMERA_SUBPORT;
+    msg.len = text_len;
+    if (memcpy_s(msg.data, sizeof(msg.data), reply_text, text_len) != EOK) {
+        return;
+    }
+
+    (void)ws63_task_post_sle_uplink(&msg, WS63_OS_NO_WAIT);
+}
+
+/**
  * @brief camera 状态解锁。
  */
 static void ws63_camera_unlock(unsigned int irq_status)
@@ -288,6 +318,8 @@ static void ws63_camera_handle_full_reply(const char *reply_text)
         return;
     }
 
+    /* 先投递完整上行，再做本地状态更新，保证主机与本地日志观察到同一条完整文本。 */
+    ws63_camera_post_uplink_reply(reply_text);
     ws63_camera_store_reply_text(reply_text);
     osal_printk("[camera] rx %s\r\n", reply_text);
     ws63_camera_try_report_auth_result(reply_text);

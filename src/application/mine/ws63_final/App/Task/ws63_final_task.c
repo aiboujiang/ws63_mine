@@ -348,6 +348,14 @@ static void ws63_poll_and_dispatch(void)
 
 #if (WS63_SLE_CORE_ENABLE == 1U)
             /*
+             * camera 子口上行由 camera 模块在“文本重组完成”后统一投递，
+             * 这里不再直通原始分片，避免主机侧看到同一条结果被拆成多条 [CAMERA]。
+             */
+            if ((sub_port == WS63_SLE_CAMERA_SUBPORT) && (WS63_CAMERA_ENABLE == 1U)) {
+                continue;
+            }
+
+            /*
              * 上行数据只做“拷贝 + 投递”，由 SLE 任务统一发送。
              * 这样可以避免 WK2114 轮询线程被 SLE 发送路径阻塞。
              */

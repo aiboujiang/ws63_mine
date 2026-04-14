@@ -498,3 +498,23 @@
 - `src/application/mine/ws63_final/App/Task/ws63_final_task_sensor_bridge.c`
 - `src/application/mine/ws63_final/App/Task/ws63_final_task_lock_mgr.c`
 - `src/application/mine/ws63_final/Driver/zw101.c`
+
+## 8. 2026-04-14 CAMERA 上行分包修复
+
+变更摘要：
+- 修复主机侧 `sle->uart` 日志里同一条 camera 结果被拆成两条 `[CAMERA]` 的问题。
+- `ws63_final_task` 不再把 CAMERA 子口原始分片直接上行；改为由 `ws63_final_task_camera` 在重组出完整文本后一次性上行。
+- 保持现有协议标签不变（仍为 `[CAMERA]`），仅改变上行时机，避免 Host 侧出现 `len:24 + len:10` 这类拆包打印。
+
+影响文件：
+- `src/application/mine/ws63_final/App/Task/ws63_final_task.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_camera.c`
+- `src/application/mine/ws63_final/DEBUG_COMMANDS.md`
+
+验证与结果：
+- 构建命令：`cd /home/xixi/code/fbb_ws63_20260114/src && python3 build.py ws63-liteos-app`
+- 构建结果：通过；日志包含 `Build target:ws63_liteos_app success` 与 `packet success!`。
+
+联调观察要点：
+- 修复前：主机可能连续看到 `sle->uart len:24` 与 `sle->uart len:10`，并分别打印 `[CAMERA][name,score` / `[CAMERA]]`。
+- 修复后：同一条识别结果应尽量以单条完整 `[CAMERA][name,score]` 形式上行。
