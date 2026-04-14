@@ -855,7 +855,14 @@ static errcode_t ws63_debug_send_camera_add_command(uint32_t camera_id)
         return ERRCODE_FAIL;
     }
 
-    return ws63_debug_send_camera_command(payload);
+    send_ret = ws63_debug_send_camera_command(payload);
+    if (send_ret != ERRCODE_SUCC) {
+        return send_ret;
+    }
+
+    /* 某些 camera 固件需要 List 作为最终刷新/拉起动作，避免手工补发。 */
+    ws63_os_sleep_ms(WS63_LOCK_CAMERA_WAKE_GAP_MS_DEFAULT);
+    return ws63_debug_send_camera_command("List");
 }
 
 /**
@@ -885,7 +892,14 @@ static errcode_t ws63_debug_send_camera_del_command(uint32_t camera_id)
         return ERRCODE_FAIL;
     }
 
-    return ws63_debug_send_camera_command(payload);
+    send_ret = ws63_debug_send_camera_command(payload);
+    if (send_ret != ERRCODE_SUCC) {
+        return send_ret;
+    }
+
+    /* 与 ADD 保持一致：删除后再拉一次 List，让 camera 侧完成刷新并进入可见状态。 */
+    ws63_os_sleep_ms(WS63_LOCK_CAMERA_WAKE_GAP_MS_DEFAULT);
+    return ws63_debug_send_camera_command("List");
 }
 
 /**
