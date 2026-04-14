@@ -1288,3 +1288,12 @@ Verification:
 Risks / Follow-up:
 - Host side parser/display can optionally add [LOCK] specific pretty-printing while keeping raw forwarding unchanged.
 - If lock event format evolves, keep key=value schema backward compatible for host tools.
+
+## 2026-04-14 Maintenance Log
+- **修改摘要**：重构优化 `ws63_final` 门锁相关任务，提取公共 OSAL 任务初始化和 IRQ 锁宏。
+- **影响文件**：
+  - `ws63_final_osal.h/c`：新增 `ws63_task_create_with_queue` 宏及 `WS63_FINAL_IRQ_LOCK/UNLOCK`。
+  - `ws63_final_task_camera.c`, `ws63_final_task_device_ctrl.c`, `ws63_final_task_lock_mgr.c`, `ws63_final_task_rgb.c`：替换任务创建重复代码。
+  - 所有 `Task` 下的 C 文件：替换私有 IRQ 锁为统一公共锁。
+- **验证结果**：通过 `python3 build.py ws63-liteos-app` 编译测试。
+- **后续待办事项**：无。
