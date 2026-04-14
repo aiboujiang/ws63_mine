@@ -176,20 +176,17 @@ extern "C" {
 /* 门锁状态机任务轮询周期（毫秒） */
 #define WS63_LOCK_MGR_TASK_POLL_MS 20U
 
-/* LD2402 雷达触发接近唤醒（ARMED）的距离阈值（毫米） */
+/* LD2402 雷达触发接近唤醒（ARMED）的距离阈值 */
 #define WS63_LOCK_LD2402_ARM_DISTANCE_MM_DEFAULT 80U
 
 /* 唤醒后的等待认证窗口持续时间（毫秒），窗口内有输入则刷新 */
-#define WS63_LOCK_AUTH_WINDOW_MS_DEFAULT 20000U
+#define WS63_LOCK_AUTH_WINDOW_MS_DEFAULT 15000U
 
 /* 开锁动作维持电机正转的时长（毫秒） */
 #define WS63_LOCK_UNLOCK_DURATION_MS_DEFAULT 1500U
 
 /* 开锁完成后保持开启状态（不自动回锁）的时长（毫秒） */
 #define WS63_LOCK_HOLD_OPEN_MS_DEFAULT 10000U
-
-/* 允许连续认证失败的阈值次数 */
-#define WS63_LOCK_FAIL_THRESHOLD_DEFAULT 3U
 
 /* 连续失败达标后的惩罚封印避让期时长（毫秒） */
 #define WS63_LOCK_FAIL_LOCKOUT_MS_DEFAULT 10000U

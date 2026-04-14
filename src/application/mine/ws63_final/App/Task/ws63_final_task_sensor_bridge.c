@@ -631,7 +631,7 @@ static uint8_t ws63_zw101_is_verify_fail_ack(uint8_t ack_code)
     * ACK_TIMEOUT 也会回落到这里参与普通失败统计，但前提是生命周期内的独立
     * 超时重试已经耗尽；否则会先走“立即重拉 VERIFY”的快捷分支。
      */
-    if ((ack_code == 0x08U) || (ack_code == 0x24U) || (ack_code == 0x26U)) {
+    if ((ack_code == 0x08U) || (ack_code == 0x24U) || (ack_code == 0x26U) || (ack_code == 0x09U)) {
         return 1U;
     }
 
