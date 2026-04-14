@@ -161,18 +161,10 @@ static errcode_t ws63_ttp229_format_pressed_text(uint16_t pressed_mask, char *te
 /**
  * @brief TTP229 状态锁。
  */
-static unsigned int ws63_ttp229_lock(void)
-{
-    return ws63_os_irq_lock();
-}
 
 /**
  * @brief TTP229 状态解锁。
  */
-static void ws63_ttp229_unlock(unsigned int irq_status)
-{
-    ws63_os_irq_unlock(irq_status);
-}
 
 /**
  * @brief 更新最新采样缓存。
@@ -185,9 +177,9 @@ static void ws63_ttp229_update_sample(const ws63_ttp229_sample_t *sample)
         return;
     }
 
-    irq_status = ws63_ttp229_lock();
+    irq_status = WS63_FINAL_IRQ_LOCK();
     g_ws63_ttp229_last_sample = *sample;
-    ws63_ttp229_unlock(irq_status);
+    WS63_FINAL_IRQ_UNLOCK(irq_status);
 }
 
 /**
@@ -197,13 +189,13 @@ static void ws63_ttp229_reset_sample_cache(void)
 {
     unsigned int irq_status;
 
-    irq_status = ws63_ttp229_lock();
+    irq_status = WS63_FINAL_IRQ_LOCK();
     g_ws63_ttp229_last_sample.raw_code = 0x0000U;
     g_ws63_ttp229_last_sample.pressed_mask = 0x0000U;
     g_ws63_ttp229_last_sample.pressed_count = 0U;
     g_ws63_ttp229_last_sample.multi_key = 0U;
     g_ws63_ttp229_multi_alarm_active = 0U;
-    ws63_ttp229_unlock(irq_status);
+    WS63_FINAL_IRQ_UNLOCK(irq_status);
 }
 
 /**
@@ -213,9 +205,9 @@ static void ws63_ttp229_set_ready(uint8_t ready)
 {
     unsigned int irq_status;
 
-    irq_status = ws63_ttp229_lock();
+    irq_status = WS63_FINAL_IRQ_LOCK();
     g_ws63_ttp229_ready = (ready != 0U) ? 1U : 0U;
-    ws63_ttp229_unlock(irq_status);
+    WS63_FINAL_IRQ_UNLOCK(irq_status);
 }
 
 /**
@@ -225,7 +217,7 @@ static void ws63_ttp229_password_reset(void)
 {
     unsigned int irq_status;
 
-    irq_status = ws63_ttp229_lock();
+    irq_status = WS63_FINAL_IRQ_LOCK();
     (void)memset_s(g_ws63_ttp229_password_buf,
         sizeof(g_ws63_ttp229_password_buf),
         0,
@@ -236,7 +228,7 @@ static void ws63_ttp229_password_reset(void)
     g_ws63_ttp229_password_pending_mask = 0U;
     g_ws63_ttp229_password_deadline_ms = 0U;
     g_ws63_ttp229_password_session_active = 0U;
-    ws63_ttp229_unlock(irq_status);
+    WS63_FINAL_IRQ_UNLOCK(irq_status);
 }
 
 /**
@@ -248,7 +240,7 @@ static void ws63_ttp229_password_start_session(void)
     uint32_t now_ms;
 
     now_ms = ws63_os_tick_ms();
-    irq_status = ws63_ttp229_lock();
+    irq_status = WS63_FINAL_IRQ_LOCK();
     (void)memset_s(g_ws63_ttp229_password_buf,
         sizeof(g_ws63_ttp229_password_buf),
         0,
@@ -259,7 +251,7 @@ static void ws63_ttp229_password_start_session(void)
     g_ws63_ttp229_password_pending_mask = 0U;
     g_ws63_ttp229_password_deadline_ms = now_ms + WS63_LOCK_AUTH_WINDOW_MS_DEFAULT;
     g_ws63_ttp229_password_session_active = 1U;
-    ws63_ttp229_unlock(irq_status);
+    WS63_FINAL_IRQ_UNLOCK(irq_status);
 }
 
 /**
@@ -280,10 +272,10 @@ static void ws63_ttp229_password_reset_cycle_guard(void)
 {
     unsigned int irq_status;
 
-    irq_status = ws63_ttp229_lock();
+    irq_status = WS63_FINAL_IRQ_LOCK();
     g_ws63_ttp229_password_fail_streak = 0U;
     g_ws63_ttp229_password_disabled = 0U;
-    ws63_ttp229_unlock(irq_status);
+    WS63_FINAL_IRQ_UNLOCK(irq_status);
     ws63_ttp229_password_stop_session();
 }
 
@@ -321,11 +313,11 @@ static void ws63_ttp229_log_auth_window_renewal(uint16_t pressed_mask, const cha
         return;
     }
 
-    irq_status = ws63_ttp229_lock();
+    irq_status = WS63_FINAL_IRQ_LOCK();
     if (g_ws63_ttp229_password_session_active != 0U) {
         g_ws63_ttp229_password_deadline_ms = now_ms + WS63_LOCK_AUTH_WINDOW_MS_DEFAULT;
     }
-    ws63_ttp229_unlock(irq_status);
+    WS63_FINAL_IRQ_UNLOCK(irq_status);
 
     deadline_after_ms = ws63_lock_mgr_get_auth_window_deadline_ms();
     osal_printk("[wk2114 final task] TTP229 armed renew key=%s mask=0x%04x deadline=%u->%u\r\n",
@@ -392,10 +384,10 @@ static void ws63_ttp229_password_commit_pending(uint16_t pending_mask, uint8_t a
     if (passed != 0U) {
         unsigned int irq_status;
 
-        irq_status = ws63_ttp229_lock();
+        irq_status = WS63_FINAL_IRQ_LOCK();
         g_ws63_ttp229_password_fail_streak = 0U;
         g_ws63_ttp229_password_disabled = 0U;
-        ws63_ttp229_unlock(irq_status);
+        WS63_FINAL_IRQ_UNLOCK(irq_status);
         ws63_ttp229_log_auth_window_renewal(pending_mask, key_text, now_ms);
     } else {
         unsigned int irq_status;
@@ -405,7 +397,7 @@ static void ws63_ttp229_password_commit_pending(uint16_t pending_mask, uint8_t a
          * 1) 按键与指纹失败行为保持一致；
          * 2) 避免来源层和编排层双重蜂鸣。
          */
-        irq_status = ws63_ttp229_lock();
+        irq_status = WS63_FINAL_IRQ_LOCK();
         if (g_ws63_ttp229_password_fail_streak < 0xFFU) {
             g_ws63_ttp229_password_fail_streak++;
         }
@@ -416,7 +408,7 @@ static void ws63_ttp229_password_commit_pending(uint16_t pending_mask, uint8_t a
                 (unsigned int)WS63_TTP229_PASSWORD_FAIL_DISABLE_THRESHOLD);
             (void)ws63_task_post_lock_event_text("result=locked;source=key;reason=ttp229_fail_5");
         }
-        ws63_ttp229_unlock(irq_status);
+        WS63_FINAL_IRQ_UNLOCK(irq_status);
     }
     (void)ws63_lock_mgr_report_auth_result(WS63_LOCK_AUTH_SOURCE_TTP229, passed);
     ws63_ttp229_password_stop_session();
@@ -502,9 +494,9 @@ uint8_t ws63_task_ttp229_is_password_disabled(void)
     unsigned int irq_status;
     uint8_t disabled;
 
-    irq_status = ws63_ttp229_lock();
+    irq_status = WS63_FINAL_IRQ_LOCK();
     disabled = g_ws63_ttp229_password_disabled;
-    ws63_ttp229_unlock(irq_status);
+    WS63_FINAL_IRQ_UNLOCK(irq_status);
     return disabled;
 }
 
@@ -526,16 +518,16 @@ static void ws63_ttp229_handle_alarm_transition(const ws63_ttp229_sample_t *samp
         (void)strncpy_s(key_text, sizeof(key_text), "ERR", 3U);
     }
 
-    irq_status = ws63_ttp229_lock();
+    irq_status = WS63_FINAL_IRQ_LOCK();
     alarm_enable = g_ws63_ttp229_multi_alarm_enable;
     alarm_active = g_ws63_ttp229_multi_alarm_active;
-    ws63_ttp229_unlock(irq_status);
+    WS63_FINAL_IRQ_UNLOCK(irq_status);
 
     if (alarm_enable == 0U) {
         if (alarm_active != 0U) {
-            irq_status = ws63_ttp229_lock();
+            irq_status = WS63_FINAL_IRQ_LOCK();
             g_ws63_ttp229_multi_alarm_active = 0U;
-            ws63_ttp229_unlock(irq_status);
+            WS63_FINAL_IRQ_UNLOCK(irq_status);
         }
         return;
     }
@@ -545,17 +537,17 @@ static void ws63_ttp229_handle_alarm_transition(const ws63_ttp229_sample_t *samp
             (unsigned int)sample->pressed_mask,
             (unsigned int)sample->pressed_count,
             key_text);
-        irq_status = ws63_ttp229_lock();
+        irq_status = WS63_FINAL_IRQ_LOCK();
         g_ws63_ttp229_multi_alarm_active = 1U;
-        ws63_ttp229_unlock(irq_status);
+        WS63_FINAL_IRQ_UNLOCK(irq_status);
         return;
     }
 
     if ((sample->multi_key == 0U) && (alarm_active != 0U)) {
         osal_printk("[wk2114 final task] TTP229 multi-key alarm clear\r\n");
-        irq_status = ws63_ttp229_lock();
+        irq_status = WS63_FINAL_IRQ_LOCK();
         g_ws63_ttp229_multi_alarm_active = 0U;
-        ws63_ttp229_unlock(irq_status);
+        WS63_FINAL_IRQ_UNLOCK(irq_status);
     }
 }
 
@@ -581,13 +573,13 @@ static void *ws63_ttp229_task_entry(const char *arg)
         uint8_t force_reinit;
 
         {
-            unsigned int irq_status = ws63_ttp229_lock();
+            unsigned int irq_status = WS63_FINAL_IRQ_LOCK();
             enabled = g_ws63_ttp229_enable;
             force_reinit = g_ws63_ttp229_force_reinit;
             if (force_reinit != 0U) {
                 g_ws63_ttp229_force_reinit = 0U;
             }
-            ws63_ttp229_unlock(irq_status);
+            WS63_FINAL_IRQ_UNLOCK(irq_status);
         }
 
         if (force_reinit != 0U) {
@@ -709,9 +701,9 @@ errcode_t ws63_task_ttp229_reinit(void)
         return ERRCODE_FAIL;
     }
 
-    irq_status = ws63_ttp229_lock();
+    irq_status = WS63_FINAL_IRQ_LOCK();
     g_ws63_ttp229_force_reinit = 1U;
-    ws63_ttp229_unlock(irq_status);
+    WS63_FINAL_IRQ_UNLOCK(irq_status);
     return ERRCODE_SUCC;
 #endif
 }
@@ -731,9 +723,9 @@ errcode_t ws63_task_ttp229_set_enable(uint8_t enable)
         return ERRCODE_FAIL;
     }
 
-    irq_status = ws63_ttp229_lock();
+    irq_status = WS63_FINAL_IRQ_LOCK();
     g_ws63_ttp229_enable = (enable != 0U) ? 1U : 0U;
-    ws63_ttp229_unlock(irq_status);
+    WS63_FINAL_IRQ_UNLOCK(irq_status);
     return ERRCODE_SUCC;
 #endif
 }
@@ -749,9 +741,9 @@ uint8_t ws63_task_ttp229_is_ready(void)
     unsigned int irq_status;
     uint8_t ready;
 
-    irq_status = ws63_ttp229_lock();
+    irq_status = WS63_FINAL_IRQ_LOCK();
     ready = g_ws63_ttp229_ready;
-    ws63_ttp229_unlock(irq_status);
+    WS63_FINAL_IRQ_UNLOCK(irq_status);
     return ready;
 #endif
 }
@@ -767,9 +759,9 @@ uint8_t ws63_task_ttp229_is_enabled(void)
     unsigned int irq_status;
     uint8_t enabled;
 
-    irq_status = ws63_ttp229_lock();
+    irq_status = WS63_FINAL_IRQ_LOCK();
     enabled = g_ws63_ttp229_enable;
-    ws63_ttp229_unlock(irq_status);
+    WS63_FINAL_IRQ_UNLOCK(irq_status);
     return enabled;
 #endif
 }
@@ -789,12 +781,12 @@ errcode_t ws63_task_ttp229_set_multi_key_alarm(uint8_t enable)
         return ERRCODE_FAIL;
     }
 
-    irq_status = ws63_ttp229_lock();
+    irq_status = WS63_FINAL_IRQ_LOCK();
     g_ws63_ttp229_multi_alarm_enable = (enable != 0U) ? 1U : 0U;
     if (g_ws63_ttp229_multi_alarm_enable == 0U) {
         g_ws63_ttp229_multi_alarm_active = 0U;
     }
-    ws63_ttp229_unlock(irq_status);
+    WS63_FINAL_IRQ_UNLOCK(irq_status);
     return ERRCODE_SUCC;
 #endif
 }
@@ -810,9 +802,9 @@ uint8_t ws63_task_ttp229_is_multi_key_alarm_enable(void)
     unsigned int irq_status;
     uint8_t enabled;
 
-    irq_status = ws63_ttp229_lock();
+    irq_status = WS63_FINAL_IRQ_LOCK();
     enabled = g_ws63_ttp229_multi_alarm_enable;
-    ws63_ttp229_unlock(irq_status);
+    WS63_FINAL_IRQ_UNLOCK(irq_status);
     return enabled;
 #endif
 }
@@ -828,9 +820,9 @@ uint8_t ws63_task_ttp229_is_multi_key_active(void)
     unsigned int irq_status;
     uint8_t active;
 
-    irq_status = ws63_ttp229_lock();
+    irq_status = WS63_FINAL_IRQ_LOCK();
     active = g_ws63_ttp229_multi_alarm_active;
-    ws63_ttp229_unlock(irq_status);
+    WS63_FINAL_IRQ_UNLOCK(irq_status);
     return active;
 #endif
 }
@@ -846,9 +838,9 @@ uint16_t ws63_task_ttp229_get_raw_code(void)
     unsigned int irq_status;
     uint16_t raw_code;
 
-    irq_status = ws63_ttp229_lock();
+    irq_status = WS63_FINAL_IRQ_LOCK();
     raw_code = g_ws63_ttp229_last_sample.raw_code;
-    ws63_ttp229_unlock(irq_status);
+    WS63_FINAL_IRQ_UNLOCK(irq_status);
     return raw_code;
 #endif
 }
@@ -864,9 +856,9 @@ uint16_t ws63_task_ttp229_get_pressed_mask(void)
     unsigned int irq_status;
     uint16_t pressed_mask;
 
-    irq_status = ws63_ttp229_lock();
+    irq_status = WS63_FINAL_IRQ_LOCK();
     pressed_mask = g_ws63_ttp229_last_sample.pressed_mask;
-    ws63_ttp229_unlock(irq_status);
+    WS63_FINAL_IRQ_UNLOCK(irq_status);
     return pressed_mask;
 #endif
 }
@@ -882,9 +874,9 @@ uint8_t ws63_task_ttp229_get_pressed_count(void)
     unsigned int irq_status;
     uint8_t pressed_count;
 
-    irq_status = ws63_ttp229_lock();
+    irq_status = WS63_FINAL_IRQ_LOCK();
     pressed_count = g_ws63_ttp229_last_sample.pressed_count;
-    ws63_ttp229_unlock(irq_status);
+    WS63_FINAL_IRQ_UNLOCK(irq_status);
     return pressed_count;
 #endif
 }
@@ -908,9 +900,9 @@ errcode_t ws63_task_ttp229_get_pressed_text(char *text, uint16_t text_len)
 
     text[0] = '\0';
 
-    irq_status = ws63_ttp229_lock();
+    irq_status = WS63_FINAL_IRQ_LOCK();
     sample = g_ws63_ttp229_last_sample;
-    ws63_ttp229_unlock(irq_status);
+    WS63_FINAL_IRQ_UNLOCK(irq_status);
 
     return ws63_ttp229_format_pressed_text(sample.pressed_mask, text, text_len);
 #endif

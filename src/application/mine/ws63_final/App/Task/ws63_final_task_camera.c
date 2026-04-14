@@ -46,10 +46,6 @@ static uint16_t g_ws63_camera_rx_assembled_len = 0U;
 /**
  * @brief camera 状态锁。
  */
-static unsigned int ws63_camera_lock(void)
-{
-    return ws63_os_irq_lock();
-}
 
 /**
  * @brief 将一条完整 camera 文本回包投递到 SLE 上行队列。
@@ -90,10 +86,6 @@ static void ws63_camera_post_uplink_reply(const char *reply_text)
 /**
  * @brief camera 状态解锁。
  */
-static void ws63_camera_unlock(unsigned int irq_status)
-{
-    ws63_os_irq_unlock(irq_status);
-}
 
 /**
  * @brief 判断文本是否包含指定关键字（忽略大小写）。
@@ -306,7 +298,7 @@ static void ws63_camera_store_reply_text(const char *text)
     }
     reply_buf[copy_len] = '\0';
 
-    irq_status = ws63_camera_lock();
+    irq_status = WS63_FINAL_IRQ_LOCK();
     (void)memset_s(g_ws63_camera_last_reply,
         sizeof(g_ws63_camera_last_reply),
         0,
@@ -316,7 +308,7 @@ static void ws63_camera_store_reply_text(const char *text)
         reply_buf,
         copy_len + 1U);
     g_ws63_camera_last_reply_ms = ws63_os_tick_ms();
-    ws63_camera_unlock(irq_status);
+    WS63_FINAL_IRQ_UNLOCK(irq_status);
 }
 
 /**

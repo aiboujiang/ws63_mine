@@ -27,18 +27,10 @@ static uint8_t g_ws63_buzzer_on_cache = 0U;
 /**
  * @brief ·äÃùÆ÷×´Ì¬¸üÐÂ¼ÓËø¡£
  */
-static unsigned int ws63_beep_state_lock(void)
-{
-    return ws63_os_irq_lock();
-}
 
 /**
  * @brief ·äÃùÆ÷×´Ì¬¸üÐÂ½âËø¡£
  */
-static void ws63_beep_state_unlock(unsigned int irq_status)
-{
-    ws63_os_irq_unlock(irq_status);
-}
 
 /**
  * @brief ³¢ÊÔ³õÊ¼»¯·äÃùÆ÷Çý¶¯¡£
@@ -58,12 +50,12 @@ static errcode_t ws63_beep_try_init(void)
         return ret;
     }
 
-    irq_status = ws63_beep_state_lock();
+    irq_status = WS63_FINAL_IRQ_LOCK();
     g_ws63_buzzer_ready = 1U;
     g_ws63_buzzer_on_cache = 0U;
     g_ws63_buzzer_freq_hz_cache = WS63_BEEP_DEFAULT_FREQ_HZ;
     g_ws63_buzzer_volume_cache = WS63_BEEP_DEFAULT_VOLUME_PERCENT;
-    ws63_beep_state_unlock(irq_status);
+    WS63_FINAL_IRQ_UNLOCK(irq_status);
 
     osal_printk("[wk2114 final task] buzzer init ok (GPIO9/PWM1)\r\n");
     return ERRCODE_SUCC;
@@ -89,26 +81,26 @@ static void ws63_beep_process_ctrl_msg(const ws63_beep_ctrl_msg_t *msg)
         case WS63_BEEP_CMD_ON:
             ret = ws63_buzzer_start(msg->freq_hz);
             if (ret == ERRCODE_SUCC) {
-                irq_status = ws63_beep_state_lock();
+                irq_status = WS63_FINAL_IRQ_LOCK();
                 g_ws63_buzzer_freq_hz_cache = msg->freq_hz;
                 g_ws63_buzzer_on_cache = 1U;
-                ws63_beep_state_unlock(irq_status);
+                WS63_FINAL_IRQ_UNLOCK(irq_status);
             }
             break;
         case WS63_BEEP_CMD_OFF:
             ret = ws63_buzzer_stop();
             if (ret == ERRCODE_SUCC) {
-                irq_status = ws63_beep_state_lock();
+                irq_status = WS63_FINAL_IRQ_LOCK();
                 g_ws63_buzzer_on_cache = 0U;
-                ws63_beep_state_unlock(irq_status);
+                WS63_FINAL_IRQ_UNLOCK(irq_status);
             }
             break;
         case WS63_BEEP_CMD_SET_VOLUME:
             ret = ws63_buzzer_set_volume(msg->volume_percent);
             if (ret == ERRCODE_SUCC) {
-                irq_status = ws63_beep_state_lock();
+                irq_status = WS63_FINAL_IRQ_LOCK();
                 g_ws63_buzzer_volume_cache = msg->volume_percent;
-                ws63_beep_state_unlock(irq_status);
+                WS63_FINAL_IRQ_UNLOCK(irq_status);
             }
             break;
         default:
@@ -438,9 +430,9 @@ uint8_t ws63_task_buzzer_is_on(void)
     unsigned int irq_status;
     uint8_t on;
 
-    irq_status = ws63_beep_state_lock();
+    irq_status = WS63_FINAL_IRQ_LOCK();
     on = g_ws63_buzzer_on_cache;
-    ws63_beep_state_unlock(irq_status);
+    WS63_FINAL_IRQ_UNLOCK(irq_status);
     return on;
 #endif
 }
@@ -456,9 +448,9 @@ uint16_t ws63_task_buzzer_get_freq_hz(void)
     unsigned int irq_status;
     uint16_t freq;
 
-    irq_status = ws63_beep_state_lock();
+    irq_status = WS63_FINAL_IRQ_LOCK();
     freq = g_ws63_buzzer_freq_hz_cache;
-    ws63_beep_state_unlock(irq_status);
+    WS63_FINAL_IRQ_UNLOCK(irq_status);
     return freq;
 #endif
 }
@@ -474,9 +466,9 @@ uint8_t ws63_task_buzzer_get_volume(void)
     unsigned int irq_status;
     uint8_t volume;
 
-    irq_status = ws63_beep_state_lock();
+    irq_status = WS63_FINAL_IRQ_LOCK();
     volume = g_ws63_buzzer_volume_cache;
-    ws63_beep_state_unlock(irq_status);
+    WS63_FINAL_IRQ_UNLOCK(irq_status);
     return volume;
 #endif
 }

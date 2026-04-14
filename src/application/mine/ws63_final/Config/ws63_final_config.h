@@ -85,7 +85,7 @@ extern "C" {
 /* 认证窗口默认 20s，窗口内任何输入都会续命一次。 */
 #define WS63_LOCK_AUTH_WINDOW_MS_DEFAULT            20000U
 #define WS63_LOCK_UNLOCK_DURATION_MS_DEFAULT        1500U
-#define WS63_LOCK_HOLD_OPEN_MS_DEFAULT              5000U
+#define WS63_LOCK_HOLD_OPEN_MS_DEFAULT              10000U
 #define WS63_LOCK_FAIL_THRESHOLD_DEFAULT            3U
 #define WS63_LOCK_FAIL_LOCKOUT_MS_DEFAULT          10000U
 #define WS63_LOCK_MOTOR_OPEN_DUTY_DEFAULT           40U

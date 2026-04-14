@@ -53,8 +53,8 @@ static uint8_t g_ws63_zw101_last_verify_ack = 0xFFU;
 
 /* 仅供本文件内部使用，避免把 ZW101 任务就绪查询扩散到上层接口。 */
 static uint8_t ws63_task_zw101_is_ready(void);
-static unsigned int ws63_zw101_lock(void);
-static void ws63_zw101_unlock(unsigned int irq_status);
+
+
 static void ws63_zw101_reset_timeout_retry_state(void);
 static uint8_t ws63_zw101_try_retry_verify_after_timeout(void);
 
@@ -108,14 +108,14 @@ static void ws63_zw101_trace_verify_state(const char *tag)
         return;
     }
 
-    irq_status = ws63_zw101_lock();
+    irq_status = WS63_FINAL_IRQ_LOCK();
     request = g_ws63_zw101_verify_requested;
     cancelled = g_ws63_zw101_verify_cancelled;
     disabled = g_ws63_zw101_verify_disabled;
     wait_release = g_ws63_zw101_verify_wait_release;
     fail_streak = g_ws63_zw101_verify_fail_streak;
     timeout_streak = g_ws63_zw101_verify_timeout_streak;
-    ws63_zw101_unlock(irq_status);
+    WS63_FINAL_IRQ_UNLOCK(irq_status);
 
     armed = ws63_lock_mgr_is_armed();
     ready = ws63_task_zw101_is_ready();
@@ -135,18 +135,12 @@ static void ws63_zw101_trace_verify_state(const char *tag)
 /**
  * @brief ZW101 VERIFY 任务状态锁。
  */
-static unsigned int ws63_zw101_lock(void)
-{
-    return ws63_os_irq_lock();
-}
+
 
 /**
  * @brief ZW101 VERIFY 任务状态解锁。
  */
-static void ws63_zw101_unlock(unsigned int irq_status)
-{
-    ws63_os_irq_unlock(irq_status);
-}
+
 
 /**
  * @brief 清空 ACK_TIMEOUT 的独立重试计数。
@@ -158,9 +152,9 @@ static void ws63_zw101_reset_timeout_retry_state(void)
 {
     unsigned int irq_status;
 
-    irq_status = ws63_zw101_lock();
+    irq_status = WS63_FINAL_IRQ_LOCK();
     g_ws63_zw101_verify_timeout_streak = 0U;
-    ws63_zw101_unlock(irq_status);
+    WS63_FINAL_IRQ_UNLOCK(irq_status);
 }
 
 /**
@@ -177,7 +171,7 @@ static uint8_t ws63_zw101_try_retry_verify_after_timeout(void)
         return 0U;
     }
 
-    irq_status = ws63_zw101_lock();
+    irq_status = WS63_FINAL_IRQ_LOCK();
     if (g_ws63_zw101_verify_timeout_streak < 0xFFU) {
         g_ws63_zw101_verify_timeout_streak++;
     }
@@ -192,7 +186,7 @@ static uint8_t ws63_zw101_try_retry_verify_after_timeout(void)
         g_ws63_zw101_verify_cancelled = 0U;
         g_ws63_zw101_verify_wait_release = 0U;
         g_ws63_zw101_last_verify_ack = WS63_ZW101_ACK_TIMEOUT;
-        ws63_zw101_unlock(irq_status);
+        WS63_FINAL_IRQ_UNLOCK(irq_status);
 
         (void)ws63_lock_mgr_refresh_auth_window();
         osal_printk("[zw101] VERIFY timeout, retry queued timeout_retry=%u/%u\r\n",
@@ -204,7 +198,7 @@ static uint8_t ws63_zw101_try_retry_verify_after_timeout(void)
 
     /* 超时重试耗尽后回落到普通失败上报，保留现有 lockout / 告警语义。 */
     g_ws63_zw101_verify_timeout_streak = 0U;
-    ws63_zw101_unlock(irq_status);
+    WS63_FINAL_IRQ_UNLOCK(irq_status);
     osal_printk("[zw101] VERIFY timeout retry exhausted, fall back to fail\r\n");
     return 0U;
 }
@@ -502,16 +496,16 @@ errcode_t ws63_task_zw101_request_verify(void)
         return ERRCODE_FAIL;
     }
 
-    irq_status = ws63_zw101_lock();
+    irq_status = WS63_FINAL_IRQ_LOCK();
     if (g_ws63_zw101_verify_disabled != 0U) {
-        ws63_zw101_unlock(irq_status);
+        WS63_FINAL_IRQ_UNLOCK(irq_status);
         return ERRCODE_FAIL;
     }
 
     g_ws63_zw101_verify_requested = 1U;
     g_ws63_zw101_verify_cancelled = 0U;
     g_ws63_zw101_verify_wait_release = 0U;
-    ws63_zw101_unlock(irq_status);
+    WS63_FINAL_IRQ_UNLOCK(irq_status);
 
     ws63_zw101_trace_verify_state("request_verify");
 
@@ -528,9 +522,9 @@ errcode_t ws63_task_zw101_request_verify_after_release(void)
         return ERRCODE_FAIL;
     }
 
-    irq_status = ws63_zw101_lock();
+    irq_status = WS63_FINAL_IRQ_LOCK();
     if (g_ws63_zw101_verify_disabled != 0U) {
-        ws63_zw101_unlock(irq_status);
+        WS63_FINAL_IRQ_UNLOCK(irq_status);
         return ERRCODE_FAIL;
     }
 
@@ -543,7 +537,7 @@ errcode_t ws63_task_zw101_request_verify_after_release(void)
     g_ws63_zw101_verify_requested = 0U;
     g_ws63_zw101_verify_cancelled = 0U;
     g_ws63_zw101_verify_wait_release = 1U;
-    ws63_zw101_unlock(irq_status);
+    WS63_FINAL_IRQ_UNLOCK(irq_status);
 
     ws63_zw101_trace_verify_state("request_verify_after_release");
     (void)ws63_lock_mgr_refresh_auth_window();
@@ -557,13 +551,13 @@ void ws63_task_zw101_reset_armed_window_guard(void)
 {
     unsigned int irq_status;
 
-    irq_status = ws63_zw101_lock();
+    irq_status = WS63_FINAL_IRQ_LOCK();
     g_ws63_zw101_verify_disabled = 0U;
     g_ws63_zw101_verify_fail_streak = 0U;
     g_ws63_zw101_verify_timeout_streak = 0U;
     g_ws63_zw101_verify_wait_release = 0U;
     g_ws63_zw101_last_verify_ack = 0xFFU;
-    ws63_zw101_unlock(irq_status);
+    WS63_FINAL_IRQ_UNLOCK(irq_status);
 
     ws63_zw101_trace_verify_state("reset_armed_window_guard");
 }
@@ -575,11 +569,11 @@ void ws63_task_zw101_cancel_verify_request(void)
 {
     unsigned int irq_status;
 
-    irq_status = ws63_zw101_lock();
+    irq_status = WS63_FINAL_IRQ_LOCK();
     g_ws63_zw101_verify_requested = 0U;
     g_ws63_zw101_verify_cancelled = 1U;
     g_ws63_zw101_verify_wait_release = 0U;
-    ws63_zw101_unlock(irq_status);
+    WS63_FINAL_IRQ_UNLOCK(irq_status);
 
     ws63_zw101_trace_verify_state("cancel_verify");
 }
@@ -618,9 +612,9 @@ uint8_t ws63_task_zw101_get_last_verify_ack(void)
     unsigned int irq_status;
     uint8_t ack_code;
 
-    irq_status = ws63_zw101_lock();
+    irq_status = WS63_FINAL_IRQ_LOCK();
     ack_code = g_ws63_zw101_last_verify_ack;
-    ws63_zw101_unlock(irq_status);
+    WS63_FINAL_IRQ_UNLOCK(irq_status);
     return ack_code;
 }
 
@@ -673,7 +667,7 @@ static void ws63_zw101_report_verify_result(errcode_t ret, uint8_t ack_code, uin
         (void)ws63_lock_mgr_refresh_auth_window();
     }
 
-    irq_status = ws63_zw101_lock();
+    irq_status = WS63_FINAL_IRQ_LOCK();
     g_ws63_zw101_last_verify_ack = ack_code;
     if (passed != 0U) {
         g_ws63_zw101_verify_fail_streak = 0U;
@@ -698,7 +692,7 @@ static void ws63_zw101_report_verify_result(errcode_t ret, uint8_t ack_code, uin
     fail_streak_after = g_ws63_zw101_verify_fail_streak;
     disabled_after = g_ws63_zw101_verify_disabled;
     timeout_retry_streak_after = g_ws63_zw101_verify_timeout_streak;
-    ws63_zw101_unlock(irq_status);
+    WS63_FINAL_IRQ_UNLOCK(irq_status);
 
     if (passed != 0U) {
         /* 指纹通过时更新 lock_mgr 附加字段，供开锁成功事件拼接 finger_id/score。 */
@@ -756,12 +750,12 @@ static void *ws63_zw101_task_entry(const char *arg)
         uint8_t wait_reason = 0U;
 
         {
-            unsigned int irq_status = ws63_zw101_lock();
+            unsigned int irq_status = WS63_FINAL_IRQ_LOCK();
             request = g_ws63_zw101_verify_requested;
             cancelled = g_ws63_zw101_verify_cancelled;
             wait_release = g_ws63_zw101_verify_wait_release;
             disabled = g_ws63_zw101_verify_disabled;
-            ws63_zw101_unlock(irq_status);
+            WS63_FINAL_IRQ_UNLOCK(irq_status);
         }
 
         if (wait_release != 0U) {
@@ -796,11 +790,11 @@ static void *ws63_zw101_task_entry(const char *arg)
                     }
 
                     if ((check_ret == ERRCODE_SUCC) && (finger_present == 0U)) {
-                        unsigned int irq_status = ws63_zw101_lock();
+                        unsigned int irq_status = WS63_FINAL_IRQ_LOCK();
                         g_ws63_zw101_verify_wait_release = 0U;
                         g_ws63_zw101_verify_requested = 1U;
                         g_ws63_zw101_verify_cancelled = 0U;
-                        ws63_zw101_unlock(irq_status);
+                        WS63_FINAL_IRQ_UNLOCK(irq_status);
 
                         osal_printk("[zw101] finger released, retry verify queued\r\n");
                         ws63_zw101_trace_verify_state("retry_verify_after_release");
@@ -966,14 +960,14 @@ errcode_t ws63_task_zw101_reinit(void)
 
     ret = zw101_init(ZW101_SUBPORT);
     if (ret == ERRCODE_SUCC) {
-        unsigned int irq_status = ws63_zw101_lock();
+        unsigned int irq_status = WS63_FINAL_IRQ_LOCK();
         g_ws63_zw101_verify_disabled = 0U;
         g_ws63_zw101_verify_fail_streak = 0U;
         g_ws63_zw101_verify_requested = 0U;
         g_ws63_zw101_verify_cancelled = 0U;
         g_ws63_zw101_verify_wait_release = 0U;
         g_ws63_zw101_last_verify_ack = 0xFFU;
-        ws63_zw101_unlock(irq_status);
+        WS63_FINAL_IRQ_UNLOCK(irq_status);
     }
 
     return ret;

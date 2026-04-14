@@ -1,0 +1,20 @@
+--- /home/xixi/code/fbb_ws63_20260114/src/application/mine/ws63_final/Middleware/ws63_final_osal.h  
++++ /home/xixi/code/fbb_ws63_20260114/src/application/mine/ws63_final/Middleware/ws63_final_osal.h
+@@ -107,6 +107,17 @@
+  */
+ errcode_t ws63_os_feed_watchdog(void);
+ 
++/* Task Wrapper Helper */
++errcode_t ws63_task_create_with_queue(const char *name,
++    ws63_task_entry_t entry, uintptr_t arg,
++    uint16_t stack_size, uint8_t priority,
++    uint16_t queue_len, uint16_t msg_size, unsigned long *queue_id);
++
++/* Global Logging & Lock Macros */
++#define WS63_LOG(TAG, fmt, ...) osal_printk("[%s] " fmt "\r\n", TAG, ##__VA_ARGS__)
++#define WS63_FINAL_IRQ_LOCK() ws63_os_irq_lock()
++#define WS63_FINAL_IRQ_UNLOCK(irq) ws63_os_irq_unlock(irq)
++
+ #ifdef __cplusplus
+ #if __cplusplus
+ }

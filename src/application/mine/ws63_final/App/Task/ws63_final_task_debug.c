@@ -56,8 +56,8 @@ static uint8_t g_ws63_debug_only_mode = 0U;
 static uint32_t g_ws63_camera_debug_seq = 0U;
 
 /* 下面两个函数在状态控制接口中复用，提前声明避免静态函数先用后定义。 */
-static unsigned int ws63_debug_irq_lock(void);
-static void ws63_debug_irq_unlock(unsigned int irq_status);
+
+
 static uint32_t ws63_debug_camera_next_seq(void);
 
 /**
@@ -68,9 +68,9 @@ uint8_t ws63_task_debug_is_debug_only_mode(void)
     unsigned int irq_status;
     uint8_t enable;
 
-    irq_status = ws63_debug_irq_lock();
+    irq_status = WS63_FINAL_IRQ_LOCK();
     enable = g_ws63_debug_only_mode;
-    ws63_debug_irq_unlock(irq_status);
+    WS63_FINAL_IRQ_UNLOCK(irq_status);
     return enable;
 }
 
@@ -84,10 +84,10 @@ errcode_t ws63_task_debug_set_debug_only_mode(uint8_t enable)
     unsigned int irq_status;
     uint8_t prev_enable;
 
-    irq_status = ws63_debug_irq_lock();
+    irq_status = WS63_FINAL_IRQ_LOCK();
     prev_enable = g_ws63_debug_only_mode;
     g_ws63_debug_only_mode = (enable != 0U) ? 1U : 0U;
-    ws63_debug_irq_unlock(irq_status);
+    WS63_FINAL_IRQ_UNLOCK(irq_status);
 
     if ((enable != 0U) && (prev_enable == 0U)) {
         /*
@@ -109,9 +109,9 @@ static uint32_t ws63_debug_camera_next_seq(void)
     unsigned int irq_status;
     uint32_t seq;
 
-    irq_status = ws63_debug_irq_lock();
+    irq_status = WS63_FINAL_IRQ_LOCK();
     seq = ++g_ws63_camera_debug_seq;
-    ws63_debug_irq_unlock(irq_status);
+    WS63_FINAL_IRQ_UNLOCK(irq_status);
     return seq;
 }
 
@@ -170,18 +170,12 @@ static const char *ws63_motor_state_to_text(ws63_motor_state_t state)
 /**
  * @brief 调试命令队列临界区加锁。
  */
-static unsigned int ws63_debug_irq_lock(void)
-{
-    return ws63_os_irq_lock();
-}
+
 
 /**
  * @brief 调试命令队列临界区解锁。
  */
-static void ws63_debug_irq_unlock(unsigned int irq_status)
-{
-    ws63_os_irq_unlock(irq_status);
-}
+
 
 /**
  * @brief 将完整命令行压入队列。
@@ -196,10 +190,10 @@ static void ws63_debug_queue_push_line(const char *line)
         return;
     }
 
-    irq_status = ws63_debug_irq_lock();
+    irq_status = WS63_FINAL_IRQ_LOCK();
     if (g_ws63_debug_cmd_q_count >= WS63_DEBUG_CMD_QUEUE_DEPTH) {
         g_ws63_debug_cmd_overflow = 1U;
-        ws63_debug_irq_unlock(irq_status);
+        WS63_FINAL_IRQ_UNLOCK(irq_status);
         return;
     }
 
@@ -211,7 +205,7 @@ static void ws63_debug_queue_push_line(const char *line)
 
     g_ws63_debug_cmd_q_tail = (uint8_t)((tail + 1U) % WS63_DEBUG_CMD_QUEUE_DEPTH);
     g_ws63_debug_cmd_q_count++;
-    ws63_debug_irq_unlock(irq_status);
+    WS63_FINAL_IRQ_UNLOCK(irq_status);
 }
 
 /**
@@ -227,9 +221,9 @@ static uint8_t ws63_debug_queue_pop_line(char *out, uint16_t out_size)
         return 0U;
     }
 
-    irq_status = ws63_debug_irq_lock();
+    irq_status = WS63_FINAL_IRQ_LOCK();
     if (g_ws63_debug_cmd_q_count == 0U) {
-        ws63_debug_irq_unlock(irq_status);
+        WS63_FINAL_IRQ_UNLOCK(irq_status);
         return 0U;
     }
 
@@ -241,7 +235,7 @@ static uint8_t ws63_debug_queue_pop_line(char *out, uint16_t out_size)
 
     g_ws63_debug_cmd_q_head = (uint8_t)((head + 1U) % WS63_DEBUG_CMD_QUEUE_DEPTH);
     g_ws63_debug_cmd_q_count--;
-    ws63_debug_irq_unlock(irq_status);
+    WS63_FINAL_IRQ_UNLOCK(irq_status);
     return 1U;
 }
 
@@ -256,14 +250,14 @@ static void ws63_debug_take_async_flags(uint8_t *rx_error, uint8_t *too_long, ui
         return;
     }
 
-    irq_status = ws63_debug_irq_lock();
+    irq_status = WS63_FINAL_IRQ_LOCK();
     *rx_error = g_ws63_debug_uart_rx_error;
     *too_long = g_ws63_debug_cmd_too_long;
     *overflow = g_ws63_debug_cmd_overflow;
     g_ws63_debug_uart_rx_error = 0U;
     g_ws63_debug_cmd_too_long = 0U;
     g_ws63_debug_cmd_overflow = 0U;
-    ws63_debug_irq_unlock(irq_status);
+    WS63_FINAL_IRQ_UNLOCK(irq_status);
 }
 
 /**

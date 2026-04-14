@@ -1,0 +1,26 @@
+--- /home/xixi/code/fbb_ws63_20260114/src/application/mine/ws63_final/Middleware/ws63_final_osal.c
++++ /home/xixi/code/fbb_ws63_20260114/src/application/mine/ws63_final/Middleware/ws63_final_osal.c
+@@ -201,3 +201,23 @@
+ {
+     return uapi_watchdog_kick();
+ }
++
++errcode_t ws63_task_create_with_queue(const char *name,
++    ws63_task_entry_t entry, uintptr_t arg,
++    uint16_t stack_size, uint8_t priority,
++    uint16_t queue_len, uint16_t msg_size, unsigned long *queue_id)
++{
++    errcode_t ret;
++    if ((name == NULL) || (entry == NULL) || (queue_id == NULL)) {
++        return ERRCODE_INVALID_PARAM;
++    }
++    ret = ws63_os_msg_queue_create(name, queue_len, msg_size, queue_id);
++    if (ret != ERRCODE_SUCC) {
++        return ret;
++    }
++    ret = ws63_os_start_task(name, entry, arg, stack_size, priority);
++    if (ret != ERRCODE_SUCC) {
++        ws63_os_msg_queue_delete(*queue_id);
++    }
++    return ret;
++}
