@@ -823,6 +823,41 @@ static void ws63_debug_dump_ld2402_runtime_status(const char *tag)
         (unsigned int)ws63_task_ld2402_get_log_gap_ms());
 }
 
+    /**
+     * @brief 向 camera 子口发送一条人脸管理调试命令。
+     */
+    static errcode_t ws63_debug_send_camera_command(const char *camera_payload);
+
+/**
+ * @brief 执行 camera ADD 调试命令（先唤醒，再发 add）。
+ *
+ * 说明：部分 camera 固件在休眠态下不会立即响应首条 add 指令，
+ * 需要先收到 action 进入采集态后再执行 add，才能稳定触发拍照采集。
+ */
+static errcode_t ws63_debug_send_camera_add_command(uint32_t camera_id)
+{
+    char payload[WS63_DEBUG_CMD_MAX_LEN] = {0};
+    int32_t ret;
+    errcode_t send_ret;
+
+    send_ret = ws63_debug_send_camera_command("action");
+    if (send_ret != ERRCODE_SUCC) {
+        ws63_debug_log("[ws63 dbg] CAMERA add pre-action fail ret=0x%x\r\n", (unsigned int)send_ret);
+        return send_ret;
+    }
+
+    /* 复用门锁侧已验证的唤醒间隔，给 camera 留出切到采集态的时间窗口。 */
+    ws63_os_sleep_ms(WS63_LOCK_CAMERA_WAKE_GAP_MS_DEFAULT);
+
+    ret = snprintf_s(payload, sizeof(payload), sizeof(payload) - 1U, "add %u", (unsigned int)camera_id);
+    if (ret < 0) {
+        ws63_debug_log("[ws63 dbg] CAMERA add format fail\r\n");
+        return ERRCODE_FAIL;
+    }
+
+    return ws63_debug_send_camera_command(payload);
+}
+
 /**
  * @brief 向 camera 子口发送一条人脸管理调试命令。
  *
@@ -834,8 +869,7 @@ static void ws63_debug_dump_ld2402_runtime_status(const char *tag)
  */
 static errcode_t ws63_debug_send_camera_command(const char *camera_payload)
 {
-    char send_buf[WS63_DEBUG_CMD_MAX_LEN] = {0};
-    int32_t ret;
+    errcode_t ret;
 
     if ((camera_payload == NULL) || (camera_payload[0] == '\0')) {
         return ERRCODE_INVALID_PARAM;
@@ -848,17 +882,17 @@ static errcode_t ws63_debug_send_camera_command(const char *camera_payload)
         return ret;
     }
 
-    ret = snprintf_s(send_buf,
-        sizeof(send_buf),
-        sizeof(send_buf) - 1U,
-        "[camera]%s\r\n",
-        camera_payload);
-    if (ret < 0) {
-        ws63_debug_log("[ws63 dbg] CAMERA format fail\r\n");
-        return ERRCODE_FAIL;
+    /*
+     * 统一走 camera 任务队列，复用其串行发送与重试策略，
+     * 避免调试线程直接抢占子口导致首条命令在冷启动阶段不稳定。
+     */
+    ret = ws63_task_camera_send_message(camera_payload);
+    if (ret != ERRCODE_SUCC) {
+        /* camera 任务若尚未拉起，补一次启动后重投，避免调试首包丢失。 */
+        (void)ws63_camera_task_start();
+        ret = ws63_task_camera_send_message(camera_payload);
     }
 
-    ret = ws63_task_send(WS63_SLE_CAMERA_SUBPORT, (const uint8_t *)send_buf, (uint16_t)strlen(send_buf));
     ws63_debug_log("[ws63 dbg] CAMERA send payload=[camera]%s ret=0x%x\r\n",
         camera_payload,
         (unsigned int)ret);
@@ -918,13 +952,7 @@ static void ws63_debug_exec_camera_command(const char *cmd)
             return;
         }
 
-        ret = snprintf_s(payload, sizeof(payload), sizeof(payload) - 1U, "add %u", (unsigned int)camera_id);
-        if (ret < 0) {
-            ws63_debug_log("[ws63 dbg] CAMERA add format fail\r\n");
-            return;
-        }
-
-        (void)ws63_debug_send_camera_command(payload);
+        (void)ws63_debug_send_camera_add_command(camera_id);
         return;
     }
 

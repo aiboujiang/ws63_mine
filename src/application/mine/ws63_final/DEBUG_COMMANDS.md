@@ -518,3 +518,22 @@
 联调观察要点：
 - 修复前：主机可能连续看到 `sle->uart len:24` 与 `sle->uart len:10`，并分别打印 `[CAMERA][name,score` / `[CAMERA]]`。
 - 修复后：同一条识别结果应尽量以单条完整 `[CAMERA][name,score]` 形式上行。
+
+## 9. 2026-04-14 CAMERA ADD 首条无响应修复
+
+变更摘要：
+- 修复主机侧执行 `camera add <id>` 后摄像头偶发无反应、需再发 `camera List` 才开始采集的问题。
+- 调试命令链路新增 `ADD` 专用流程：先发送 `action` 唤醒采集态，再等待唤醒间隔，随后发送 `add <id>`。
+- `camera` 调试命令统一改为走 `ws63_task_camera_send_message()` 队列发送，复用 camera 任务的串行与重试机制，避免冷启动阶段首包不稳定。
+
+影响文件：
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_debug.c`
+- `src/application/mine/ws63_final/DEBUG_COMMANDS.md`
+
+验证与结果：
+- 构建命令：`cd /home/xixi/code/fbb_ws63_20260114/src && python3 build.py ws63-liteos-app`
+- 构建结果：通过；日志包含 `Build target:ws63_liteos_app success` 与 `packet success!`。
+
+联调建议：
+- 先执行 `camera add 333`，观察是否直接进入采集流程，无需再补发 `camera List`。
+- 如需手动控制生命周期，仍可使用 `camera start` / `camera die`。
