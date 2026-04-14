@@ -52,10 +52,13 @@ static uint8_t g_ws63_debug_uart_rx_error = 0U;
 static uint8_t g_ws63_debug_last_char_cr = 0U;
 /* 纯调试模式开关：进入后门锁编排任务保持挂起，仅保留调试命令链路。 */
 static uint8_t g_ws63_debug_only_mode = 0U;
+/* camera 调试序号：用于把一次命令的分阶段日志串起来。 */
+static uint32_t g_ws63_camera_debug_seq = 0U;
 
 /* 下面两个函数在状态控制接口中复用，提前声明避免静态函数先用后定义。 */
 static unsigned int ws63_debug_irq_lock(void);
 static void ws63_debug_irq_unlock(unsigned int irq_status);
+static uint32_t ws63_debug_camera_next_seq(void);
 
 /**
  * @brief 读出当前纯调试模式状态。
@@ -96,6 +99,20 @@ errcode_t ws63_task_debug_set_debug_only_mode(uint8_t enable)
     }
 
     return ERRCODE_SUCC;
+}
+
+/**
+ * @brief 获取下一个 camera 调试序号。
+ */
+static uint32_t ws63_debug_camera_next_seq(void)
+{
+    unsigned int irq_status;
+    uint32_t seq;
+
+    irq_status = ws63_debug_irq_lock();
+    seq = ++g_ws63_camera_debug_seq;
+    ws63_debug_irq_unlock(irq_status);
+    return seq;
 }
 
 /**
@@ -839,36 +856,59 @@ static errcode_t ws63_debug_send_camera_add_command(uint32_t camera_id)
     char payload[WS63_DEBUG_CMD_MAX_LEN] = {0};
     int32_t ret;
     errcode_t send_ret;
+    uint32_t seq;
+
+    seq = ws63_debug_camera_next_seq();
+    ws63_debug_log("[ws63 dbg][camera#%u] ADD begin id=%u ts=%u\r\n",
+        (unsigned int)seq,
+        (unsigned int)camera_id,
+        (unsigned int)ws63_os_tick_ms());
 
     send_ret = ws63_debug_send_camera_command("action");
     if (send_ret != ERRCODE_SUCC) {
-        ws63_debug_log("[ws63 dbg] CAMERA add pre-action fail ret=0x%x\r\n", (unsigned int)send_ret);
+        ws63_debug_log("[ws63 dbg][camera#%u] ADD pre-action fail ret=0x%x\r\n",
+            (unsigned int)seq,
+            (unsigned int)send_ret);
         return send_ret;
     }
-    ws63_debug_log("[ws63 dbg] CAMERA add wake sent id=%u\r\n", (unsigned int)camera_id);
+    ws63_debug_log("[ws63 dbg][camera#%u] ADD wake sent id=%u ts=%u\r\n",
+        (unsigned int)seq,
+        (unsigned int)camera_id,
+        (unsigned int)ws63_os_tick_ms());
 
     /* 复用门锁侧已验证的唤醒间隔，给 camera 留出切到采集态的时间窗口。 */
     ws63_os_sleep_ms(WS63_LOCK_CAMERA_WAKE_GAP_MS_DEFAULT);
 
     ret = snprintf_s(payload, sizeof(payload), sizeof(payload) - 1U, "add %u", (unsigned int)camera_id);
     if (ret < 0) {
-        ws63_debug_log("[ws63 dbg] CAMERA add format fail\r\n");
+        ws63_debug_log("[ws63 dbg][camera#%u] ADD format fail\r\n", (unsigned int)seq);
         return ERRCODE_FAIL;
     }
 
     send_ret = ws63_debug_send_camera_command(payload);
     if (send_ret != ERRCODE_SUCC) {
+        ws63_debug_log("[ws63 dbg][camera#%u] ADD send fail ret=0x%x\r\n",
+            (unsigned int)seq,
+            (unsigned int)send_ret);
         return send_ret;
     }
-    ws63_debug_log("[ws63 dbg] CAMERA add sent id=%u\r\n", (unsigned int)camera_id);
+    ws63_debug_log("[ws63 dbg][camera#%u] ADD sent id=%u ts=%u\r\n",
+        (unsigned int)seq,
+        (unsigned int)camera_id,
+        (unsigned int)ws63_os_tick_ms());
 
     /* 某些 camera 固件需要 List 作为最终刷新/拉起动作，避免手工补发。 */
     ws63_os_sleep_ms(WS63_LOCK_CAMERA_WAKE_GAP_MS_DEFAULT);
-    ws63_debug_log("[ws63 dbg] CAMERA add follow-up List queued id=%u\r\n", (unsigned int)camera_id);
-    send_ret = ws63_debug_send_camera_command("List");
-    ws63_debug_log("[ws63 dbg] CAMERA add flow done id=%u ret=0x%x\r\n",
+    ws63_debug_log("[ws63 dbg][camera#%u] ADD follow-up List queued id=%u ts=%u\r\n",
+        (unsigned int)seq,
         (unsigned int)camera_id,
-        (unsigned int)send_ret);
+        (unsigned int)ws63_os_tick_ms());
+    send_ret = ws63_debug_send_camera_command("List");
+    ws63_debug_log("[ws63 dbg][camera#%u] ADD flow done id=%u ret=0x%x ts=%u\r\n",
+        (unsigned int)seq,
+        (unsigned int)camera_id,
+        (unsigned int)send_ret,
+        (unsigned int)ws63_os_tick_ms());
     return send_ret;
 }
 
@@ -883,36 +923,59 @@ static errcode_t ws63_debug_send_camera_del_command(uint32_t camera_id)
     char payload[WS63_DEBUG_CMD_MAX_LEN] = {0};
     int32_t ret;
     errcode_t send_ret;
+    uint32_t seq;
+
+    seq = ws63_debug_camera_next_seq();
+    ws63_debug_log("[ws63 dbg][camera#%u] DEL begin id=%u ts=%u\r\n",
+        (unsigned int)seq,
+        (unsigned int)camera_id,
+        (unsigned int)ws63_os_tick_ms());
 
     send_ret = ws63_debug_send_camera_command("action");
     if (send_ret != ERRCODE_SUCC) {
-        ws63_debug_log("[ws63 dbg] CAMERA del pre-action fail ret=0x%x\r\n", (unsigned int)send_ret);
+        ws63_debug_log("[ws63 dbg][camera#%u] DEL pre-action fail ret=0x%x\r\n",
+            (unsigned int)seq,
+            (unsigned int)send_ret);
         return send_ret;
     }
-    ws63_debug_log("[ws63 dbg] CAMERA del wake sent id=%u\r\n", (unsigned int)camera_id);
+    ws63_debug_log("[ws63 dbg][camera#%u] DEL wake sent id=%u ts=%u\r\n",
+        (unsigned int)seq,
+        (unsigned int)camera_id,
+        (unsigned int)ws63_os_tick_ms());
 
     /* 与 ADD 统一使用同一唤醒间隔，保持调试行为一致。 */
     ws63_os_sleep_ms(WS63_LOCK_CAMERA_WAKE_GAP_MS_DEFAULT);
 
     ret = snprintf_s(payload, sizeof(payload), sizeof(payload) - 1U, "Del %u", (unsigned int)camera_id);
     if (ret < 0) {
-        ws63_debug_log("[ws63 dbg] CAMERA del format fail\r\n");
+        ws63_debug_log("[ws63 dbg][camera#%u] DEL format fail\r\n", (unsigned int)seq);
         return ERRCODE_FAIL;
     }
 
     send_ret = ws63_debug_send_camera_command(payload);
     if (send_ret != ERRCODE_SUCC) {
+        ws63_debug_log("[ws63 dbg][camera#%u] DEL send fail ret=0x%x\r\n",
+            (unsigned int)seq,
+            (unsigned int)send_ret);
         return send_ret;
     }
-    ws63_debug_log("[ws63 dbg] CAMERA del sent id=%u\r\n", (unsigned int)camera_id);
+    ws63_debug_log("[ws63 dbg][camera#%u] DEL sent id=%u ts=%u\r\n",
+        (unsigned int)seq,
+        (unsigned int)camera_id,
+        (unsigned int)ws63_os_tick_ms());
 
     /* 与 ADD 保持一致：删除后再拉一次 List，让 camera 侧完成刷新并进入可见状态。 */
     ws63_os_sleep_ms(WS63_LOCK_CAMERA_WAKE_GAP_MS_DEFAULT);
-    ws63_debug_log("[ws63 dbg] CAMERA del follow-up List queued id=%u\r\n", (unsigned int)camera_id);
-    send_ret = ws63_debug_send_camera_command("List");
-    ws63_debug_log("[ws63 dbg] CAMERA del flow done id=%u ret=0x%x\r\n",
+    ws63_debug_log("[ws63 dbg][camera#%u] DEL follow-up List queued id=%u ts=%u\r\n",
+        (unsigned int)seq,
         (unsigned int)camera_id,
-        (unsigned int)send_ret);
+        (unsigned int)ws63_os_tick_ms());
+    send_ret = ws63_debug_send_camera_command("List");
+    ws63_debug_log("[ws63 dbg][camera#%u] DEL flow done id=%u ret=0x%x ts=%u\r\n",
+        (unsigned int)seq,
+        (unsigned int)camera_id,
+        (unsigned int)send_ret,
+        (unsigned int)ws63_os_tick_ms());
     return send_ret;
 }
 
@@ -933,16 +996,23 @@ static errcode_t ws63_debug_send_camera_command(const char *camera_payload)
         return ERRCODE_INVALID_PARAM;
     }
 
-    ws63_debug_log("[ws63 dbg] CAMERA send begin payload=%s\r\n", camera_payload);
+    ws63_debug_log("[ws63 dbg] CAMERA send begin payload=%s ts=%u\r\n",
+        camera_payload,
+        (unsigned int)ws63_os_tick_ms());
 
     /* camera 子口若尚未拉起，先走惰性初始化，避免命令直接丢失。 */
     ret = ws63_task_ensure_camera_ready();
     if (ret != ERRCODE_SUCC) {
-        ws63_debug_log("[ws63 dbg] CAMERA ready fail ret=0x%x\r\n", (unsigned int)ret);
+        ws63_debug_log("[ws63 dbg] CAMERA ready fail ret=0x%x payload=%s ts=%u\r\n",
+            (unsigned int)ret,
+            camera_payload,
+            (unsigned int)ws63_os_tick_ms());
         return ret;
     }
 
-    ws63_debug_log("[ws63 dbg] CAMERA ready ok, queue send next\r\n");
+    ws63_debug_log("[ws63 dbg] CAMERA ready ok, queue send next payload=%s ts=%u\r\n",
+        camera_payload,
+        (unsigned int)ws63_os_tick_ms());
 
     /*
      * 统一走 camera 任务队列，复用其串行发送与重试策略，
@@ -951,14 +1021,18 @@ static errcode_t ws63_debug_send_camera_command(const char *camera_payload)
     ret = ws63_task_camera_send_message(camera_payload);
     if (ret != ERRCODE_SUCC) {
         /* camera 任务若尚未拉起，补一次启动后重投，避免调试首包丢失。 */
-        ws63_debug_log("[ws63 dbg] CAMERA queue send fail ret=0x%x, try start task\r\n", (unsigned int)ret);
+        ws63_debug_log("[ws63 dbg] CAMERA queue send fail ret=0x%x payload=%s ts=%u, try start task\r\n",
+            (unsigned int)ret,
+            camera_payload,
+            (unsigned int)ws63_os_tick_ms());
         (void)ws63_camera_task_start();
         ret = ws63_task_camera_send_message(camera_payload);
     }
 
-    ws63_debug_log("[ws63 dbg] CAMERA send payload=[camera]%s ret=0x%x\r\n",
+    ws63_debug_log("[ws63 dbg] CAMERA send payload=[camera]%s ret=0x%x ts=%u\r\n",
         camera_payload,
-        (unsigned int)ret);
+        (unsigned int)ret,
+        (unsigned int)ws63_os_tick_ms());
     return ret;
 }
 
@@ -987,7 +1061,9 @@ static void ws63_debug_exec_camera_command(const char *cmd)
         return;
     }
 
-    ws63_debug_log("[ws63 dbg] CAMERA cmd raw=%s\r\n", cmd);
+    ws63_debug_log("[ws63 dbg] CAMERA cmd raw=%s ts=%u\r\n",
+        cmd,
+        (unsigned int)ws63_os_tick_ms());
 
     if (strncpy_s(camera_buf, sizeof(camera_buf), cmd, sizeof(camera_buf) - 1U) != EOK) {
         return;
@@ -1008,7 +1084,9 @@ static void ws63_debug_exec_camera_command(const char *cmd)
         return;
     }
 
-    ws63_debug_log("[ws63 dbg] CAMERA op=%s\r\n", op);
+    ws63_debug_log("[ws63 dbg] CAMERA op=%s ts=%u\r\n",
+        op,
+        (unsigned int)ws63_os_tick_ms());
 
     if (strcmp(op, "ADD") == 0) {
         arg0 = ws63_debug_next_token(&cursor);
@@ -1022,7 +1100,7 @@ static void ws63_debug_exec_camera_command(const char *cmd)
     }
 
     if (strcmp(op, "LIST") == 0) {
-        ws63_debug_log("[ws63 dbg] CAMERA list requested\r\n");
+        ws63_debug_log("[ws63 dbg] CAMERA list requested ts=%u\r\n", (unsigned int)ws63_os_tick_ms());
         (void)ws63_debug_send_camera_command("List");
         return;
     }
@@ -1040,14 +1118,14 @@ static void ws63_debug_exec_camera_command(const char *cmd)
 
     if (strcmp(op, "START") == 0) {
         /* start 作为调试别名，实际仍下发 camera 现网已使用的 action。 */
-        ws63_debug_log("[ws63 dbg] CAMERA start alias -> action\r\n");
+        ws63_debug_log("[ws63 dbg] CAMERA start alias -> action ts=%u\r\n", (unsigned int)ws63_os_tick_ms());
         (void)ws63_debug_send_camera_command("action");
         return;
     }
 
     if (strcmp(op, "DIE") == 0) {
         /* die 作为调试别名，实际仍下发 camera 现网已使用的 Die。 */
-        ws63_debug_log("[ws63 dbg] CAMERA die alias -> Die\r\n");
+        ws63_debug_log("[ws63 dbg] CAMERA die alias -> Die ts=%u\r\n", (unsigned int)ws63_os_tick_ms());
         (void)ws63_debug_send_camera_command("Die");
         return;
     }

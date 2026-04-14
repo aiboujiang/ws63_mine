@@ -81,9 +81,10 @@ static void ws63_camera_post_uplink_reply(const char *reply_text)
     }
 
     ret = ws63_task_post_sle_uplink(&msg, WS63_OS_NO_WAIT);
-    osal_printk("[camera] uplink queued len=%u ret=0x%x\r\n",
+    osal_printk("[camera] uplink queued len=%u ret=0x%x ts=%u\r\n",
         (unsigned int)text_len,
-        (unsigned int)ret);
+        (unsigned int)ret,
+        (unsigned int)ws63_os_tick_ms());
 }
 
 /**
@@ -347,9 +348,10 @@ static void ws63_camera_feed_rx_bytes(const uint8_t *data, uint16_t len)
         return;
     }
 
-    osal_printk("[camera] rx chunk len=%u assembled=%u\r\n",
+    osal_printk("[camera] rx chunk len=%u assembled=%u ts=%u\r\n",
         (unsigned int)len,
-        (unsigned int)g_ws63_camera_rx_assembled_len);
+        (unsigned int)g_ws63_camera_rx_assembled_len,
+        (unsigned int)ws63_os_tick_ms());
 
     for (i = 0U; i < len; i++) {
         uint8_t ch = data[i];
@@ -357,8 +359,9 @@ static void ws63_camera_feed_rx_bytes(const uint8_t *data, uint16_t len)
         if ((ch == '\r') || (ch == '\n')) {
             if (g_ws63_camera_rx_assembled_len > 0U) {
                 g_ws63_camera_rx_assembled[g_ws63_camera_rx_assembled_len] = '\0';
-                osal_printk("[camera] rx delim=CRLF assembled_len=%u\r\n",
-                    (unsigned int)g_ws63_camera_rx_assembled_len);
+                osal_printk("[camera] rx delim=CRLF assembled_len=%u ts=%u\r\n",
+                    (unsigned int)g_ws63_camera_rx_assembled_len,
+                    (unsigned int)ws63_os_tick_ms());
                 ws63_camera_handle_full_reply(g_ws63_camera_rx_assembled);
                 g_ws63_camera_rx_assembled_len = 0U;
                 g_ws63_camera_rx_assembled[0] = '\0';
@@ -368,8 +371,9 @@ static void ws63_camera_feed_rx_bytes(const uint8_t *data, uint16_t len)
 
         if (g_ws63_camera_rx_assembled_len >= (uint16_t)(sizeof(g_ws63_camera_rx_assembled) - 1U)) {
             /* 避免异常长文本一直占用缓冲，直接丢弃当前半包并重新同步。 */
-            osal_printk("[camera] rx overflow drop partial len=%u\r\n",
-                (unsigned int)g_ws63_camera_rx_assembled_len);
+            osal_printk("[camera] rx overflow drop partial len=%u ts=%u\r\n",
+                (unsigned int)g_ws63_camera_rx_assembled_len,
+                (unsigned int)ws63_os_tick_ms());
             g_ws63_camera_rx_assembled_len = 0U;
             g_ws63_camera_rx_assembled[0] = '\0';
         }
@@ -383,8 +387,9 @@ static void ws63_camera_feed_rx_bytes(const uint8_t *data, uint16_t len)
         if (ch == ']') {
             /* Noah_Xiang,0.77 这类协议以 ']' 结束，收到即产出，解决分包问题。 */
             g_ws63_camera_rx_assembled[g_ws63_camera_rx_assembled_len] = '\0';
-            osal_printk("[camera] rx delim=] assembled_len=%u\r\n",
-                (unsigned int)g_ws63_camera_rx_assembled_len);
+            osal_printk("[camera] rx delim=] assembled_len=%u ts=%u\r\n",
+                (unsigned int)g_ws63_camera_rx_assembled_len,
+                (unsigned int)ws63_os_tick_ms());
             ws63_camera_handle_full_reply(g_ws63_camera_rx_assembled);
             g_ws63_camera_rx_assembled_len = 0U;
             g_ws63_camera_rx_assembled[0] = '\0';
@@ -403,7 +408,10 @@ void ws63_task_camera_process_data(uint8_t sub_port, const uint8_t *data, uint16
         return;
     }
 
-    osal_printk("[camera] process sub_port=%u len=%u\r\n", (unsigned int)sub_port, (unsigned int)len);
+    osal_printk("[camera] process sub_port=%u len=%u ts=%u\r\n",
+        (unsigned int)sub_port,
+        (unsigned int)len,
+        (unsigned int)ws63_os_tick_ms());
 
     /* camera 有任意有效输入就续命，避免人脸链路处理时被唤醒窗口提前切回。 */
     (void)ws63_lock_mgr_refresh_auth_window();
@@ -426,17 +434,23 @@ errcode_t ws63_task_camera_send_message(const char *payload)
     }
 
     if (g_ws63_camera_task_started == 0U) {
-        osal_printk("[camera] send reject, task not started payload=%s\r\n", payload);
+        osal_printk("[camera] send reject, task not started payload=%s ts=%u\r\n",
+            payload,
+            (unsigned int)ws63_os_tick_ms());
         return ERRCODE_FAIL;
     }
 
     msg.type = WS63_CAMERA_CMD_SEND_TEXT;
     if (strncpy_s(msg.text, sizeof(msg.text), payload, sizeof(msg.text) - 1U) != EOK) {
-        osal_printk("[camera] send payload copy fail payload=%s\r\n", payload);
+        osal_printk("[camera] send payload copy fail payload=%s ts=%u\r\n",
+            payload,
+            (unsigned int)ws63_os_tick_ms());
         return ERRCODE_FAIL;
     }
 
-    osal_printk("[camera] queue push payload=%s\r\n", payload);
+    osal_printk("[camera] queue push payload=%s ts=%u\r\n",
+        payload,
+        (unsigned int)ws63_os_tick_ms());
 
     return ws63_os_msg_queue_send(g_ws63_camera_cmd_queue,
         &msg,
@@ -499,10 +513,11 @@ static void *ws63_camera_task_entry(const char *arg)
             continue;
         }
 
-        osal_printk("[camera] queue recv type=%u text=%s size=%u\r\n",
+        osal_printk("[camera] queue recv type=%u text=%s size=%u ts=%u\r\n",
             (unsigned int)msg.type,
             msg.text,
-            (unsigned int)size);
+            (unsigned int)size,
+            (unsigned int)ws63_os_tick_ms());
 
         if (msg.type != WS63_CAMERA_CMD_SEND_TEXT) {
             continue;
@@ -514,32 +529,39 @@ static void *ws63_camera_task_entry(const char *arg)
 
             if (ws63_camera_format_send_text(msg.text, (char *)send_buf, sizeof(send_buf)) != ERRCODE_SUCC) {
                 ret = ERRCODE_FAIL;
-                osal_printk("[camera] format fail text=%s\r\n", msg.text);
+                osal_printk("[camera] format fail text=%s ts=%u\r\n",
+                    msg.text,
+                    (unsigned int)ws63_os_tick_ms());
                 break;
             }
 
-            osal_printk("[camera] tx try=%u payload=%s\r\n",
+            osal_printk("[camera] tx try=%u payload=%s ts=%u\r\n",
                 (unsigned int)(retry + 1U),
-                send_buf);
+                send_buf,
+                (unsigned int)ws63_os_tick_ms());
 
             ret = ws63_task_send(WS63_SLE_CAMERA_SUBPORT, send_buf, (uint16_t)strlen((char *)send_buf));
             if (ret == ERRCODE_SUCC) {
-                osal_printk("[camera] tx ok try=%u payload=%s\r\n",
+                osal_printk("[camera] tx ok try=%u payload=%s ts=%u\r\n",
                     (unsigned int)(retry + 1U),
-                    send_buf);
+                    send_buf,
+                    (unsigned int)ws63_os_tick_ms());
                 break;
             }
 
-            osal_printk("[camera] tx fail try=%u ret=0x%x payload=%s\r\n",
+            osal_printk("[camera] tx fail try=%u ret=0x%x payload=%s ts=%u\r\n",
                 (unsigned int)(retry + 1U),
                 (unsigned int)ret,
-                send_buf);
+                send_buf,
+                (unsigned int)ws63_os_tick_ms());
 
             ws63_os_sleep_ms(WS63_CAMERA_SEND_RETRY_GAP_MS);
         }
 
         if (ret != ERRCODE_SUCC) {
-            osal_printk("[camera] send fail, text=%s\r\n", msg.text);
+            osal_printk("[camera] send fail, text=%s ts=%u\r\n",
+                msg.text,
+                (unsigned int)ws63_os_tick_ms());
         }
     }
 
@@ -554,7 +576,7 @@ errcode_t ws63_camera_task_start(void)
     errcode_t ret;
 
     if (g_ws63_camera_task_started == 1U) {
-        osal_printk("[camera] task already started\r\n");
+        osal_printk("[camera] task already started ts=%u\r\n", (unsigned int)ws63_os_tick_ms());
         return ERRCODE_SUCC;
     }
 
@@ -563,11 +585,15 @@ errcode_t ws63_camera_task_start(void)
         (uint16_t)sizeof(ws63_camera_ctrl_msg_t),
         &g_ws63_camera_cmd_queue);
     if (ret != ERRCODE_SUCC) {
-        osal_printk("[camera] queue create fail, ret=0x%x\r\n", (unsigned int)ret);
+        osal_printk("[camera] queue create fail, ret=0x%x ts=%u\r\n",
+            (unsigned int)ret,
+            (unsigned int)ws63_os_tick_ms());
         return ret;
     }
 
-    osal_printk("[camera] queue create ok depth=%u\r\n", (unsigned int)WS63_CAMERA_CMD_QUEUE_DEPTH);
+    osal_printk("[camera] queue create ok depth=%u ts=%u\r\n",
+        (unsigned int)WS63_CAMERA_CMD_QUEUE_DEPTH,
+        (unsigned int)ws63_os_tick_ms());
 
     ret = ws63_os_start_task("ws63_camera_task",
         ws63_camera_task_entry,
@@ -577,14 +603,17 @@ errcode_t ws63_camera_task_start(void)
     if (ret != ERRCODE_SUCC) {
         ws63_os_msg_queue_delete(g_ws63_camera_cmd_queue);
         g_ws63_camera_cmd_queue = 0UL;
-        osal_printk("[camera] task start fail, ret=0x%x\r\n", (unsigned int)ret);
+        osal_printk("[camera] task start fail, ret=0x%x ts=%u\r\n",
+            (unsigned int)ret,
+            (unsigned int)ws63_os_tick_ms());
         return ret;
     }
 
     g_ws63_camera_task_started = 1U;
-    osal_printk("[camera] task start ok, subport=%u baud=%u\r\n",
+    osal_printk("[camera] task start ok, subport=%u baud=%u ts=%u\r\n",
         (unsigned int)WS63_SLE_CAMERA_SUBPORT,
-        (unsigned int)WS63_SUBPORT3_BAUD);
+        (unsigned int)WS63_SUBPORT3_BAUD,
+        (unsigned int)ws63_os_tick_ms());
     return ERRCODE_SUCC;
 }
 #endif
