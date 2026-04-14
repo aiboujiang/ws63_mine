@@ -511,21 +511,8 @@ static void ws63_lock_mgr_handle_event(const ws63_lock_event_t *event, uint32_t 
     }
 
     if (g_ws63_lock_state == WS63_LOCK_STATE_ARMED) {
-        uint8_t count_as_fail = 1U;
-
-        if (event->source == WS63_LOCK_AUTH_SOURCE_ZW101) {
-            uint8_t last_ack = ws63_task_zw101_get_last_verify_ack();
-            if (last_ack == WS63_ZW101_ACK_NOT_PRESSED) {
-                /* NOT_PRESSED 仅触发窗口内重试，不作为有效认证失败。 */
-                count_as_fail = 0U;
-                osal_printk("[lock mgr] zw101 no-press, skip fail_feedback\r\n");
-            }
-        }
-
-        if (count_as_fail != 0U) {
-            osal_printk("[lock mgr] auth fail, source=%u\r\n", (unsigned int)event->source);
-            ws63_lock_mgr_start_fail_feedback(now_ms);
-        }
+        osal_printk("[lock mgr] auth fail, source=%u\r\n", (unsigned int)event->source);
+        ws63_lock_mgr_start_fail_feedback(now_ms);
 
         if (event->source == WS63_LOCK_AUTH_SOURCE_ZW101) {
             errcode_t retrigger_ret = ws63_task_zw101_request_verify_after_release();
