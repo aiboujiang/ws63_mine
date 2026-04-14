@@ -29,11 +29,69 @@ static uint32_t g_ws63_last_log_ms[WS63_SUBPORT_MAX + 1U] = {0};
 static unsigned long g_ws63_wk2114_tx_queue = 0UL;
 static unsigned long g_ws63_sle_uplink_queue = 0UL;
 
+/* ZW101 上行只保留短预览，避免把二进制原文直接灌到主机串口。 */
+#define WS63_TASK_ZW101_HEX_PREVIEW_BYTES 16U
+
 /* 任务状态：用于 API 快速判断是否可投递请求。 */
 static uint8_t g_ws63_wk2114_ready = 0U;
 static uint8_t g_ws63_wk2114_task_started = 0U;
 static uint8_t g_ws63_sle_task_started = 0U;
 static uint8_t g_ws63_subport_inited[WS63_SUBPORT_MAX + 1U] = {0};
+
+/**
+ * @brief 将二进制缓冲区压缩为短 Hex 预览文本。
+ *
+ * 说明：主机侧只需要看出帧头和前几个字节是否正常即可，完整原文会直接
+ * 挤占串口输出并造成乱码，因此这里只保留一个可读预览。
+ *
+ * @param data 原始二进制数据。
+ * @param len  原始数据长度。
+ * @param text 预览输出缓冲区。
+ * @param text_len 预览输出缓冲区长度。
+ * @return uint16_t 实际写入长度，失败返回 0。
+ */
+static uint16_t ws63_task_build_hex_preview(const uint8_t *data, uint16_t len, char *text, uint16_t text_len)
+{
+    static const char hex_digits[] = "0123456789ABCDEF";
+    uint16_t i;
+    uint16_t preview_len;
+    uint16_t pos;
+
+    if ((data == NULL) || (text == NULL) || (text_len <= 6U) || (len == 0U)) {
+        return 0U;
+    }
+
+    preview_len = (len > WS63_TASK_ZW101_HEX_PREVIEW_BYTES) ? WS63_TASK_ZW101_HEX_PREVIEW_BYTES : len;
+
+    /* 先放固定前缀，再按字节展开成可读的十六进制文本。 */
+    if (memcpy_s(text, text_len, "data=", sizeof("data=") - 1U) != EOK) {
+        return 0U;
+    }
+
+    pos = (uint16_t)(sizeof("data=") - 1U);
+    for (i = 0U; i < preview_len; i++) {
+        if ((uint32_t)pos + 3U >= text_len) {
+            break;
+        }
+
+        text[pos++] = hex_digits[(data[i] >> 4U) & 0x0FU];
+        text[pos++] = hex_digits[data[i] & 0x0FU];
+        if ((uint16_t)(i + 1U) < preview_len) {
+            text[pos++] = ' ';
+        }
+    }
+
+    /* 预览不追求完整性，只要主机能看出还有未展开的数据即可。 */
+    if ((len > preview_len) && ((uint32_t)pos + 4U < text_len)) {
+        text[pos++] = ' ';
+        text[pos++] = '.';
+        text[pos++] = '.';
+        text[pos++] = '.';
+    }
+
+    text[pos] = '\0';
+    return pos;
+}
 
 /**
  * @brief 设置 WK2114 链路就绪状态。
@@ -105,9 +163,46 @@ errcode_t ws63_task_post_sle_uplink(const ws63_sle_uplink_msg_t *msg, uint32_t t
         return ERRCODE_FAIL;
     }
 
+    if (ws63_task_debug_is_debug_only_mode() == 0U) {
+        /*
+         * 未进入 DEBUG INIT 时，设备侧不再向主机上报运行日志，
+         * 这样主机串口不会看到 LD2402 / ZW101 这类常规巡航输出。
+         */
+        return ERRCODE_SUCC;
+    }
+
     if ((msg->sub_port == 0U) || (msg->sub_port > WS63_SUBPORT_MAX) || (msg->len == 0U) ||
         (msg->len > WS63_TASK_QUEUE_PAYLOAD_MAX)) {
         return ERRCODE_INVALID_PARAM;
+    }
+
+    /*
+     * LD2402 的主机侧可见上行受日志开关控制：关闭时静音，打开时恢复距离行。
+     * 这样 `LD LOG OFF/ON` 才能明确控制主机是否看到距离刷屏，同时不影响本地
+     * 驱动层的状态处理。
+     */
+    if (msg->sub_port == LD2402_SUBPORT) {
+        if (ws63_task_ld2402_get_log_enable() == 0U) {
+            return ERRCODE_SUCC;
+        }
+
+        return ws63_sle_send_subport_data(msg->sub_port, msg->data, msg->len);
+    }
+
+    /*
+     * ZW101 上报仍保留标签，但把原始二进制收敛成 Hex 预览，避免主机终端
+     * 直接显示不可读字节流。
+     */
+    if (msg->sub_port == ZW101_SUBPORT) {
+        char preview[WS63_TASK_QUEUE_PAYLOAD_MAX + 1U] = {0};
+        uint16_t preview_len;
+
+        preview_len = ws63_task_build_hex_preview(msg->data, msg->len, preview, sizeof(preview));
+        if (preview_len == 0U) {
+            return ERRCODE_FAIL;
+        }
+
+        return ws63_sle_send_subport_data(msg->sub_port, (const uint8_t *)preview, preview_len);
     }
 
     return ws63_os_msg_queue_send(g_ws63_sle_uplink_queue,
@@ -189,8 +284,13 @@ static errcode_t ws63_init_subport_with_device(uint8_t sub_port)
         osal_printk("[wk2114 final task] ZW101 cfg sub-uart%u baud=%u\r\n",
             (unsigned int)sub_port,
             (unsigned int)sub_baud);
+        /*
+         * 先绑定 ZW101 回调，再执行初始化。
+         * 这样即使初始化阶段 worker 线程先读到回包，也会喂入 zw101 缓存，避免 ACK 被默认回调吞掉。
+         */
+        g_ws63_rx_cb[sub_port] = zw101_process_data;
         if (zw101_init(sub_port) == ERRCODE_SUCC) {
-            g_ws63_rx_cb[sub_port] = zw101_process_data;
+            osal_printk("[wk2114 final task] ZW101 init ok\r\n");
         } else {
             osal_printk("[wk2114 final task] ZW101 init fail\r\n");
         }
@@ -354,6 +454,14 @@ static errcode_t ws63_sle_downlink_handler(const uint8_t *data, uint16_t len)
 
     if ((data == NULL) || (len == 0U)) {
         return ERRCODE_INVALID_PARAM;
+    }
+
+    /*
+     * 优先把文本型下行喂给调试命令解析器。
+     * 若已被消费，则不再透传到子口，避免同一帧被重复处理。
+     */
+    if (ws63_task_debug_try_consume_sle_downlink(data, len) == ERRCODE_SUCC) {
+        return ERRCODE_SUCC;
     }
 
 #if (WS63_SLE_LD2402_ENABLE == 1U)
@@ -569,6 +677,8 @@ errcode_t ws63_task_register_rx_callback(uint8_t sub_port, ws63_rx_callback_t ca
  */
 errcode_t ws63_task_ensure_zw101_ready(void)
 {
+    errcode_t ret;
+
     if (ws63_task_wk2114_is_ready() == 0U) {
         return ERRCODE_FAIL;
     }
@@ -581,7 +691,31 @@ errcode_t ws63_task_ensure_zw101_ready(void)
         return ERRCODE_FAIL;
     }
 
-    return ws63_init_subport_with_device(ZW101_SUBPORT);
+    ret = ws63_init_subport_with_device(ZW101_SUBPORT);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+
+    /*
+     * 兜底策略：历史上可能出现“子口已初始化但 ZW101 未就绪”的状态。
+     * 这里检测 ready 位，必要时补一次显式 init，避免 VERIFY 长时间卡在 ready=0。
+     */
+    if (zw101_is_ready() == 0U) {
+        osal_printk("[wk2114 final task] ZW101 ready=0, force reinit\r\n");
+        /*
+         * 兜底重初始化前再次强制绑定回调，规避“历史失败后仍停留默认回调”的竞态。
+         */
+        g_ws63_rx_cb[ZW101_SUBPORT] = zw101_process_data;
+        ret = zw101_init(ZW101_SUBPORT);
+        if (ret != ERRCODE_SUCC) {
+            osal_printk("[wk2114 final task] ZW101 force reinit fail, ret=0x%x\r\n", (unsigned int)ret);
+            return ret;
+        }
+
+        g_ws63_rx_cb[ZW101_SUBPORT] = zw101_process_data;
+    }
+
+    return ERRCODE_SUCC;
 }
 
 /**
@@ -646,6 +780,28 @@ errcode_t ws63_task_send(uint8_t sub_port, const uint8_t *data, uint16_t len)
 }
 
 /**
+ * @brief 通过 SLE 向主机侧发送调试日志文本。
+ */
+errcode_t ws63_task_send_debug_log_to_host(const uint8_t *data, uint16_t len)
+{
+#if (WS63_SLE_CORE_ENABLE == 1U)
+    if ((data == NULL) || (len == 0U)) {
+        return ERRCODE_INVALID_PARAM;
+    }
+
+    if (ws63_task_debug_is_debug_only_mode() == 0U) {
+        return ERRCODE_SUCC;
+    }
+
+    return ws63_sle_send_debug_data(data, len);
+#else
+    (void)data;
+    (void)len;
+    return ERRCODE_FAIL;
+#endif
+}
+
+/**
  * @brief WK2114 最终版业务管理任务入口。
  *
  * 管理任务职责：
@@ -655,9 +811,12 @@ errcode_t ws63_task_send(uint8_t sub_port, const uint8_t *data, uint16_t len)
 void *ws63_task_entry(const char *arg)
 {
     errcode_t wdt_ret;
+    uint32_t boot_ms;
+    uint8_t lock_mgr_started = 0U;
 
     (void)arg;
     ws63_os_sleep_ms(WS63_BOOT_DELAY_MS);
+    boot_ms = ws63_os_tick_ms();
 
     /* 电机/编码器初始化独立于 WK2114 链路，失败仅记录日志，不阻断任务。 */
     ws63_motor_encoder_init();
@@ -702,10 +861,6 @@ void *ws63_task_entry(const char *arg)
     }
 #endif
 
-    if (ws63_lock_mgr_task_start() != ERRCODE_SUCC) {
-        osal_printk("[wk2114 final task] start lock mgr task fail\r\n");
-    }
-
     while (1) {
         uint32_t now_ms;
 
@@ -715,6 +870,22 @@ void *ws63_task_entry(const char *arg)
         }
 
         ws63_task_debug_process(now_ms);
+
+        /*
+         * 门锁编排任务采用“延后启动 + 调试模式门控”：
+         * 1) 先让调试命令有机会把系统切到 DEBUG_ONLY；
+         * 2) 只有在观察窗口结束且未进入纯调试模式时，才拉起门锁任务；
+         * 3) 若后续执行 DEBUG EXIT，门锁任务会在下一轮循环恢复启动。
+         */
+        if ((lock_mgr_started == 0U) &&
+            (ws63_task_debug_is_debug_only_mode() == 0U) &&
+            ((uint32_t)(now_ms - boot_ms) >= WS63_DEBUG_BOOT_DECISION_MS)) {
+            if (ws63_lock_mgr_task_start() == ERRCODE_SUCC) {
+                lock_mgr_started = 1U;
+            } else {
+                osal_printk("[wk2114 final task] start lock mgr task fail\r\n");
+            }
+        }
 
         /* 多任务并行后仍在管理线程持续喂狗，避免高负载场景触发复位。 */
         wdt_ret = ws63_os_feed_watchdog();

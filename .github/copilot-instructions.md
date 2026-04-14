@@ -29,3 +29,14 @@ Required behavior before task closure:
 
 Skill location in this repository:
 - `.github/skills/task-md-maintenance/SKILL.md`
+- `.github/skills/mandatory-menuconfig-check/SKILL.md`
+
+## Build Precheck Rule (Mandatory)
+
+Before running any `python3 build.py ...` command, always execute:
+
+```bash
+bash tools/check_ws63_menuconfig.sh
+```
+
+If the check fails, stop build immediately, fix menuconfig first, then rerun the check until it passes.

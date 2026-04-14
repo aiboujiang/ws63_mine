@@ -1,47 +1,66 @@
-# WS63 Final 串口调试命令手册
+# WS63 Final SLE 调试命令手册
 
 ## 1. 适用范围
 
-本手册适用于 `ws63_final` 模块中的电机、编码器、蜂鸣器、RGB、TTP229、LD2402 与 ZW101 在线控测命令。
+本手册适用于 `ws63_final` 模块中的电机、编码器、蜂鸣器、RGB、TTP229、camera、LD2402 与 ZW101 在线控测命令。
 
 目标：
-- 通过串口实时控制电机正反转、停止、刹车与占空比。
-- 通过串口实时查看编码器 RPM、窗口增量与累计计数。
-- 通过串口实时控制蜂鸣器开关与频率。
-- 通过串口实时控制 RGB 颜色、开关与演示模式。
-- 通过串口实时读取 TTP229 按键掩码并控制状态机/报警开关。
-- 通过串口在线触发 LD2402/ZW101 初始化握手及发送原始调试帧。
-- 通过串口在线验证 ZW101 ZA 兼容命令链路（回显/自动登录/自动搜索/终止）。
+- 通过主机侧 SLE 下行实时控制电机正反转、停止、刹车与占空比。
+- 通过主机侧 SLE 下行实时查看编码器 RPM、窗口增量与累计计数。
+- 通过主机侧 SLE 下行实时控制蜂鸣器开关与频率。
+- 通过主机侧 SLE 下行实时控制 RGB 颜色、开关与演示模式。
+- 通过主机侧 SLE 下行实时读取 TTP229 按键掩码并控制状态机/报警开关。
+- 通过主机侧 SLE 下行在线触发 camera 人脸新增/查询/删除联调。
+- 通过主机侧 SLE 下行在线触发 LD2402/ZW101 初始化与业务命令联调。
+- 通过主机侧 SLE 下行在线验证 ZW101 重构能力链路（ENROLL/VERIFY/ECHO/LIST/DEL/CLEAR/CANCEL）。
 - 通过统一日志格式快速定位指令执行状态。
 
-## 2. 默认串口配置
+调试会话说明：
+- 主机输入 `DEBUG INIT` 后，系统进入纯调试模式。
+- 纯调试模式下保留全部调试命令，但门锁编排任务会被延后启动或保持挂起。
+- 退出纯调试模式使用 `DEBUG EXIT`。
 
-- 调试串口总线：`UART0`
-- TX 引脚：`GPIO17`
-- RX 引脚：`GPIO18`
-- 波特率：`115200`
-- 数据位：`8`
-- 停止位：`1`
-- 校验位：`None`
+## 2. 默认调试通道配置
+
+- 命令入口：主机侧 SLE 下行
+- 调试日志出口：主机侧 SLE 上行（`[DEBUG]` 标签）
+- ws63_final 本机调试 UART：默认关闭
 
 说明：
-- 若现场串口占用冲突，可在 `ws63_final_config.h` 中修改 `WS63_DEBUG_UART_*` 宏。
-- 若仍使用 `UART0`，当前实现会在初始化调试口时先 `uapi_uart_deinit(UART0)` 再 `uapi_uart_init(UART0)`，用于降低与 AT 通道并发抢读风险。
+- 若需临时启用 ws63_final 本机调试 UART，可在 `ws63_final_config.h` 中将 `WS63_DEBUG_LOCAL_UART_IO_ENABLE` 置为 `1`。
+- 默认推荐保持 `WS63_DEBUG_LOCAL_UART_IO_ENABLE=0`，避免本机串口与 SLE 双入口并发导致命令源不一致。
 
-日志镜像开关：
-- `WS63_DEBUG_LOG_MIRROR_SYS=0`（默认）：仅输出到调试串口，避免同口重复日志。
-- `WS63_DEBUG_LOG_MIRROR_SYS=1`：同时输出到 `osal_printk` 和调试串口，便于双口观测。
+关键开关：
+- `WS63_DEBUG_STRICT_SLE_ONLY=1`：开启严格模式（仅允许 SLE 下行命令 + SLE 上行调试日志）。
+- `WS63_DEBUG_SLE_CMD_ENABLE=1`：开启 SLE 下行命令入口。
+- `WS63_DEBUG_SLE_LOG_ENABLE=1`：开启调试日志 SLE 上行。
+- `WS63_DEBUG_LOCAL_UART_IO_ENABLE=0`：关闭 ws63_final 本机调试 UART 收发。
+
+主机侧推荐开关（`sle_uart_host`）：
+- `MINE_HOST_STRICT_CMD_INPUT_ENABLE=1`：只允许指定命令 UART 输入口进入 SLE 下发链路。
+- `MINE_HOST_CMD_UART_BUS=UART_BUS_0`：默认主机命令输入口为 UART0。
+- `MINE_UART_ENABLE_MASK=MINE_UART_EN_UART0`：默认仅启用 UART0，避免非命令口噪声误下发。
 
 ## 3. 命令列表
 
 所有命令均以换行结束（`\r`、`\n` 或 `\r\n`），命令大小写不敏感。
 
 接收机制说明：
-- 命令接收采用“UART 中断回调 + 行缓冲队列”。
-- 回调仅负责按行组帧入队，命令执行在任务主循环中出队处理。
+- 命令接收采用“SLE 下行 + 行缓冲队列”。
+- 下行入口仅负责按行组帧入队，命令执行在任务主循环中出队处理。
 - 当串口日志很密集时，若队列已满会丢弃新命令并打印溢出提示。
 
 ### 3.1 通用命令
+
+- `DEBUG INIT`
+  - 功能：进入纯调试模式。
+  - 说明：建议在启动观察窗口内发送该命令，避免门锁编排任务被拉起。
+
+- `DEBUG EXIT`
+  - 功能：退出纯调试模式，恢复正常门锁流程。
+
+- `DEBUG STAT`
+  - 功能：查询当前调试会话模式是否为纯调试模式。
 
 - `HELP`
   - 功能：打印全部可用命令。
@@ -162,7 +181,38 @@
 - 调试输出里的 `keys=` 会按上述映射把多键组合成 A+B 这种文本，未知位则保留为十六进制，方便排查异常输入。
 - 当 `count>=2` 且报警开启时，会输出 `multi-key alarm` 告警日志。
 
-### 3.8 LD 调试命令
+### 3.8 camera 调试命令
+
+- `[camera]add <id>`
+  - 功能：新增一张人脸，调试层会自动补前缀后下发到 camera 子口。
+  - 示例：`[camera]add 1`
+
+- `[camera]List`
+  - 功能：查询当前已登记的人脸列表。
+  - 返回格式：`[sum,id1,id2,...]`
+  - 说明：`sum` 表示当前人脸数量，后续依次是各人脸 `id`。
+
+- `[camera]Del <id>`
+  - 功能：删除指定 `id` 的人脸。
+  - 示例：`[camera]Del 1`
+
+- `add` / `Del` 的完成态回包
+  - 功能：camera 侧在新增或删除完成后，可能返回类似 `xxx complete` 的文本。
+  - 说明：这类回包按普通文本日志处理，不影响上层联调；例如 `add complete`、`Del complete`、`camera complete` 都可视为完成态返回。
+
+- `[camera]start`
+  - 功能：camera 生命周期调试别名，实际会下发 `action`。
+
+- `[camera]die`
+  - 功能：camera 生命周期调试别名，实际会下发 `Die`。
+
+说明：
+- 调试层会把命令统一整理为实际发送文本 `[camera]add <id>`、`[camera]List`、`[camera]Del <id>`、`[camera]action`、`[camera]Die`。
+- camera 回包会按原文落到日志里，格式为 `[camera] rx <reply>`。
+- 当前实现对 `List` 回包不做二次改写，直接接受并透传上述 `[sum,id1,id2,...]` 形式。
+- `add` / `Del` 的完成态回包若出现 `xxx complete`，同样按成功完成文本处理。
+
+### 3.9 LD 调试命令
 
 - `LD HELP`
   - 功能：打印 LD 全部调试命令。
@@ -247,65 +297,49 @@
 - `SLE ULOGSTAT`
   - 功能：查询 SLE 上行 success 日志开关与当前间隔配置。
 
-### 3.9 ZW101 调试命令
+### 3.10 ZW101 调试命令
 
-- `ZW101 INIT`
-  - 功能：重新初始化 ZW101 模块并执行握手检测。
+- `ZW HELP`
+  - 功能：打印 ZW 命令帮助。
 
-- `ZW101 HANDSHAKE`
-  - 功能：发送标准握手命令（0x35）并返回 ACK。
+- `ZW INIT`
+  - 功能：重新初始化 ZW101 模块并执行探测。
 
-- `ZW101 CHECKSENSOR`
-  - 功能：发送传感器检测命令（0x36）并返回 ACK。
+- `ZW STAT`
+  - 功能：输出当前 ZW 命令映射的子串口信息。
 
-- `ZW101 RAW <HEX...>`
-  - 功能：向 ZW101 子口发送原始十六进制命令帧。
-  - 示例：`ZW101 RAW EF 01 FF FF FF FF 01 00 03 35 00 39`
-
-- `ZW101 STAT`
-  - 功能：输出当前 ZW101 命令映射的子串口信息。
-
-- `ZW101 ZA HELP`
-  - 功能：打印 ZA 兼容命令帮助。
-
-- `ZW101 ZA ECHO`
+- `ZW ECHO`
   - 功能：发送 `GetEcho(0x53)`，用于确认基础通信链路正常。
 
-- `ZW101 ZA LOGIN <wait> <interval0-15> <press2|3> <id> <dup0|1>`
-  - 功能：发送 `AutoLogin(0x54)`。
-  - 示例：`ZW101 ZA LOGIN 10 3 2 1 0`
+- `ZW VERIFY [score1-5] [id]`
+  - 功能：发送 `AutoIdentify(0x32)` 并打印 `ack/id/score`。
+  - 默认：`score=3`、`id=0xFFFF`（1:N）、`param=0x0000`。
+  - 示例：`ZW VERIFY`、`ZW VERIFY 4`、`ZW VERIFY 3 1`
 
-- `ZW101 ZA SEARCH <wait> <start> <count>`
-  - 功能：发送 `AutoSearch(0x55)`，并打印返回的 `ack/id/score`。
-  - 示例：`ZW101 ZA SEARCH 20 0 10`
+- `ZW ENROLL <id> [times2-6]`
+  - 功能：发送 `AutoEnroll(0x31)`。
+  - 默认：`times=3`，参数位默认禁止重复登记（bit4=1）。
+  - 示例：`ZW ENROLL 1`、`ZW ENROLL 1 3`
 
-- `ZW101 ZA SEARCHRES <buf1|2> <start> <count>`
-  - 功能：发送 `SearchResBack(0x56)`，并打印返回的 `ack/id/score`。
-  - 示例：`ZW101 ZA SEARCHRES 1 0 10`
+- `ZW LIST`
+  - 功能：发送 `ReadValidTemplateNum(0x1D)` 并打印有效模板数量。
 
-- `ZW101 ZA LOGINLIGHT <wait> <press2|3> <id> <dup0|1>`
-  - 功能：发送 `AutoLoginStabLight(0x57)`。
-  - 示例：`ZW101 ZA LOGINLIGHT 10 2 1 0`
+- `ZW DEL <id> [count]`
+  - 功能：发送 `Delete(0x0C)` 删除模板。
+  - 示例：`ZW DEL 1`、`ZW DEL 1 2`
 
-- `ZW101 ZA SEARCHECHO <wait> <start> <count>`
-  - 功能：发送 `AutoSearchWithEcho(0x58)`，并打印返回的 `ack/id/score`。
-  - 示例：`ZW101 ZA SEARCHECHO 20 0 10`
+- `ZW CLEAR`
+  - 功能：发送 `Empty(0x0D)` 清空模板库。
 
-- `ZW101 ZA TERM`
-  - 功能：发送 `ProcessTerminateCmd(0xAA)`，终止当前流程。
-
-参数说明：
-- `wait`：驱动等待应答的周期参数（单位 10ms，传入 `uint8`）。
-- `id/start/count`：按协议使用 16 位无符号整数。
-- `press2|3`：手指按压次数，当前仅允许 `2` 或 `3`。
-- `dup0|1`：重复录入标志，`0` 关闭、`1` 开启。
+- `ZW CANCEL`
+  - 功能：发送 `Cancel(0x30)` 终止当前流程。
 
 ## 4. 日志格式说明
 
 ### 4.1 命令输入日志
 
 - 格式：`[ws63 dbg] cmd<=<COMMAND>`
-- 作用：确认串口收到并开始解析该命令。
+- 作用：确认从主机 SLE 收到并开始解析该命令。
 
 ### 4.2 命令执行结果日志
 
@@ -327,7 +361,7 @@
 
 ## 5. 建议联调流程
 
-1. 上电后发送 `HELP`，确认命令通道在线。
+1. 上电后通过主机侧 SLE 发送 `HELP`，确认命令通道在线。
 2. 发送 `MOTOR FWD 30`，观察电机正转。
 3. 发送 `MOTOR WATCH ON`，连续观察状态变化。
 4. 发送 `MOTOR DUTY 60`，确认占空比提升后转速变化。
@@ -340,18 +374,33 @@
 11. 发送 `TTP229 WATCH ON` 并按键，观察持续输出的 `raw/mask/count` 是否随按键变化。
 12. 发送 `TTP229 WATCH OFF`，确认持续输出停止。
 13. 同时按下两个触摸键，观察是否出现多键报警日志。
-14. 发送 `LD INIT`、`ZW101 HANDSHAKE`，验证两类模块调试链路。
-15. 发送 `ZW101 ZA ECHO`、`ZW101 ZA SEARCH 20 0 10`，验证 ZA 兼容命令通信链路。
-16. 若 LD 上电后日志过密，优先执行 `LD LOGINT 1000`，必要时执行 `SLE ULOG OFF`。
+14. 发送 `LD INIT`、`ZW INIT`，验证两类模块调试链路。
+15. 发送 `ZW ECHO`、`ZW VERIFY`，验证 VERIFY 认证链路。
+16. 发送 `ZW LIST`、`ZW DEL 1`、`ZW CLEAR`，验证模板管理命令链路。
+17. 若 LD 上电后日志过密，优先执行 `LD LOGINT 1000`，必要时执行 `SLE ULOG OFF`。
+18. 主机串口建议仅在 `UART0` 输入命令，确认 `[mine host][DEBUG]` 可稳定回显从机调试日志。
 
 ## 6. 常见问题
 
-- 现象：串口无响应。
-  - 排查：确认串口工具参数（115200/8N1）及接线（GPIO17/18）。
-  - 排查：若使用 UART0，避免同时让其他上位机工具占用同一串口做 AT 交互。
+- 现象：主机 SLE 下发命令无响应。
+  - 排查：确认主机与 ws63_final 的 SLE 链路已连接。
+  - 排查：确认 `WS63_DEBUG_SLE_CMD_ENABLE` 是否为 `1`。
+  - 排查：若主机启用了严格入口，确认命令是否从 `MINE_HOST_CMD_UART_BUS`（默认 UART0）输入。
+
+- 现象：发送 `DEBUG INIT` 后门锁任务仍然起来了。
+  - 说明：`DEBUG INIT` 需要在启动观察窗口内生效；窗口大小由 `WS63_DEBUG_BOOT_DECISION_MS` 控制。
+  - 处置：重启后尽早发送 `DEBUG INIT`，或在纯调试模式中使用 `DEBUG EXIT` 恢复正常流程。
+
+- 现象：ws63_final 本机串口没有调试日志。
+  - 说明：默认行为。当前版本要求调试日志经 SLE 上行，不从 ws63_final 本机串口输出。
+  - 排查：确认 `WS63_DEBUG_SLE_LOG_ENABLE` 是否为 `1`。
+
+- 现象：主机 `UART2` 输入命令无效。
+  - 说明：严格模式下主机只接受 `MINE_HOST_CMD_UART_BUS` 的命令输入。
+  - 处置：改为 `UART0` 输入，或按需调整 `MINE_HOST_CMD_UART_BUS` 并重新编译。
 
 - 现象：同一条 `[ws63 dbg]` 日志重复出现两次。
-  - 排查：确认 `WS63_DEBUG_LOG_MIRROR_SYS` 是否误设为 `1` 且系统日志与调试日志复用同一物理口。
+  - 排查：确认主机侧工具未对同一 SLE 上行数据做重复打印。
 
 - 现象：命令返回 unknown。
   - 排查：检查命令拼写、参数范围、是否包含换行结束符。
@@ -381,17 +430,58 @@
   - 排查：确认接线为 `SCL->GPIO16`、`SDO(板上标注SDA)->GPIO15`，并检查供电与地线。
   - 排查：若接线无误，按规格书复核时序参数（起始脉冲/时钟脉冲）是否匹配当前模组。
 
-- 现象：`LD RAW` / `ZW101 RAW` 返回参数错误。
+- 现象：`LD RAW` 返回参数错误。
   - 排查：确保使用两位十六进制字节并用空格分隔，例如 `AA 55 01 0F`。
   - 排查：避免输入奇数字符数（例如 `A B2`），解析器会直接判定为非法。
 
-- 现象：`ZW101 ZA *` 返回 `invalid ... args`。
-  - 排查：确认参数个数与顺序匹配帮助信息；`press` 仅支持 `2/3`，`dup` 仅支持 `0/1`。
-  - 排查：`id/start/count` 必须在 `0~65535`。
+- 现象：`ZW VERIFY` / `ZW ENROLL` / `ZW DEL` 返回 `invalid ... args`。
+  - 排查：确认参数个数与顺序匹配帮助信息；`score` 仅支持 `1~5`，`times` 仅支持 `2~6`。
+  - 排查：`id/count` 必须在 `0~65535`，且 `count` 不能为 `0`。
 
-- 现象：`ZW101 ... ack=0x26`。
+- 现象：`ZW ... ack=0x26`。
   - 说明：`0x26` 为等待 ACK 超时，表示命令已发出但在超时窗口内未收到有效应答帧。
-  - 排查：优先执行 `ZW101 HANDSHAKE` 与 `ZW101 CHECKSENSOR` 观察 ACK；若均超时，检查子口接线、供电与波特率。
+  - 排查：优先执行 `ZW INIT` 与 `ZW ECHO` 观察 ACK；若仍超时，检查子口接线、供电与波特率。
+
+- 现象：进入 `ARMED -> VERIFYING` 后“未触摸也快速成功”。
+  - 说明：当前版本已新增全链路追踪日志，按时间顺序可判断是“本次命令真实 ACK”还是“历史/异步帧误命中”。
+  - 关注日志1（驱动层）：`[zw101 trace] seq=... send cmd=0x32 ...`，确认每次 VERIFY 都有唯一 `seq`。
+  - 关注日志2（驱动层）：`[zw101 trace] ... ack=0x.. payload_len=..` + `ack_payload data=...`，直接看原始 ACK 码和载荷字节。
+  - 关注日志3（任务层）：`[zw101 trace] task_before_verify/task_after_verify`，确认请求位、取消位、禁用位与 fail_streak。
+  - 关注日志4（锁管理）：`[lock mgr trace] auth_event_enqueue/auth_event_handle`，确认认证结果入队/出队与状态机状态是否一致。
+  - 判定建议：若 `seq` 连续但 `ack_payload` 内容固定异常（例如 `id/score` 恒定），优先怀疑模块侧返回语义或参数口径；若 `seq` 与结果错位，优先怀疑串口缓存残留或并发读写时序。
+
+- VERIFY SUCCESS 判定口径（对齐 slave）：
+  - 必须满足 `ack=0x00` 且阶段码 `p1=0x05(SEARCH)` 才进入终态成功判定。
+  - 终态成功还需 `id != 0xFFFF` 且 `score > 0`；否则按失败处理，避免中间态/异常载荷误判。
+  - 若看到 `ack_payload=00 00 FF FF 00 00`，这是 `LEGAL_CHECK` 阶段中间态，不能判定为成功。
+
+- 验证失败重试策略（新增）：
+  - ZW101 失败后不再立即重试，而是先进入 `wait_release` 状态。
+  - 如果本次结果是 `ACK_TIMEOUT`，且门锁仍处于当前 ARMED 生命周期内，任务层会先自动重拉一次 VERIFY；只有超时重试耗尽后，才会回落到普通失败上报。
+  - 任务会周期执行 `CheckSensor(0x36)` 检测是否离手：
+  - `ack=0x00` 视为仍按压；`ack=0x02` 视为已离手。
+  - 仅在检测到离手后，才会重新排队下一次 VERIFY。
+  - 关键日志：`task_wait_finger_release`、`release_check ... finger=RELEASED`、`finger released, retry verify queued`。
+
+- ZW101 禁用作用域（更新）：
+  - 连续失败触发的 `VERIFY disabled` 仅在当前 ARMED 窗口内生效。
+  - 每次从 IDLE 新进入 ARMED 时，会自动重置 `disabled/fail_streak`，不继承上一个窗口状态。
+  - 关键日志：`reset_armed_window_guard`。
+
+- 现象：`request_verify` 已投递，但日志长期显示 `ready=0`，最终 `auth window timeout`。
+  - 说明：当前版本已加入 ready 自愈重试；当 ARMED 且有请求时，会周期触发 `ws63_task_ensure_zw101_ready()`。
+  - 关注日志：`[zw101 trace] ready_recover ret=0x...` 与 `[wk2114 final task] ZW101 ready=0, force reinit`。
+  - 判定建议：
+  - 若 `ready_recover ret=0x0` 且随后出现 `VERIFYING`，说明是一次性惰性初始化失败已被自愈。
+  - 若连续非 0，优先排查 `ZW101_SUBPORT` 使能配置、供电与子口连线。
+
+- 现象：`0x53/0x35` 偶尔成功，但 `0x36` 连续超时，同时出现 `U1 rx len=12 first=0x..` 默认回调日志。
+  - 说明：这是初始化阶段 ACK 被 worker 线程先读走、且未进入 `zw101_process_data` 的典型竞态。
+  - 修复点：当前版本已改为“先绑定 ZW101 回调，再执行 `zw101_init`”，并在 force reinit 前再次强制绑定。
+
+- 现象：异常日志提示 `task:ws63_zw101_task stack overflow`。
+  - 说明：ZW101 任务链路包含协议等待与自愈初始化，默认 2KB 栈在高日志场景存在溢出风险。
+  - 修复点：当前版本已把 ZW101 任务栈提升为 `WS63_ZW101_TASK_STACK_SIZE=3072`。
 
 ## 7. 关联文件
 
@@ -405,3 +495,6 @@
 - `src/application/mine/ws63_final/App/Task/ws63_final_task_rgb.c`
 - `src/application/mine/ws63_final/App/Task/ws63_final_task_debug.c`
 - `src/application/mine/ws63_final/App/Task/ws63_final_task_ttp229.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_sensor_bridge.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_lock_mgr.c`
+- `src/application/mine/ws63_final/Driver/zw101.c`

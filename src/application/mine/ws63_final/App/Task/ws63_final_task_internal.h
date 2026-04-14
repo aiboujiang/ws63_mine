@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include "ws63_final_config.h"
 #include "ws63_final_task.h"
+#include "ws63_final_task_debug.h"
 
 #define WS63_SUBPORT_MAX 4U
 
@@ -189,6 +190,15 @@ errcode_t ws63_lock_mgr_report_auth_result(ws63_lock_auth_source_t source, uint8
 uint8_t ws63_lock_mgr_is_armed(void);
 
 /**
+ * @brief 查询门锁接近唤醒窗口当前截止时间。
+ *
+ * 说明：用于按键侧输出“续命前/后”调试日志，不改变门锁状态机语义。
+ *
+ * @return uint32_t 当前截止时间（毫秒 Tick）；未进入窗口时可能为 0。
+ */
+uint32_t ws63_lock_mgr_get_auth_window_deadline_ms(void);
+
+/**
  * @brief 刷新门锁接近唤醒窗口的超时时间。
  *
  * 说明：仅在门锁处于 ARMED 状态时生效，用于摄像头、按键、指纹和雷达输入续命。
@@ -198,23 +208,53 @@ uint8_t ws63_lock_mgr_is_armed(void);
 errcode_t ws63_lock_mgr_refresh_auth_window(void);
 
 /**
- * @brief 启动 ZW101 自动识别任务。
+ * @brief 启动 ZW101 VERIFY 任务。
  *
  * @return errcode_t ERRCODE_SUCC 成功，其他失败。
  */
 errcode_t ws63_zw101_task_start(void);
 
 /**
- * @brief 请求 ZW101 自动识别任务执行一次识别。
+ * @brief 请求 ZW101 VERIFY 任务执行一次认证。
  *
  * @return errcode_t ERRCODE_SUCC 成功，其他失败。
  */
-errcode_t ws63_task_zw101_request_auto_identify(void);
+errcode_t ws63_task_zw101_request_verify(void);
 
 /**
- * @brief 取消尚未开始的 ZW101 自动识别请求。
+ * @brief 请求 ZW101 在检测到手指离开后再执行一次 VERIFY。
+ *
+ * 说明：用于认证失败后的重试节流，避免手指未离开时立即重入认证。
+ *
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
  */
-void ws63_task_zw101_cancel_auto_identify_request(void);
+errcode_t ws63_task_zw101_request_verify_after_release(void);
+
+/**
+ * @brief 重置 ZW101 在当前 ARMED 窗口的失败禁用状态。
+ *
+ * 说明：用于每次新进入 ARMED 时清空上一个窗口的禁用与失败计数。
+ */
+void ws63_task_zw101_reset_armed_window_guard(void);
+
+/**
+ * @brief 取消尚未开始的 ZW101 VERIFY 请求。
+ */
+void ws63_task_zw101_cancel_verify_request(void);
+
+/**
+ * @brief 获取最近一次 ZW101 VERIFY 返回的 ACK。
+ *
+ * @return uint8_t 最近 ACK 码，0xFF 表示暂无有效记录。
+ */
+uint8_t ws63_task_zw101_get_last_verify_ack(void);
+
+/**
+ * @brief 查询 TTP229 是否已在当前 armed 周期内被失败封禁。
+ *
+ * @return uint8_t 1=已封禁，0=仍可继续输入。
+ */
+uint8_t ws63_task_ttp229_is_password_disabled(void);
 
 /**
  * @brief camera 任务发送文本消息。

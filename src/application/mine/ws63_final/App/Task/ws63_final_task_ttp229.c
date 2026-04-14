@@ -42,7 +42,11 @@ static ws63_ttp229_sample_t g_ws63_ttp229_last_sample = {
 static uint8_t g_ws63_ttp229_password_session_active = 0U;
 static uint8_t g_ws63_ttp229_password_len = 0U;
 static uint8_t g_ws63_ttp229_password_overflow = 0U;
+static uint8_t g_ws63_ttp229_password_fail_streak = 0U;
+static uint8_t g_ws63_ttp229_password_disabled = 0U;
 static uint16_t g_ws63_ttp229_password_last_mask = 0U;
+/* 已按下但尚未在抬起时提交的单键缓存。 */
+static uint16_t g_ws63_ttp229_password_pending_mask = 0U;
 static uint32_t g_ws63_ttp229_password_deadline_ms = 0U;
 static char g_ws63_ttp229_password_buf[WS63_TTP229_PASSWORD_LEN + 1U] = {0};
 
@@ -229,6 +233,7 @@ static void ws63_ttp229_password_reset(void)
     g_ws63_ttp229_password_len = 0U;
     g_ws63_ttp229_password_overflow = 0U;
     g_ws63_ttp229_password_last_mask = 0U;
+    g_ws63_ttp229_password_pending_mask = 0U;
     g_ws63_ttp229_password_deadline_ms = 0U;
     g_ws63_ttp229_password_session_active = 0U;
     ws63_ttp229_unlock(irq_status);
@@ -251,6 +256,7 @@ static void ws63_ttp229_password_start_session(void)
     g_ws63_ttp229_password_len = 0U;
     g_ws63_ttp229_password_overflow = 0U;
     g_ws63_ttp229_password_last_mask = 0U;
+    g_ws63_ttp229_password_pending_mask = 0U;
     g_ws63_ttp229_password_deadline_ms = now_ms + WS63_LOCK_AUTH_WINDOW_MS_DEFAULT;
     g_ws63_ttp229_password_session_active = 1U;
     ws63_ttp229_unlock(irq_status);
@@ -265,6 +271,23 @@ static void ws63_ttp229_password_stop_session(void)
 }
 
 /**
+ * @brief 重置 TTP229 在当前 armed 周期内的失败封禁状态。
+ *
+ * 说明：一旦门锁退出 armed，失败封禁就只应保留到本次输入周期结束，不应
+ * 跨到下一轮接近唤醒窗口。
+ */
+static void ws63_ttp229_password_reset_cycle_guard(void)
+{
+    unsigned int irq_status;
+
+    irq_status = ws63_ttp229_lock();
+    g_ws63_ttp229_password_fail_streak = 0U;
+    g_ws63_ttp229_password_disabled = 0U;
+    ws63_ttp229_unlock(irq_status);
+    ws63_ttp229_password_stop_session();
+}
+
+/**
  * @brief 播放按键轻提示音。
  */
 static void ws63_ttp229_password_beep(void)
@@ -275,11 +298,139 @@ static void ws63_ttp229_password_beep(void)
 }
 
 /**
+ * @brief 刷新 TTP229 触发的 armed 续命窗口并打印显式日志。
+ *
+ * 说明：仅在“抬起后提交成功”时调用，避免按住采样阶段刷屏。
+ *
+ * @param pressed_mask 本次成功提交的按键位图。
+ * @param key_text 本次成功提交的可读按键文本。
+ * @param now_ms 当前时间戳，用于同步更新 TTP229 密码会话 deadline。
+ */
+static void ws63_ttp229_log_auth_window_renewal(uint16_t pressed_mask, const char *key_text, uint32_t now_ms)
+{
+    unsigned int irq_status;
+    uint32_t deadline_before_ms;
+    uint32_t deadline_after_ms;
+
+    if (key_text == NULL) {
+        return;
+    }
+
+    deadline_before_ms = ws63_lock_mgr_get_auth_window_deadline_ms();
+    if (ws63_lock_mgr_refresh_auth_window() != ERRCODE_SUCC) {
+        return;
+    }
+
+    irq_status = ws63_ttp229_lock();
+    if (g_ws63_ttp229_password_session_active != 0U) {
+        g_ws63_ttp229_password_deadline_ms = now_ms + WS63_LOCK_AUTH_WINDOW_MS_DEFAULT;
+    }
+    ws63_ttp229_unlock(irq_status);
+
+    deadline_after_ms = ws63_lock_mgr_get_auth_window_deadline_ms();
+    osal_printk("[wk2114 final task] TTP229 armed renew key=%s mask=0x%04x deadline=%u->%u\r\n",
+        key_text,
+        (unsigned int)pressed_mask,
+        (unsigned int)deadline_before_ms,
+        (unsigned int)deadline_after_ms);
+}
+
+/**
+ * @brief 将已按下但尚未提交的 TTP229 键值写入密码缓存。
+ *
+ * 说明：这里只在抬起态处理提交结果，避免长按或持续采样导致重复入码。
+ * 数字键在成功入库后才会续命并打印日志；`#` 则在成功校验后再补一次续命。
+ *
+ * @param pending_mask 已缓存的单键位图。
+ * @param armed 当前是否处于门锁接近唤醒窗口。
+ * @param now_ms 当前时间戳，用于同步更新密码会话 deadline。
+ */
+static void ws63_ttp229_password_commit_pending(uint16_t pending_mask, uint8_t armed, uint32_t now_ms)
+{
+    char key_text[8] = {0};
+    uint8_t passed = 0U;
+
+    if (pending_mask == 0U) {
+        return;
+    }
+
+    if (ws63_ttp229_format_pressed_text(pending_mask, key_text, sizeof(key_text)) != ERRCODE_SUCC) {
+        return;
+    }
+
+    if ((key_text[0] >= '0') && (key_text[0] <= '9') && (key_text[1] == '\0')) {
+        if ((g_ws63_ttp229_password_len < WS63_TTP229_PASSWORD_LEN) && (g_ws63_ttp229_password_overflow == 0U)) {
+            g_ws63_ttp229_password_buf[g_ws63_ttp229_password_len] = key_text[0];
+            g_ws63_ttp229_password_len++;
+            g_ws63_ttp229_password_buf[g_ws63_ttp229_password_len] = '\0';
+            if (armed != 0U) {
+                ws63_ttp229_log_auth_window_renewal(pending_mask, key_text, now_ms);
+            }
+        } else {
+            g_ws63_ttp229_password_overflow = 1U;
+        }
+        return;
+    }
+
+    if ((key_text[0] != '#') || (key_text[1] != '\0')) {
+        return;
+    }
+
+    if (armed == 0U) {
+        return;
+    }
+
+    if ((g_ws63_ttp229_password_overflow == 0U) &&
+        (g_ws63_ttp229_password_len == WS63_TTP229_PASSWORD_LEN) &&
+        (strcmp(g_ws63_ttp229_password_buf, WS63_TTP229_PASSWORD_TEXT) == 0)) {
+        passed = 1U;
+    }
+
+    osal_printk("[wk2114 final task] TTP229 password %s, input=%s\r\n",
+        (passed != 0U) ? "pass" : "fail",
+        g_ws63_ttp229_password_buf);
+    if (passed != 0U) {
+        unsigned int irq_status;
+
+        irq_status = ws63_ttp229_lock();
+        g_ws63_ttp229_password_fail_streak = 0U;
+        g_ws63_ttp229_password_disabled = 0U;
+        ws63_ttp229_unlock(irq_status);
+        ws63_ttp229_log_auth_window_renewal(pending_mask, key_text, now_ms);
+    } else {
+        unsigned int irq_status;
+
+        /*
+         * 失败声光提示由 lock_mgr 统一触发：
+         * 1) 按键与指纹失败行为保持一致；
+         * 2) 避免来源层和编排层双重蜂鸣。
+         */
+        irq_status = ws63_ttp229_lock();
+        if (g_ws63_ttp229_password_fail_streak < 0xFFU) {
+            g_ws63_ttp229_password_fail_streak++;
+        }
+        if ((g_ws63_ttp229_password_fail_streak >= WS63_TTP229_PASSWORD_FAIL_DISABLE_THRESHOLD) &&
+            (g_ws63_ttp229_password_disabled == 0U)) {
+            g_ws63_ttp229_password_disabled = 1U;
+            osal_printk("[wk2114 final task] TTP229 password disabled after %u continuous failures\r\n",
+                (unsigned int)WS63_TTP229_PASSWORD_FAIL_DISABLE_THRESHOLD);
+        }
+        ws63_ttp229_unlock(irq_status);
+    }
+    (void)ws63_lock_mgr_report_auth_result(WS63_LOCK_AUTH_SOURCE_TTP229, passed);
+    ws63_ttp229_password_stop_session();
+}
+
+/**
  * @brief 处理 TTP229 密码输入。
+ *
+ * 关键流程：
+ * 1) 按下时只做蜂鸣提示，不再续命；
+ * 2) 抬起时将缓存的单键提交到密码缓冲区，成功后再续命；
+ * 3) `#` 只在抬起时触发最终校验，校验成功后补一次续命，避免长按重复提交。
  */
 static void ws63_ttp229_handle_password_input(const ws63_ttp229_sample_t *sample)
 {
-    char key_text[8] = {0};
     uint8_t armed;
     uint32_t now_ms;
 
@@ -289,9 +440,22 @@ static void ws63_ttp229_handle_password_input(const ws63_ttp229_sample_t *sample
 
     now_ms = ws63_os_tick_ms();
     armed = ws63_lock_mgr_is_armed();
-    if (sample->pressed_mask != 0U) {
-        (void)ws63_lock_mgr_refresh_auth_window();
+
+    /* 当前不在 armed 窗口时，失败封禁必须随窗口一起收口，避免影响下一轮输入。 */
+    if (armed == 0U) {
+        if ((g_ws63_ttp229_password_fail_streak != 0U) || (g_ws63_ttp229_password_disabled != 0U)) {
+            ws63_ttp229_password_reset_cycle_guard();
+        } else {
+            ws63_ttp229_password_stop_session();
+        }
+        return;
     }
+
+    if (g_ws63_ttp229_password_disabled != 0U) {
+        ws63_ttp229_password_stop_session();
+        return;
+    }
+
     if ((g_ws63_ttp229_password_session_active != 0U) &&
         (g_ws63_ttp229_password_deadline_ms != 0U) &&
         (now_ms >= g_ws63_ttp229_password_deadline_ms)) {
@@ -299,7 +463,13 @@ static void ws63_ttp229_handle_password_input(const ws63_ttp229_sample_t *sample
     }
 
     if (sample->pressed_mask == 0U) {
+        if (g_ws63_ttp229_password_pending_mask != 0U) {
+            ws63_ttp229_password_commit_pending(g_ws63_ttp229_password_pending_mask, armed, now_ms);
+        }
+
+        /* 已进入抬起态后清空最后一次采样，下一次按下会重新生成边沿。 */
         g_ws63_ttp229_password_last_mask = 0U;
+        g_ws63_ttp229_password_pending_mask = 0U;
         return;
     }
 
@@ -307,53 +477,34 @@ static void ws63_ttp229_handle_password_input(const ws63_ttp229_sample_t *sample
         ws63_ttp229_password_start_session();
     }
 
-    g_ws63_ttp229_password_deadline_ms = now_ms + WS63_LOCK_AUTH_WINDOW_MS_DEFAULT;
-
     if (sample->pressed_mask == g_ws63_ttp229_password_last_mask) {
         return;
     }
 
+    /* 只在采样到新的单键按下时缓存一次，长按不会重复入码。 */
     g_ws63_ttp229_password_last_mask = sample->pressed_mask;
 
     if (sample->pressed_count != 1U) {
+        g_ws63_ttp229_password_pending_mask = 0U;
         return;
     }
 
-    if (ws63_ttp229_format_pressed_text(sample->pressed_mask, key_text, sizeof(key_text)) != ERRCODE_SUCC) {
-        return;
-    }
+    g_ws63_ttp229_password_pending_mask = sample->pressed_mask;
+    ws63_ttp229_password_beep();
+}
 
-    if ((key_text[0] >= '0') && (key_text[0] <= '9') && (key_text[1] == '\0')) {
-        if ((g_ws63_ttp229_password_len < WS63_TTP229_PASSWORD_LEN) && (g_ws63_ttp229_password_overflow == 0U)) {
-            g_ws63_ttp229_password_buf[g_ws63_ttp229_password_len] = key_text[0];
-            g_ws63_ttp229_password_len++;
-            g_ws63_ttp229_password_buf[g_ws63_ttp229_password_len] = '\0';
-            ws63_ttp229_password_beep();
-        } else {
-            g_ws63_ttp229_password_overflow = 1U;
-        }
-        return;
-    }
+/**
+ * @brief 查询 TTP229 当前 armed 周期是否已被失败封禁。
+ */
+uint8_t ws63_task_ttp229_is_password_disabled(void)
+{
+    unsigned int irq_status;
+    uint8_t disabled;
 
-    if ((key_text[0] == '#') && (key_text[1] == '\0')) {
-        if (armed == 0U) {
-            return;
-        }
-
-        uint8_t passed = 0U;
-
-        if ((g_ws63_ttp229_password_overflow == 0U) &&
-            (g_ws63_ttp229_password_len == WS63_TTP229_PASSWORD_LEN) &&
-            (strcmp(g_ws63_ttp229_password_buf, WS63_TTP229_PASSWORD_TEXT) == 0)) {
-            passed = 1U;
-        }
-
-        osal_printk("[wk2114 final task] TTP229 password %s, input=%s\r\n",
-            (passed != 0U) ? "pass" : "fail",
-            g_ws63_ttp229_password_buf);
-        (void)ws63_lock_mgr_report_auth_result(WS63_LOCK_AUTH_SOURCE_TTP229, passed);
-        ws63_ttp229_password_stop_session();
-    }
+    irq_status = ws63_ttp229_lock();
+    disabled = g_ws63_ttp229_password_disabled;
+    ws63_ttp229_unlock(irq_status);
+    return disabled;
 }
 
 /**

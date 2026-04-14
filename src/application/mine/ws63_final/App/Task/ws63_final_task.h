@@ -6,6 +6,15 @@
 #ifndef WS63_TASK_H
 #define WS63_TASK_H
 
+
+/**
+ * @brief 取消当前可能正在执行的 ZW101 VERIFY 流程。
+ *
+ * 说明：先清理任务层挂起请求，再下发协议层 CANCEL，尽量同时覆盖“尚未开始”和“已经进入设备侧”的两种情况。
+ *
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_task_zw101_cancel_active_request(void);
 #include <stdint.h>
 
 #include "errcode.h"
@@ -384,6 +393,15 @@ errcode_t ws63_task_sle_uplink_log_set_gap_ms(uint32_t gap_ms);
 uint32_t ws63_task_sle_uplink_log_get_gap_ms(void);
 
 /**
+ * @brief 通过 SLE 向主机侧发送调试日志文本。
+ *
+ * @param data 日志文本数据。
+ * @param len  日志长度。
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_task_send_debug_log_to_host(const uint8_t *data, uint16_t len);
+
+/**
  * @brief 重新初始化 ZW101（触发握手检测）。
  *
  * @return errcode_t ERRCODE_SUCC 成功，其他失败。
@@ -391,99 +409,76 @@ uint32_t ws63_task_sle_uplink_log_get_gap_ms(void);
 errcode_t ws63_task_zw101_reinit(void);
 
 /**
- * @brief 执行 ZW101 标准握手命令（0x35）。
+ * @brief 执行 ZW101 ECHO 命令。
  *
  * @param ack_out 输出 ACK 码，可为空。
- * @return errcode_t ERRCODE_SUCC=握手成功，其他=失败。
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
  */
-errcode_t ws63_task_zw101_handshake(uint8_t *ack_out);
+errcode_t ws63_task_zw101_echo(uint8_t *ack_out);
 
 /**
- * @brief 执行 ZW101 传感器检测命令（0x36）。
+ * @brief 执行 ZW101 自动验证（VERIFY）。
+ *
+ * @param score_level 安全等级（1~5）。
+ * @param target_id 目标 ID；0xFFFF 表示 1:N。
+ * @param param_flags 参数位。
+ * @param match_id_out 输出匹配 ID，可为空。
+ * @param score_out 输出匹配分数，可为空。
+ * @param ack_out 输出 ACK 码，可为空。
+ * @return errcode_t ERRCODE_SUCC=认证通过，其他=认证失败。
+ */
+errcode_t ws63_task_zw101_verify(uint8_t score_level,
+    uint16_t target_id,
+    uint16_t param_flags,
+    uint16_t *match_id_out,
+    uint16_t *score_out,
+    uint8_t *ack_out);
+
+/**
+ * @brief 执行 ZW101 自动注册（ENROLL）。
+ *
+ * @param page_id 模板 ID。
+ * @param enroll_times 采样次数（2~6）。
+ * @param param_flags 参数位。
+ * @param ack_out 输出 ACK 码，可为空。
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_task_zw101_enroll(uint16_t page_id,
+    uint8_t enroll_times,
+    uint16_t param_flags,
+    uint8_t *ack_out);
+
+/**
+ * @brief 查询 ZW101 有效模板数量（LIST）。
+ *
+ * @param valid_num_out 输出有效模板数量。
+ * @param ack_out 输出 ACK 码，可为空。
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_task_zw101_list(uint16_t *valid_num_out, uint8_t *ack_out);
+
+/**
+ * @brief 删除 ZW101 模板（DEL）。
+ */
+errcode_t ws63_task_zw101_delete(uint16_t page_id,
+    uint16_t count,
+    uint8_t *ack_out);
+
+/**
+ * @brief 清空 ZW101 模板库（CLEAR）。
  *
  * @param ack_out 输出 ACK 码，可为空。
- * @return errcode_t ERRCODE_SUCC=检测成功，其他=失败。
- */
-errcode_t ws63_task_zw101_check_sensor(uint8_t *ack_out);
-
-/**
- * @brief 向 ZW101 发送原始命令帧。
- *
- * @param data 命令缓冲区。
- * @param len  命令长度。
  * @return errcode_t ERRCODE_SUCC 成功，其他失败。
  */
-errcode_t ws63_task_zw101_send_raw(const uint8_t *data, uint16_t len);
+errcode_t ws63_task_zw101_clear(uint8_t *ack_out);
 
 /**
- * @brief 执行 ZW101 ZA 握手（GetEcho）。
+ * @brief 取消 ZW101 当前流程（CANCEL）。
  *
- * @param ack_out 输出确认码，可为 NULL。
+ * @param ack_out 输出 ACK 码，可为空。
  * @return errcode_t ERRCODE_SUCC 成功，其他失败。
  */
-errcode_t ws63_task_zw101_za_get_echo(uint8_t *ack_out);
-
-/**
- * @brief 执行 ZW101 ZA 自动登记（AutoLogin）。
- */
-errcode_t ws63_task_zw101_za_auto_login(uint8_t wait_time,
-    uint8_t sample_interval_code,
-    uint8_t press_times,
-    uint16_t page_id,
-    uint8_t allow_dup,
-    uint8_t *ack_out);
-
-/**
- * @brief 执行 ZW101 ZA 自动搜索（AutoSearch）。
- *
- * @param wait_time 待指时长。
- * @param start_page 起始页。
- * @param page_num 搜索页数。
- * @param page_id_out 输出匹配页码，可为 NULL。
- * @param score_out 输出匹配得分，可为 NULL。
- * @param ack_out 输出确认码，可为 NULL。
- * @return errcode_t ERRCODE_SUCC 成功，其他失败。
- */
-errcode_t ws63_task_zw101_za_auto_search(uint8_t wait_time,
-    uint16_t start_page,
-    uint16_t page_num,
-    uint16_t *page_id_out,
-    uint16_t *score_out,
-    uint8_t *ack_out);
-
-/**
- * @brief 执行 ZW101 ZA 搜索指纹（带残留判断，SearchResBack）。
- */
-errcode_t ws63_task_zw101_za_search_res_back(uint8_t buffer_id,
-    uint16_t start_page,
-    uint16_t page_num,
-    uint16_t *page_id_out,
-    uint16_t *score_out,
-    uint8_t *ack_out);
-
-/**
- * @brief 执行 ZW101 ZA 自动登记（灯常亮，AutoLoginStabLight）。
- */
-errcode_t ws63_task_zw101_za_auto_login_stab(uint8_t wait_time,
-    uint8_t press_times,
-    uint16_t page_id,
-    uint8_t allow_dup,
-    uint8_t *ack_out);
-
-/**
- * @brief 执行 ZW101 ZA 自动搜索（搜前提示，AutoSearchWithEcho）。
- */
-errcode_t ws63_task_zw101_za_auto_search_echo(uint8_t wait_time,
-    uint16_t start_page,
-    uint16_t page_num,
-    uint16_t *page_id_out,
-    uint16_t *score_out,
-    uint8_t *ack_out);
-
-/**
- * @brief 执行 ZW101 ZA 过程终止（ProcessTerminateCmd）。
- */
-errcode_t ws63_task_zw101_za_terminate(uint8_t *ack_out);
+errcode_t ws63_task_zw101_cancel(uint8_t *ack_out);
 
 /**
  * @brief 触发 TTP229 状态机重初始化。

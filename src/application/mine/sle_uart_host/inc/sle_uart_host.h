@@ -40,7 +40,20 @@ extern "C" {
  * 默认仅启用 UART0。若需同时启用多路，请按位或组合：
  * 例如：MINE_UART_EN_UART0 | MINE_UART_EN_UART1 | MINE_UART_EN_UART2
  */
-#define MINE_UART_ENABLE_MASK (MINE_UART_EN_UART0 | MINE_UART_EN_UART2)
+#define MINE_UART_ENABLE_MASK (MINE_UART_EN_UART0)
+
+/**
+ * @brief Host 严格命令入口开关。
+ *
+ * 1=仅允许指定命令 UART 总线（默认 UART0）下发到 SLE，
+ * 其余 UART 只保留本地观测，不进入“主机->从机”命令链路。
+ */
+#define MINE_HOST_STRICT_CMD_INPUT_ENABLE 1U
+
+/**
+ * @brief Host 命令输入 UART 总线。
+ */
+#define MINE_HOST_CMD_UART_BUS MINE_UART0_BUS
 
 /**
  * @brief UART0 引脚配置。
@@ -80,6 +93,13 @@ extern "C" {
  * @brief Host 广播名（从机会按该名称过滤目标设备）。
  */
 #define MINE_SLE_UART_HOST_NAME "mine_sle_host"
+
+/* 严格模式编译守卫：命令输入口必须在使能掩码内。 */
+#if (MINE_HOST_STRICT_CMD_INPUT_ENABLE == 1U)
+#if ((MINE_UART_ENABLE_MASK & (1U << MINE_HOST_CMD_UART_BUS)) == 0U)
+#error "MINE_HOST_CMD_UART_BUS must be enabled in MINE_UART_ENABLE_MASK when strict mode is on"
+#endif
+#endif
 
 /**
  * @brief Host 侧回退 SLE MAC。

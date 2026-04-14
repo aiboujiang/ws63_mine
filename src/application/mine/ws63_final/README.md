@@ -2,12 +2,76 @@
 
 ## 1. ¼Ü¹¹¶¨Î»
 
-1. Ö÷¿Ø£ºWS63¡£
-2. ÍâÉè£ºWK2114£¨UART À©Õ¹Ğ¾Æ¬£©¡£
-3. ·Ö²ãÔ­Ôò£ºÉÏ²ãÖ»ÄÜµ÷ÓÃÏÂ²ã£¬ÏÂ²ã¾ø²»µ÷ÓÃÉÏ²ã¡£
-4. Ó²¼ş²Ù×÷±ß½ç£º½ö `BSP` ¿ÉÖ±½Óµ÷ÓÃ WS63 µÄ GPIO/UART/IRQ API¡£
+±¾ÏµÍ³ÃæÏòÃÅËøÖÕ¶ËµÄ¶à´«¸ĞÆ÷Ğ­Í¬Óë¶àÁ´Â·Í¨ĞÅĞèÇó£¬½áºÏ `ws63_final` µÄÓ¦ÓÃ·Ö²ãÓë `sle_uart_host` µÄÖ÷»úÇÅ½Ó·½Ê½£¬²ÉÓÃ×Ôµ×ÏòÉÏµÄ·Ö²ãÊ½Èí¼ş¼Ü¹¹½øĞĞÉè¼Æ¡£ÕûÌå½á¹¹ÓÉ `BSP`¡¢`Driver`¡¢`Middleware`¡¢`App/Task` Óë `App/Main` Îå¸ö²ã¼¶×é³É£¬²¢Í¨¹ıÖ÷»ú²à `sle_uart_host` Íê³É UART0 Óë SLE/SSAPS Ö®¼äµÄÃüÁî½ÓÈë¡¢Êı¾İ×ª·¢ºÍ¿ÉÊÓ»¯µ÷ÊÔ¡£¸Ã¼Ü¹¹µÄ»ù±¾Ô­ÔòÊÇµ¥ÏòÒÀÀµ£ºÉÏ²ã½öÄÜµ÷ÓÃÏÂ²ãÌá¹©µÄ½Ó¿Ú£¬ÏÂ²ã²»µÃ·´ÏòÒÀÀµÉÏ²ãÒµÎñÂß¼­¡£ÕâÑù¿ÉÒÔ°ÑÓ²¼ş¼Ä´æÆ÷·ÃÎÊ¡¢Ğ­ÒéÏ¸½Ú´¦ÀíºÍÒµÎñ±àÅÅÑÏ¸ñ·ÖÀë£¬±ÜÃâÒµÎñ´úÂëÖ±½ÓñîºÏµ×²ãÊµÏÖ¡£
 
-## 2. Ä¿Â¼½á¹¹
+´ÓÂÛÎÄ±í´ï½Ç¶È¿´£¬ÕâÒ»¼Ü¹¹µÄºËĞÄ¼ÛÖµÔÚÓÚ½«¡°ÈÎÎñµ÷¶È¡¢Ğ­Òé×ª»»¡¢Ó²¼ş·ÃÎÊ¡¢ÒµÎñ±àÅÅ¡±ËÄÀàÖ°Ôğ²ğ·Öµ½²»Í¬Ä£¿éÖĞ£¬Ê¹Ã¿Ò»²ã¶¼Ö»¹Ø×¢×Ô¼ºËùÔÚ±ß½çÄÚµÄÎÊÌâ¡£¶ÔÓÚÊµÊ±ĞÔÒªÇó½Ï¸ß¡¢ÍâÉèÀàĞÍ½Ï¶àµÄÇ¶ÈëÊ½ÃÅËøÏµÍ³£¬ÕâÖÖ·½Ê½¿ÉÒÔÏÔÖø½µµÍÄ£¿éñîºÏ¶È£¬ÌáÉı¿ÉÎ¬»¤ĞÔ¡¢¿ÉÒÆÖ²ĞÔºÍºóĞøÀ©Õ¹ÄÜÁ¦£¬Í¬Ê±Ò²±ãÓÚÔÚĞÂÔö´«¸ĞÆ÷»òĞÂÔöÍ¨ĞÅÁ´Â·Ê±±£³Ö½Ó¿ÚÎÈ¶¨¡£
+
+### 1.1 Éè¼ÆÄ¿±ê
+
+1. ÃæÏò¶à´«¸ĞÆ÷Ğ­Í¬³¡¾°£¬Í³Ò»´¦Àí camera¡¢LD2402¡¢ZW101¡¢TTP229¡¢RGB¡¢·äÃùÆ÷¡¢µç»úÓë±àÂëÆ÷µÈÍâÉèÊı¾İ¡£
+2. ÃæÏò¶àÁ´Â·Í¨ĞÅ³¡¾°£¬½«±¾µØ UART ¿ØÖÆ¡¢WK2114 ×Ó´®¿ÚÀ©Õ¹Óë SLE/SSAPS ÎŞÏßÇÅ½ÓÍ³Ò»ÄÉÈëÍ¬Ò»Ì×µ÷¶È¿ò¼Ü¡£
+3. ÃæÏòÃÅËøºËĞÄÒµÎñ£¬½«×´Ì¬¹ÜÀí¡¢ÈÏÖ¤ÅĞ¶¨¡¢¿ªËø¿ØÖÆÓë¸æ¾¯´¦ÀíÊÕÁ²µ½¶ÀÁ¢µÄÒµÎñ±àÅÅ²ã£¬±ÜÃâÒµÎñÂß¼­É¢ÂäÔÚÇı¶¯Ï¸½ÚÖĞ¡£
+4. ÃæÏò¹¤³Ì¿ÉÎ¬»¤ĞÔ£¬È·±£ÈÎºÎĞÂÔö¹¦ÄÜ¶¼ÄÜÃ÷È·ÂäÎ»µ½¶ÔÓ¦²ã¼¶£¬¶ø²»ÊÇ¿ç²ãĞŞ¸Ä¶à¸öÄ£¿é¡£
+
+### 1.2 ·Ö²ãÖ°Ôğ
+
+1. `App/Main`£ºÏµÍ³Ö÷Èë¿Ú£¬Ö»¸ºÔğ´´½¨ÒµÎñ×ÜÈÎÎñ£¬²»³ĞÔØ¾ßÌåÒµÎñÂß¼­¡£
+2. `App/Task`£ºÓ¦ÓÃÈÎÎñ²ã£¬¸ºÔğÈÎÎñ³õÊ¼»¯¡¢ÂÖÑ¯µ÷¶È¡¢ÏûÏ¢¶ÓÁĞ·Ö·¢¡¢ÈÏÖ¤×´Ì¬»ú¡¢´«¸ĞÆ÷½á¹ûÈÚºÏÒÔ¼°ÃÅËøÒµÎñ±àÅÅ¡£
+3. `Middleware`£ºÖĞ¼ä¼ş²ã£¬¸ºÔğ OSAL ·â×°¡¢SLE Á¬½ÓÓë SSAPS ×ª·¢µÈÆ½Ì¨ÄÜÁ¦£¬°ÑĞ­ÒéÁ´Â·ºÍÏµÍ³³éÏó·â×°ÎªÎÈ¶¨½Ó¿Ú¡£
+4. `Driver`£ºÉè±¸Çı¶¯²ã£¬¸ºÔğ WK2114¡¢¶àÂ·×Ó´®¿Ú¡¢LD2402¡¢ZW101¡¢camera µÈÍâÉèĞ­ÒéÊµÏÖ£¬ÏòÉÏÖ»Êä³ö±ê×¼»¯Êı¾İºÍ¿ØÖÆ½á¹û¡£
+5. `BSP`£º°å¼¶Ö§³Å²ã£¬¸ºÔğ GPIO¡¢UART¡¢I2C¡¢SPI¡¢PWM¡¢IRQ µÈµ×²ã×ÊÔ´·ÃÎÊ£¬ÊÇÎ¨Ò»ÔÊĞíÖ±½Ó½Ó´¥ WS63 Ó²¼ş³éÏó½Ó¿ÚµÄ²ã¼¶¡£
+
+Ö÷»ú²à `sle_uart_host` Î»ÓÚÏµÍ³Íâ²¿£¬³Ğµ£¡°ÉÏÎ»»úÃüÁîÈë¿Ú + SLE/SSAPS ÇÅ½ÓÆ÷¡±µÄ½ÇÉ«¡£ËüÍ¨¹ı UART0 ½ÓÊÕµ÷ÊÔÖ¸Áî£¬ÔÙ½«ÃüÁî×ª·¢µ½ SLE ÏÂĞĞÁ´Â·£»Í¬Ê±½ÓÊÕ ws63_final µÄ SLE ÉÏĞĞÊı¾İ£¬²¢°Ñ½á¹û»ØÏÔµ½Ö÷»ú´®¿Ú¡£ÕâÑù¿ÉÒÔ°Ñ±¾µØ¿ØÖÆÌ¨ºÍÎŞÏßÁ´Â·Í³Ò»ÎªÍ¬Ò»Ìõµ÷ÊÔ±Õ»·¡£
+
+### 1.3 Æô¶¯Á´Â·
+
+ÏµÍ³Æô¶¯ºó£¬`App/Main` ÏÈ´´½¨ `App/Task` ÈÎÎñÈë¿Ú£¬ÔÙÓÉÈÎÎñ²ã°´³õÊ¼»¯Ë³ĞòÍê³É `Middleware`¡¢`Driver` Óë `BSP` µÄÄÜÁ¦×°Åä¡£Ëæºó£¬¸÷ÒµÎñ×ÓÄ£¿é½øÈë¶ÀÁ¢ÈÎÎñ»ò×´Ì¬»úÔËĞĞ½×¶Î£¬ÀıÈçµç»úÓë±àÂëÆ÷ÓÃÓÚÔË¶¯¿ØÖÆ£¬LD2402 ÓÃÓÚ¾àÀë¼ì²â£¬ZW101 ÓÃÓÚÖ¸ÎÆÈÏÖ¤£¬TTP229 ÓÃÓÚÃÜÂëÊäÈë£¬camera ÓÃÓÚÊÓ¾õÊ¶±ğ£¬RGB Óë·äÃùÆ÷ÓÃÓÚ×´Ì¬·´À¡¡£Ö÷ÈÎÎñ¸ºÔğ°ÑÕâĞ©Ä£¿éµÄ½á¹û»ã×Ü³ÉÃÅËø×´Ì¬£¬²¢ÔÚ±ØÒªÊ±´¥·¢¿ªËø¡¢±£³Ö¡¢¸æ¾¯»ò»Ö¸´¶¯×÷¡£
+
+### 1.4 Êı¾İÁ÷×éÖ¯
+
+ÏµÍ³ÔËĞĞÊ±£¬Êı¾İÁ´Â·Í¨³£×ñÑ­¡°²É¼¯ - ·Ö·¢ - ´¦Àí - »Ø´«¡±µÄË³Ğò×éÖ¯£º
+
+1. ÍâÉèÔÚ `Driver` »ò `BSP` ²ãÍê³É²ÉÑùÓëĞ­ÒéÊÕ°ü¡£
+2. ²É¼¯½á¹û½øÈë `App/Task` ²ãµÄ·Ö·¢¶ÓÁĞ»ò»Øµ÷Èë¿Ú¡£
+3. ÒµÎñÈÎÎñ¸ù¾İ´«¸ĞÆ÷½á¹ûÍê³ÉÈÏÖ¤ÅĞ¶Ï¡¢×´Ì¬¸üĞÂºÍ¶¯×÷¾ö²ß¡£
+4. ¾ö²ß½á¹ûÔÙÍ¨¹ı `Middleware` »òÖ÷»ú²à `sle_uart_host` »Ø´«µ½ÉÏÎ»»ú£¬ĞÎ³É±Õ»·¹Û²âÁ´Â·¡£
+
+ÕâÖÖ×éÖ¯·½Ê½µÄ¹Ø¼üÔÚÓÚ½âñî¡£ÈÎÎñÖ®¼äÍ¨¹ı¶ÓÁĞ¡¢»Øµ÷ºÍ×´Ì¬±êÖ¾½øĞĞ½»»¥£¬±ÜÃâÍ¬²½×èÈûºÍ¿ç²ãÖ±½Óµ÷ÓÃ£»Ö÷»úÓëÉè±¸Ö®¼äÍ¨¹ı SLE/SSAPS ºÍ UART ÇÅ½Ó½øĞĞÍ¨ĞÅ£¬±ÜÃâÒµÎñÂß¼­Ö±½ÓÒÀÀµ¾ßÌå´®¿ÚÊµÏÖ¡£
+
+### 1.5 ¼Ü¹¹ÊÕÒæ
+
+1. ¿ÉÎ¬»¤ĞÔ¸üÇ¿£ºÃ¿¸öÄ£¿éÖ°Ôğµ¥Ò»£¬ÎÊÌâ¶¨Î»Ê±Ö»Ğè¹Ø×¢¶ÔÓ¦²ã¼¶¡£
+2. ¿ÉÒÆÖ²ĞÔ¸üºÃ£ºµ×²ãÓ²¼ş²îÒìÖ÷Òª¼¯ÖĞÔÚ `BSP` Óë `Driver`£¬ÒµÎñ²ãÎŞĞè¸ĞÖª¾ßÌå¼Ä´æÆ÷ºÍÒı½Å±ä»¯¡£
+3. ¿ÉÀ©Õ¹ĞÔ¸ü¸ß£ºĞÂÔöÍâÉèÊ±£¬Ö»ĞèÔÚ `Driver` »ò `App/Task` Ôö¼Ó¶ÔÓ¦Ä£¿é£¬²¢Í¨¹ıÍ³Ò»½Ó¿Ú½ÓÈëÖ÷µ÷¶È¡£
+4. ÊµÊ±ĞÔ¸üÎÈ¶¨£ºÈÎÎñµ÷¶È¡¢Ğ­ÒéÊÕ·¢ºÍÓ²¼ş·ÃÎÊ·Ö²ãºó£¬¹Ø¼üÂ·¾¶¸üÇåÎú£¬±ãÓÚ¿ØÖÆ×èÈûµãºÍ²¢·¢³åÍ»¡£
+5. ¹¤³Ì±ß½ç¸üÃ÷È·£ºÃÅËøÒµÎñÂß¼­¡¢Ğ­Òé½âÎöÓëÓ²¼ş¿ØÖÆ±Ë´Ë¸ôÀë£¬½µµÍºóĞøÖØ¹¹µÄ³É±¾¡£
+
+## 2. ÏµÍ³¼Ü¹¹Í¼
+
+```mermaid
+flowchart TB
+	subgraph HOST[Ö÷»ú²à sle_uart_host]
+		HOST_UART[UART0 ÃüÁîÈë¿Ú]
+		HOST_SLE[SLE / SSAPS Á¬½ÓÓë×ª·¢]
+		HOST_APP[Ö÷»ú²àµ÷ÊÔÓë¿ØÖÆÂß¼­]
+		HOST_UART --> HOST_APP --> HOST_SLE
+	end
+
+	subgraph WS63[ws63_final]
+		MAIN[App/Main\nÈë¿ÚÆô¶¯]
+		TASK[App/Task\nÈÎÎñµ÷¶È / ÒµÎñ±àÅÅ]
+		MIDDLE[Middleware\nOSAL / SLE ÖĞ¼ä¼ş]
+		DRIVER[Driver\nÍâÉèĞ­ÒéÇı¶¯]
+		BSP[BSP\nGPIO / UART / I2C / SPI / PWM / IRQ]
+		MAIN --> TASK --> MIDDLE --> DRIVER --> BSP
+	end
+
+	HOST_SLE <-->|SLE / SSAPS\nÃüÁîÓëÊı¾İË«Ïò×ª·¢| MIDDLE
+	TASK -->|´«¸ĞÆ÷½á¹û / ¿ØÖÆÖ¸Áî| DRIVER
+	DRIVER -->|Ó²¼ş·ÃÎÊ| BSP
+```
+
+## 3. Ä¿Â¼½á¹¹
 
 ```text
 ws63_final/
@@ -20,7 +84,7 @@ ws63_final/
 ©¸©¤©¤ App/Main/    # Ó¦ÓÃÖ÷Èë¿Ú£¨ÈÎÎñÆô¶¯£©
 ```
 
-## 3. ¶ÔÍâ½Ó¿Ú
+## 4. ¶ÔÍâ½Ó¿Ú
 
 1. `ws63_start()`£ºÆô¶¯×îÖÕ°æÒµÎñÈÎÎñ¡£
 2. `ws63_task_register_rx_callback(sub_port, cb)`£º×¢²á×Ó´®¿Ú½ÓÊÕ»Øµ÷¡£
@@ -28,22 +92,22 @@ ws63_final/
 4. `ws63_task_buzzer_on(freq_hz)` / `ws63_task_buzzer_off()`£º¿ØÖÆ·äÃùÆ÷¿ª¹ØÓëÆµÂÊ¡£
 5. `ws63_task_buzzer_set_volume(volume_percent)`£ºÉèÖÃ·äÃùÆ÷ÒôÁ¿£¨Õ¼¿Õ±ÈÓ³Éä£©¡£
 6. `ws63_task_ld2402_reinit()` / `ws63_task_zw101_reinit()`£º´¥·¢Ä£¿éµ÷ÊÔÎÕÊÖÖØ³õÊ¼»¯¡£
-7. `ws63_task_zw101_za_*`£ºZW101 ZA ¼æÈİÃüÁîÇÅ½Ó½Ó¿Ú£¨»ØÏÔ/×Ô¶¯µÇÂ¼/×Ô¶¯ËÑË÷/ÖÕÖ¹£©¡£
-8. `ws63_zw101_task_start()` / `ws63_task_zw101_request_auto_identify()`£ºÃÅËø½Ó½ü´°¿ÚÄÚ×Ô¶¯´¥·¢Ö¸ÎÆÊ¶±ğÈÎÎñ¡£
+7. `ws63_task_zw101_echo()/verify()/enroll()/list()/delete()/clear()/cancel()`£ºZW101 ÖØ¹¹ºóµÄ×îĞ¡ÒµÎñ½Ó¿Ú¼¯ºÏ¡£
+8. `ws63_zw101_task_start()` / `ws63_task_zw101_request_verify()`£ºÃÅËø½Ó½ü´°¿ÚÄÚ´¥·¢ VERIFY ²¢µÈ´ıÈÏÖ¤½á¹û¡£
 
-## 4. ºóĞøÄ£¿éÕûºÏ½¨Òé
+## 5. ºóĞøÄ£¿éÕûºÏ½¨Òé
 
 1. Ã¿¸öÒµÎñÄ£¿é£¨Èç LD2402/ZW101£©ÔÚ `App/Task` ²ã×¢²á×Ô¼ºµÄ `rx_callback`¡£
 2. ÒµÎñÄ£¿é½ûÖ¹Ö±½Ó·ÃÎÊ BSP/¼Ä´æÆ÷£¬Ö»ÄÜµ÷ÓÃ Task/Driver ±©Â¶µÄ±ê×¼½Ó¿Ú¡£
 3. Èç¹ûĞÂÔöÓ²¼ş²îÒì£¨Òı½Å¡¢²¨ÌØÂÊ¡¢FIFO ãĞÖµ£©£¬ÓÅÏÈ¸Ä `Config`£¬²»¸ÄÒµÎñÂß¼­¡£
 
-## 5. ±àÒë¿ª¹Ø
+## 6. ±àÒë¿ª¹Ø
 
 ÔÚ menuconfig ÖĞ¿ªÆô£º
 
 - `Application -> Mine -> Support Mine WS63 final layered framework (WS63 master).`
 
-## 6. ±¸×¢
+## 7. ±¸×¢
 
 µ±Ç°¿ò¼ÜÒÑÍê³É»ù´¡Á´Â·£º
 
@@ -54,11 +118,315 @@ ws63_final/
 
 ÄãºóĞøÖ»ĞèÒªÔÚ `App/Task` ²ãÀ©Õ¹ÒµÎñÂß¼­£¬¼´¿ÉÍê³É¶àÄ£¿éÍ³Ò»ÕûºÏ¡£
 
-## 7. µ÷ÊÔÃüÁîÎÄµµ
+## 8. µ÷ÊÔÃüÁîÎÄµµ
 
 - ´®¿ÚÔÚÏß¿Ø²âÃüÁîÓëÈÕÖ¾ËµÃ÷Çë²é¿´£º`DEBUG_COMMANDS.md`
 
-## 8. ÈÎÎñÎ¬»¤¼ÇÂ¼
+## 9. ÈÎÎñÎ¬»¤¼ÇÂ¼
+
+### 2026-04-14: README ¼Ü¹¹ËµÃ÷°´ ws63_final Óë sle_uart_host ¿Ú¾¶Í³Ò»
+
+±ä¸üÕªÒª£º
+- ½«¼Ü¹¹¶¨Î»¸ÄĞ´ÎªÃæÏòÃÅËøÖÕ¶Ë¶à´«¸ĞÆ÷Óë¶àÁ´Â·Í¨ĞÅµÄ·Ö²ãÊ½ËµÃ÷£¬Ã÷È· ws63_final Óë sle_uart_host µÄÖ°Ôğ±ß½ç¡£
+- ²¹³äÏµÍ³¼Ü¹¹ Mermaid Í¼£¬Õ¹Ê¾Ö÷»ú²à UART0 -> SLE/SSAPS -> ws63_final µÄÍêÕûÊı¾İÁ´Â·¡£
+- ±£ÁôÔ­ÓĞÄ¿Â¼½á¹¹ÓëºóĞøÄ£¿éÕûºÏ½¨Òé£¬²¢°Ñ²ã¼¶ÃèÊöÊÕÁ²µ½ App/Main¡¢App/Task¡¢Middleware¡¢Driver¡¢BSP µÄµ¥ÏòÒÀÀµ¹ØÏµ¡£
+
+Ó°ÏìÎÄ¼ş£º
+- `src/application/mine/ws63_final/README.md`
+
+ÑéÖ¤½á¹û£º
+- ÎÄµµ¸üĞÂ£¬ÎŞĞè±àÒë¡£
+
+·çÏÕ/ºóĞø£º
+- ÈôºóĞø ws63_final ĞÂÔö¶ÀÁ¢·şÎñ²ã»òĞÂµÄÖ÷»úÇÅ½ÓÁ´Â·£¬ÔÙÍ¬²½µ÷Õû Mermaid Í¼ÖĞµÄÄ£¿é±ß½ç¡£
+
+### 2026-04-14: README ¼Ü¹¹¶ÎÀ©Õ¹ÎªÂÛÎÄÕıÎÄ
+
+±ä¸üÕªÒª£º
+- ½«¼Ü¹¹¶¨Î»À©Õ¹ÎªÊÊºÏÂÛÎÄÖ±½ÓÒıÓÃµÄÕıÎÄ±í´ï£¬²¹³äÉè¼ÆÄ¿±ê¡¢·Ö²ãÖ°Ôğ¡¢Æô¶¯Á´Â·¡¢Êı¾İÁ÷×éÖ¯ºÍ¼Ü¹¹ÊÕÒæ¡£
+- ±£ÁôÔ­ÓĞ Mermaid Í¼ºÍÄ¿Â¼½á¹¹£¬È·±£ÂÛÎÄÕıÎÄÓë¹¤³ÌËµÃ÷±£³ÖÒ»ÖÂ¡£
+- Ç¿»¯Ö÷»ú²à `sle_uart_host` Óë ws63_final Ö®¼äµÄÇÅ½Ó¹ØÏµÃèÊö£¬±ãÓÚ´ÓÏµÍ³¼¶ËµÃ÷ÕûÌåÈí¼ş±Õ»·¡£
+
+Ó°ÏìÎÄ¼ş£º
+- `src/application/mine/ws63_final/README.md`
+
+ÑéÖ¤½á¹û£º
+- ÎÄµµ¸üĞÂ£¬ÎŞĞè±àÒë¡£
+
+·çÏÕ/ºóĞø£º
+- ÈôÂÛÎÄºóĞø»¹ĞèÒª¡°Ê±ĞòÍ¼¡±»ò¡°Ä£¿éĞ­×÷Í¼¡±£¬¿É¼ÌĞøÔÚ±¾ÎÄ¼ş²¹³ä¶ÔÓ¦ Mermaid Í¼¡£
+
+### 2026-04-14: ¹ÜÀíÈÎÎñÕ»ÌáÉıµ½ 8KB
+
+±ä¸üÕªÒª£º
+- ½« `WS63_MGR_TASK_STACK_SIZE` ÌáÉıµ½ `8192U`£¬±ÜÃâµ÷ÊÔÃüÁî¡¢×´Ì¬»úºÍÈÕÖ¾ÔÚÍ¬Ò»¹ÜÀíÈÎÎñÄÚµş¼ÓÊ±·¢ÉúÕ»Òç³ö¡£
+- ±£Áô `WS63_TASK_STACK_SIZE` ×÷Îª·Ç¹ÜÀí³¡¾°Ä¬ÈÏÖµ£¬²»Ó°ÏìÆäËüÈÎÎñµÄÕ»ÅäÖÃ¡£
+- Í¬²½¸üĞÂÅäÖÃ×¢ÊÍ£¬Ã÷È· 8KB Ô¤Áô¸øÃüÁî½âÎöºÍÈÕÖ¾·åÖµ¡£
+
+Ó°ÏìÎÄ¼ş£º
+- `src/application/mine/ws63_final/Config/ws63_final_config.h`
+- `src/application/mine/ws63_final/README.md`
+
+ÑéÖ¤½á¹û£º
+- ÃüÁî£º`cd /home/xixi/code/fbb_ws63_20260114/src && python3 build.py -c ws63-liteos-app`
+- ½á¹û£ºÍ¨¹ı£¬ÈÕÖ¾°üº¬ `Build target:ws63_liteos_app success` ºÍ `packet success!`¡£
+
+·çÏÕ/ºóĞø£º
+- ÈôºóĞø¹ÜÀíÈÎÎñ¼ÌĞøµş¼Ó¸ü¶àµ÷ÊÔÈë¿Ú£¬ÔÙ½áºÏÕ»Ë®Î»Í³¼ÆÆÀ¹ÀÊÇ·ñĞèÒª½øÒ»²½Ôö´ó¡£
+
+### 2026-04-14: LD2402 LOG ON/OFF »Ö¸´Ö÷»úÉÏĞĞ¿ØÖÆ
+
+±ä¸üÕªÒª£º
+- ½« `LD2402` Ö÷»ú²àÉÏĞĞÖØĞÂ°ó¶¨µ½ÈÕÖ¾¿ª¹Ø£¬`LD LOG OFF` ¸ºÔğ¾²Òô£¬`LD LOG ON` ¸ºÔğ»Ö¸´¾àÀëĞĞ¡£
+- ±£³Ö `ZW101` µÄ Hex Ô¤ÀÀ²ßÂÔ²»±ä£¬±ÜÃâÔ­Ê¼¶ş½øÖÆ¼ÌĞøË¢µ½Ö÷»úÖÕ¶Ë¡£
+- ÕâÑù `LD LOG ON` / `OFF` µÄÏÖ³¡·´À¡ÓëÃüÁîÓïÒåÖØĞÂÒ»ÖÂ£¬±ãÓÚÅÅÕÏÊ±ÁÙÊ±¿ª¹Ø¡£
+
+Ó°ÏìÎÄ¼ş£º
+- `src/application/mine/ws63_final/App/Task/ws63_final_task.c`
+- `src/application/mine/ws63_final/README.md`
+
+ÑéÖ¤½á¹û£º
+- ´ıÖØĞÂ¹¹½¨ÑéÖ¤¡£
+
+·çÏÕ/ºóĞø£º
+- `LD LOG ON` ÏÖÔÚ»á»Ö¸´Ö÷»ú²à¾àÀëĞĞ£¬ÈôĞèÒªÔÙ´Î¾²Òô£¬¼ÌĞøÖ´ĞĞ `LD LOG OFF` ¼´¿É¡£
+
+### 2026-04-14: DEBUG INIT Áª¶¯¹Ø LD ÈÕÖ¾²¢È¡Ïû ZW101
+
+±ä¸üÕªÒª£º
+Ó°ÏìÎÄ¼ş£º
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_debug.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_sensor_bridge.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_lock_mgr.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task.h`
+- `src/application/mine/ws63_final/Driver/ld2402.c`
+- `src/application/mine/ws63_final/README.md`
+
+ÑéÖ¤½á¹û£º
+- ´ıÖ´ĞĞ¹¹½¨ÑéÖ¤¡£
+
+### 2026-04-14: LD2402 Ö÷»ú¾²Òô + ZW101 Hex Ô¤ÀÀ
+
+±ä¸üÕªÒª£º
+- ÔÚ `ws63_task_post_sle_uplink()` Àï½« `LD2402` ×Ó¿ÚÉÏĞĞÖ±½Ó¾²Òô£¬²»ÔÙ°Ñ¾àÀëË¢ÆÁÍ¸´«µ½Ö÷»ú¡£
+- ½« `ZW101` ×Ó¿ÚÔ­Ê¼¶ş½øÖÆÉÏĞĞÊÕÁ²Îª¶Ì Hex Ô¤ÀÀÎÄ±¾£¬±ÜÃâÖ÷»úÖÕ¶ËÖ±½ÓÏÔÊ¾ÂÒÂë¡£
+- ĞÂÔö±¾µØ Hex Ô¤ÀÀÖúÊÖ£¬±£ÁôÖ¡Í·ºÍÇ°¼¸¸ö×Ö½Ú£¬±ãÓÚÈ·ÈÏÁ´Â·ÈÔÈ»¿É¶Á¡£
+- ÈÔ±£Áô `DEBUG INIT` Ö®ºóµÄµ÷ÊÔÃüÁî»ØÖ´Óë±ØÒª×´Ì¬ÈÕÖ¾£¬²»Ó°ÏìÃüÁî½»»¥¡£
+
+Ó°ÏìÎÄ¼ş£º
+- `src/application/mine/ws63_final/App/Task/ws63_final_task.c`
+- `src/application/mine/ws63_final/README.md`
+
+ÑéÖ¤½á¹û£º
+- ¹¹½¨ÃüÁî£º`cd /home/xixi/code/fbb_ws63_20260114/src && python3 build.py -c ws63-liteos-app`
+- ¹¹½¨½á¹û£ºÍ¨¹ı£¬´ò°üÁ÷³ÌÒÑÍê³É£¬ÈÕÖ¾Î²²¿°üº¬ `packet app` Óë `copy_files_to_interim done!`¡£
+
+·çÏÕ/ºóĞø£º
+- `ZW101` Ä¿Ç°Ö»Õ¹Ê¾ Hex Ô¤ÀÀ£¬²»ÔÙÍ¸´«ÍêÕûÔ­Ê¼Ö¡£»ÈôºóĞøĞèÒª×¥ÍêÕû°ü£¬ĞèÒªµ¥¶ÀÔö¼ÓÊÜ¿Øµ÷ÊÔÈë¿Ú¡£
+
+### 2026-04-14: DEBUG INIT ´¿µ÷ÊÔ»á»°ÃÅ¿Ø
+
+±ä¸üÕªÒª£º
+- ĞÂÔö `DEBUG INIT` / `DEBUG EXIT` / `DEBUG STAT` Èı¸ö»á»°ÃüÁî£¬ÓÃÓÚÔÚÔËĞĞÊ±ÇĞ»»´¿µ÷ÊÔÄ£Ê½¡£
+- µ÷ÊÔÄ£Ê½¿ªÆôºó£¬ÃÅËø±àÅÅÈÎÎñ¸ÄÎªÑÓºóÆô¶¯£»ÈôÒÑÆô¶¯£¬Ôò½øÈëĞü¹ÒÌ¬²¢Çå¿ÕÀúÊ·ÈÏÖ¤ÊÂ¼ş£¬±ÜÃâÍË³öµ÷ÊÔºóÎó´¥·¢¿ªËø¡£
+- `ws63_task_entry` ¸ÄÎªÏÈ´¦Àíµ÷ÊÔÃüÁî¡¢ÔÙ°´¹Û²ì´°¿Ú¾ö¶¨ÊÇ·ñÀ­Æğ `lock_mgr`£¬´Ó¶ø¸øÖ÷»úÊäÈë `DEBUG INIT` Áô³öÈë¿Ú¡£
+- Î´½øÈë `DEBUG INIT` Ê±£¬Éè±¸²à²»ÔÙÏòÖ÷»úÉÏ±¨ LD2402 / ZW101 µÈ³£¹æÔËĞĞÈÕÖ¾£¬Ö÷»ú´®¿ÚÖ»±£Áô±ØÒªÁ´Â·Êä³ö¡£
+- Í¬²½¸üĞÂ `DEBUG_COMMANDS.md`£¬²¹³äµ÷ÊÔ»á»°ÓïÒåÓëÅÅÕÏËµÃ÷¡£
+
+Ó°ÏìÎÄ¼ş£º
+- `src/application/mine/ws63_final/App/Task/ws63_final_task.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_debug.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_debug.h`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_internal.h`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_lock_mgr.c`
+- `src/application/mine/ws63_final/Config/ws63_final_config.h`
+- `src/application/mine/ws63_final/DEBUG_COMMANDS.md`
+- `src/application/mine/ws63_final/README.md`
+
+ÑéÖ¤½á¹û£º
+- ¹¹½¨ÃüÁî£º`cd /home/xixi/code/fbb_ws63_20260114/src && python3 build.py -c ws63-liteos-app`
+- ¹¹½¨½á¹û£ºÍ¨¹ı£¬ÈÕÖ¾°üº¬ `Build target:ws63_liteos_app success` Óë `packet success!`¡£
+
+### 2026-04-14: ÑÏ¸ñ SLE Ö÷´Óµ÷ÊÔÁ´Â·ÊÕÁ²£¨Host ¿ØÖÆ + Slave »ØÏÔ£©
+
+±ä¸üÕªÒª£º
+- ĞÂÔö `ws63_final` ÑÏ¸ñÄ£Ê½¿ª¹Ø `WS63_DEBUG_STRICT_SLE_ONLY`£¬²¢ÔÚ±àÒëÆÚÇ¿ÖÆÔ¼Êø£º`SLE_CMD=1`¡¢`SLE_LOG=1`¡¢`LOCAL_UART_IO=0`¡£
+- Ö÷»ú `sle_uart_host` Ä¬ÈÏÃüÁîÈë¿ÚÊÕÁ²µ½ `UART0`£¬²¢ĞÂÔöÑÏ¸ñÈë¿Ú¿ª¹Ø£¬±ÜÃâ·ÇÃüÁî´®¿ÚÔëÉùÎóÏÂ·¢µ½´Ó»ú¡£
+- Ö÷»úÔö¼Ó `[DEBUG]` ±êÇ©·ÖÁ÷´òÓ¡£ºÊÕµ½´Ó»úµ÷ÊÔÉÏĞĞºóÖ±½ÓÊä³ö `[mine host][DEBUG]` ¿É¶ÁÈÕÖ¾Ô¤ÀÀ¡£
+- Í¬²½¸üĞÂ `DEBUG_COMMANDS.md`£¬²¹ÆëÑÏ¸ñÄ£Ê½¿ª¹ØÓëÖ÷»ú²àÅäÖÃ/ÅÅÕÏ¿Ú¾¶¡£
+
+Ó°ÏìÎÄ¼ş£º
+- `src/application/mine/sle_uart_host/inc/sle_uart_host.h`
+- `src/application/mine/sle_uart_host/src/sle_uart_host.c`
+- `src/application/mine/sle_uart_host/src/sle_uart_host_ssaps.c`
+- `src/application/mine/ws63_final/Config/ws63_final_config.h`
+- `src/application/mine/ws63_final/DEBUG_COMMANDS.md`
+- `src/application/mine/ws63_final/README.md`
+
+ÑéÖ¤½á¹û£º
+- ¹¹½¨ÃüÁî£º`cd /home/xixi/code/fbb_ws63_20260114/src && python3 build.py ws63-liteos-app`
+- ¹¹½¨½á¹û£ºÍ¨¹ı£¬ÈÕÖ¾°üº¬ `Build target:ws63_liteos_app success` Óë `packet success!`¡£
+
+### 2026-04-13: TTP229 ¸ÄÎª°´ÏÂ»º´æ¡¢Ì§ÆğÌá½»
+
+±ä¸üÕªÒª£º
+- ½« TTP229 ÃÜÂëÊäÈë¸Ä³É±ßÑØÓïÒå£º°´ÏÂÖ»¸ºÔğ·äÃùÌáÊ¾²¢ĞøÃü auth window£¬Ì§ÆğºóÔÙÌá½»Ò»´ÎÊäÈë¡£
+- ĞÂÔö pending-mask »º´æ£¬±ÜÃâ³¤°´Í¬Ò»°´¼üÊ±ÖØ¸´ÈëÂë»òÖØ¸´´¥·¢ `#` Ìá½»¡£
+- ±£Áôµ¥¼üÊäÈëÁ÷³Ì£¬ÇÒÔÚ¶à¼ü»òÒì³£×´Ì¬Ê±Çå¿Õ pending£¬±ÜÃâÔà×´Ì¬ÑØÓÃµ½ÏÂÒ»´ÎÊäÈë¡£
+- Î¬³ÖÏÖÓĞÃÜÂëĞ£ÑéÓë±¨¾¯ÉÏ±¨Á´Â·²»±ä£¬Ö»µ÷Õû Task ²ãµÄÊäÈëÏû·ÑÊ±»ú¡£
+
+Ó°ÏìÎÄ¼ş£º
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_ttp229.c`
+- `src/application/mine/ws63_final/README.md`
+
+ÑéÖ¤½á¹û£º
+- ¹¹½¨ÃüÁî£º`cd /home/xixi/code/fbb_ws63_20260114/src && python3 build.py ws63-liteos-app`
+- ¹¹½¨½á¹û£ºÍ¨¹ı£¬ÈÕÖ¾°üº¬ `Build target:ws63_liteos_app success` Óë `packet success!`¡£
+
+### 2026-04-14: TTP229 ĞøÃüÈÕÖ¾¸ÄÎªÌ§Æğºó³É¹¦Ìá½»
+
+±ä¸üÕªÒª£º
+- ½« TTP229 µÄĞøÃüÈÕÖ¾´Ó¡°Ã¿¸ö°´×¡²ÉÑù¡±Ç¨ÒÆµ½¡°Ì§ÆğºóÌá½»³É¹¦¡±Â·¾¶£¬¼õÉÙ°´×¡½×¶ÎË¢ÆÁ¡£
+- °´¼ü°´ÏÂ½×¶ÎÖ»±£Áô·äÃùÌáÊ¾Óë×´Ì¬»º´æ£¬auth window ĞøÃüÑÓºóµ½³É¹¦Ìá½»ºóÔÙÖ´ĞĞ¡£
+- `#` µÄ×îÖÕĞ£ÑéÈÔ±£ÁôÌ§Æğ´¥·¢ÓïÒå£¬³É¹¦Ğ£Ñéºó²¹Ò»´ÎĞøÃü²¢´òÓ¡ÏÔÊ½ÈÕÖ¾¡£
+
+Ó°ÏìÎÄ¼ş£º
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_ttp229.c`
+- `src/application/mine/ws63_final/README.md`
+
+ÑéÖ¤½á¹û£º
+- ´ıÖ´ĞĞ¹¹½¨ÑéÖ¤¡£
+
+### 2026-04-13: TTP229 ĞøÃüÏÔÊ½ÈÕÖ¾²¹Æë
+
+±ä¸üÕªÒª£º
+- ÔÚ TTP229 ²ÉÑùÈë¿ÚÔö¼ÓÏÔÊ½ĞøÃüÈÕÖ¾£¬½öÔÚ `armed` ÇÒË¢ĞÂ³É¹¦Ê±Êä³ö¡£
+- ÈÕÖ¾ÄÚÈİ°üº¬°´¼üÎÄ±¾/Î»Í¼£¬ÒÔ¼°ĞøÃüÇ°ºóµÄ auth window deadline£¬±ãÓÚÏÖ³¡È·ÈÏ¡°ÈÎÒ»°´¼ü°´ÏÂ¶¼»áĞøÃü¡±¡£
+- ±£³ÖËø¹ÜÀíÆ÷Ö»¸ºÔğ×´Ì¬ÃÅ¿Ø£¬²»°ÑÈÕÖ¾Âß¼­ÏÂ³Áµ½×´Ì¬»úÄÚ²¿¡£
+
+Ó°ÏìÎÄ¼ş£º
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_ttp229.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_lock_mgr.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_internal.h`
+- `src/application/mine/ws63_final/README.md`
+
+ÑéÖ¤½á¹û£º
+- ¹¹½¨ÃüÁî£º`cd /home/xixi/code/fbb_ws63_20260114/src && python3 build.py ws63-liteos-app`
+- ¹¹½¨½á¹û£ºÍ¨¹ı£¬ÈÕÖ¾°üº¬ `Build target:ws63_liteos_app success` Óë `packet success!`¡£
+
+### 2026-04-13: VERIFY Ê§°Üºó¸ÄÎª 0.3s ÂÖÑ¯ÀëÊÖ£¨½ö ACK=0x02 ²ÅÖØÊÔ£©
+
+±ä¸üÕªÒª£º
+- µ÷Õû `ws63_task_zw101_request_verify_after_release()`£ºVERIFY Ê§°ÜºóÍ³Ò»½øÈë `wait_release`£¬²»ÔÙ¶Ô `NOT_PRESSED` Á¢¼´ÖØÊÔ¡£
+- ½«ÀëÊÖÂÖÑ¯¼ä¸ôµ÷ÕûÎª `300ms`£¬Ã¿´Îµ÷ÓÃ `PS_GetImageInfo(0x3D)` ¼ì²â°´Ñ¹×´Ì¬¡£
+- ½öÔÚÈ·ÈÏ `ACK=0x02`£¨ÎŞÊÖÖ¸£©ºó²ÅÅÅ¶ÓÏÂÒ»´Î VERIFY£¬±ÜÃâÁ¬Ğø¿Õ¼ìµ¼ÖÂ¸ßÆµÖØÈë¡£
+- ĞŞÕı ZW101 ½ûÓÃ¼ÆÊı¹æÔò£º`ACK=0x09 (NOT_PRESSED)` ²»ÔÙ¼ÆÈë `fail_streak`£¬±ÜÃâ¡°Î´°´Ñ¹¡±°Ñ½ûÓÃãĞÖµ´òÂú¡£
+
+Ó°ÏìÎÄ¼ş£º
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_sensor_bridge.c`
+- `src/application/mine/ws63_final/README.md`
+
+ÑéÖ¤½á¹û£º
+- menuconfig Ô¤¼ì²éÃüÁî£º`cd /home/xixi/code/fbb_ws63_20260114 && bash tools/check_ws63_menuconfig.sh`
+- Ô¤¼ì²é½á¹û£ºÊ§°Ü£¨½Å±¾È±Ê§£¬`No such file or directory`£©¡£
+- ¹¹½¨ÃüÁî£º`cd /home/xixi/code/fbb_ws63_20260114/src && python3 build.py ws63-liteos-app`
+- ¹¹½¨½á¹û£ºÍ¨¹ı£¬ÈÕÖ¾°üº¬ `Build target:ws63_liteos_app success` Óë `packet success!`¡£
+
+### 2026-04-13: ÀëÊÖ¼ì²âÇĞ»»Îª PS_GetImageInfo£¨ACK=0x02 ÎŞÊÖÖ¸£©
+
+±ä¸üÕªÒª£º
+- ½« ZW101 ÀëÊÖ¼ì²â½Ó¿Ú `zw101_check_finger_present()` µÄµ×²ãÃüÁî´Ó `CheckSensor(0x36)` ÇĞ»»Îª `PS_GetImageInfo(0x3D)`¡£
+- Ã÷È· ACK ÓïÒå£º`0x00=ÓĞÊÖÖ¸`¡¢`0x02=ÎŞÊÖÖ¸`£¬ÓëÏÖ³¡ÅĞ¶¨¿Ú¾¶±£³ÖÒ»ÖÂ¡£
+- ±£³ÖÂÖÑ¯Â·¾¶ `trace_silent=1U`£¬±ÜÃâ¸ßÆµÀëÊÖ¼ì²âµ¼ÖÂ´®¿ÚÈÕÖ¾Ë¢ÆÁ¡£
+
+Ó°ÏìÎÄ¼ş£º
+- `src/application/mine/ws63_final/Driver/zw101.c`
+- `src/application/mine/ws63_final/Driver/zw101.h`
+- `src/application/mine/ws63_final/README.md`
+
+ÑéÖ¤½á¹û£º
+- menuconfig Ô¤¼ì²éÃüÁî£º`cd /home/xixi/code/fbb_ws63_20260114 && bash tools/check_ws63_menuconfig.sh`
+- Ô¤¼ì²é½á¹û£ºÊ§°Ü£¨½Å±¾È±Ê§£¬`No such file or directory`£©¡£
+- ¹¹½¨ÃüÁî£º`cd /home/xixi/code/fbb_ws63_20260114/src && python3 build.py ws63-liteos-app`
+- ¹¹½¨½á¹û£ºÍ¨¹ı£¬ÈÕÖ¾°üº¬ `Build target:ws63_liteos_app success` Óë `packet success!`¡£
+
+### 2026-04-13: ZW101 NOT_PRESSED Ê§°Ü¼ÆÊı¸ôÀë£¨±ÜÃâ¿ìËÙ lockout/½ûÓÃ£©
+
+±ä¸üÕªÒª£º
+- ÔÚ ZW101 task ĞÂÔö `ws63_task_zw101_get_last_verify_ack()`£¬Ïò lock_mgr ±©Â¶×î½üÒ»´Î VERIFY ACK¡£
+- µ÷Õû ZW101 Á¬ĞøÊ§°Ü½ûÓÃ¼ÆÊı£º`ACK=0x09 (NOT_PRESSED)` ²»ÔÙ¼ÆÈë `fail_streak`£¬±ÜÃâÎó´¥·¢¡°5 ´Î½ûÓÃ¡±¡£
+- µ÷Õû lock_mgr Ê§°Ü¼ÆÊı£ºµ±ÈÏÖ¤À´Ô´Îª ZW101 ÇÒ×î½ü ACK Îª `0x09` Ê±£¬Ìø¹ı `fail_count` µİÔö£¬²»½øÈë lockout¡£
+- ±£ÁôÖØÊÔÁ´Â·£º`0x09` ÈÔ´¥·¢´°¿ÚÄÚÖØÊÔ£¬µ«²»»á°Ñ¡°Î´°´Ñ¹¡±µ±×÷ÕæÊµÈÏÖ¤Ê§°ÜÀÛ¼Ó¡£
+
+Ó°ÏìÎÄ¼ş£º
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_sensor_bridge.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_lock_mgr.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_internal.h`
+- `src/application/mine/ws63_final/README.md`
+
+ÑéÖ¤½á¹û£º
+- menuconfig Ô¤¼ì²éÃüÁî£º`cd /home/xixi/code/fbb_ws63_20260114 && bash tools/check_ws63_menuconfig.sh`
+- Ô¤¼ì²é½á¹û£ºÊ§°Ü£¨½Å±¾È±Ê§£¬`No such file or directory`£©¡£
+- ¹¹½¨ÃüÁî£º`cd /home/xixi/code/fbb_ws63_20260114/src && python3 build.py ws63-liteos-app`
+- ¹¹½¨½á¹û£ºÍ¨¹ı£¬ÈÕÖ¾°üº¬ `Build target:ws63_liteos_app success` Óë `packet success!`¡£
+
+### 2026-04-13: ZW101 NOT_PRESSED Ê§°ÜÖØÊÔĞŞ¸´£¨±ÜÃâ±¾´°¿Ú¿¨ÔÚ wait_release£©
+
+±ä¸üÕªÒª£º
+- ÔÚ ZW101 task ÖĞĞÂÔö¡°×î½üÒ»´Î VERIFY ACK¡±¼ÇÂ¼£¬ÓÃÓÚÖØÊÔÂ·¾¶¾ö²ß¡£
+- µ±×î½üÒ»´ÎÊ§°Ü ACK Îª `NOT_PRESSED(0x09)` Ê±£¬Ê§°ÜºóµÄÖØÊÔ¸ÄÎª¡°Á¢¼´ÖØĞÂÇëÇó VERIFY¡±£¬²»ÔÙ½øÈë `wait_release`¡£
+- ±£ÁôÔ­ÓĞÀëÊÖºóÖØÊÔ»úÖÆ£º·Ç `NOT_PRESSED` µÄÊ§°ÜÈÔ½øÈë `wait_release`£¬¼ì²âµ½ÀëÊÖºóÔÙÅÅ¶ÓÖØÊÔ¡£
+- ÖØÖÃ ARMED ´°¿Ú±£»¤×´Ì¬¡¢ÈÎÎñÆô¶¯Óë reinit Ê±Í¬²½ÇåÀí×î½ü ACK£¬±ÜÃâ¿ç´°¿ÚÑØÓÃ³Â¾É×´Ì¬¡£
+
+Ó°ÏìÎÄ¼ş£º
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_sensor_bridge.c`
+- `src/application/mine/ws63_final/README.md`
+
+ÑéÖ¤½á¹û£º
+- menuconfig Ô¤¼ì²éÃüÁî£º`cd /home/xixi/code/fbb_ws63_20260114 && bash tools/check_ws63_menuconfig.sh`
+- Ô¤¼ì²é½á¹û£ºÊ§°Ü£¨½Å±¾È±Ê§£¬`No such file or directory`£©¡£
+- ¹¹½¨ÃüÁî£º`cd /home/xixi/code/fbb_ws63_20260114/src && python3 build.py ws63-liteos-app`
+- ¹¹½¨½á¹û£ºÍ¨¹ı£¬ÈÕÖ¾°üº¬ `Build target:ws63_liteos_app success`¡£
+
+### 2026-04-13: ZW101 ÀëÊÖÂÖÑ¯½µÔë£¨×´Ì¬±ä»¯´òÓ¡ + Çı¶¯¾²Ä¬ÂÖÑ¯£©
+
+±ä¸üÕªÒª£º
+- ÔÚ `wait_release` ½×¶Î°Ñ `CheckSensor` ÂÖÑ¯¼ä¸ô´Ó 120ms µ÷ÕûÎª 400ms£¬½µµÍÎŞĞ§ÂÖÑ¯ÆµÂÊ¡£
+- ½«ÀëÊÖ¼ì²âÈÕÖ¾¸ÄÎª¡°½ö×´Ì¬±ä»¯´òÓ¡¡±£¬±ÜÃâ¹Ì¶¨½ÚÅÄÖØ¸´Êä³ö `release_check`¡£
+- ÔÚ ZW101 Çı¶¯ÖĞÎªÃüÁîµÈ´ıÁ´Â·ĞÂÔö `trace_silent` ²ÎÊı£¬½ö¶ÔÀëÊÖÂÖÑ¯µÄ `CheckSensor` ÆôÓÃÏêÏ¸ trace ¾²Ä¬¡£
+- ±£Áô¹Ø¼üÒµÎñÈÕÖ¾£¨ÀëÊÖºóÖØÊÔÈë¶Ó¡¢VERIFY ³É°Ü¡¢³¬Ê±¸æ¾¯£©£¬²»¸Ä±äÈÏÖ¤ÓïÒå¡£
+
+Ó°ÏìÎÄ¼ş£º
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_sensor_bridge.c`
+- `src/application/mine/ws63_final/Driver/zw101.c`
+- `src/application/mine/ws63_final/README.md`
+
+ÑéÖ¤½á¹û£º
+- ÃüÁî£º`cd /home/xixi/code/fbb_ws63_20260114/src && python3 build.py ws63-liteos-app`
+- ½á¹û£º¹¹½¨Í¨¹ı£¬ÈÕÖ¾°üº¬ `Build target:ws63_liteos_app success` Óë `packet success!`¡£
+
+### 2026-04-13: ZW101 È«Á¿Ç¨ÒÆÖØ¹¹£¨ÒÆ³ı¾É ZA£¬»½ĞÑºó VERIFY µÈ´ı½á¹û£©
+
+±ä¸üÕªÒª£º
+- °´ `sle_uart_slave` µÄ ZW101 ÒµÎñÄÜÁ¦ÖØ¹¹ `ws63_final`£ºÇı¶¯²ãÖ»±£Áô `ENROLL/VERIFY/ECHO/LIST/DEL/CLEAR/CANCEL`£¬ÒÆ³ı¾É `ZA/RAW` ¼æÈİÂ·¾¶¡£
+- ÃÅËø±àÅÅ¸ÄÎª¡°½Ó½ü»½ĞÑºóÆô¶¯ VERIFY ²¢µÈ´ıÈÏÖ¤½á¹û¡±£¬Ê§°ÜÊ±ÔÚ ARMED ×´Ì¬ÏÂÖØ´¥·¢ VERIFY£»Á¬ĞøÊ§°Ü´ïµ½ 5 ´Îºó½ûÓÃ VERIFY ²¢ÉÏ±¨±¨¾¯ÏûÏ¢¡£
+- µ÷ÊÔÃüÁîÇ°×ºÍ³Ò»Îª `ZW`£¬ĞÂÃüÁî¼¯ºÏ£º`ZW INIT/STAT/ECHO/VERIFY/ENROLL/LIST/DEL/CLEAR/CANCEL`¡£
+- VERIFY Ä¬ÈÏ²ÎÊıÓë slave ¶ÔÆë£º`level=3, id=0xFFFF, param=0x0000`£¬ÈÕÖ¾Êä³öÍ³Ò»Îª `VERIFYING / VERIFY SUCCESS / VERIFY FAIL` ·ç¸ñ¡£
+
+Ó°ÏìÎÄ¼ş£º
+- `src/application/mine/ws63_final/Driver/zw101.c`
+- `src/application/mine/ws63_final/Driver/zw101.h`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_sensor_bridge.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_lock_mgr.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_debug.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task.h`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_internal.h`
+- `src/application/mine/ws63_final/DEBUG_COMMANDS.md`
+- `src/application/mine/ws63_final/README.md`
+
+ÑéÖ¤½á¹û£º
+- ´úÂë¾²Ì¬¼ì²é£ºÍ¨¹ı£¨¸Ä¶¯ÎÄ¼şÎŞ IDE ±àÒë´íÎó£©¡£
+- ¹¹½¨ÑéÖ¤£º¼û±¾´ÎÈÎÎñÊÕÎ²±àÒë½á¹û¼ÇÂ¼¡£
 
 ### 2026-04-13: camera ·Ö°üÖØ×éĞŞ¸´£¨¼æÈİ [name,score] °ë°ü£©
 
@@ -823,6 +1191,66 @@ ws63_final/
 - `src/application/mine/ws63_final/App/Task/ws63_final_task_sensor_bridge.c`
 - `src/application/mine/ws63_final/App/Task/ws63_final_task_debug.c`
 
+### 2026-04-14: ZW101 ACK_TIMEOUT ÉúÃüÖÜÆÚÄÚ×Ô¶¯ÖØÀ­ VERIFY
+
+±ä¸üÕªÒª£º
+- µ÷Õû ZW101 VERIFY ³¬Ê±ÓïÒå£ºµ± `ACK_TIMEOUT` ·¢ÉúÔÚµ±Ç° ARMED ÉúÃüÖÜÆÚÄÚÊ±£¬ÈÎÎñ²ãÏÈ×Ô¶¯ÖØÀ­ VERIFY£¬²»ÔÙ°ÑÕâ´Î³¬Ê±Ö±½ÓÉÏ±¨¸ø lock_mgr¡£
+- ĞÂÔö ZW101 ¶ÀÁ¢µÄ³¬Ê±ÖØÊÔ¼ÆÊı `timeout_retry`£¬Óë `fail_streak` ·ÖÀë£¬±ÜÃâ°ÑÍ¨ĞÅ³¬Ê±ºÍÕæÊµÊ¶±ğÊ§°Ü»ìÎªÒ»Àà¡£
+- ±£ÁôÔ­ÓĞÀëÊÖÖØÊÔÓëÊ§°Ü½ûÓÃÂß¼­£ºÖ»ÓĞ³¬Ê±ÖØÊÔºÄ¾¡ºó£¬²Å»ØÂäµ½ÆÕÍ¨Ê§°ÜÍ³¼ÆºÍ lockout ÓïÒå¡£
+
+Ó°ÏìÎÄ¼ş£º
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_sensor_bridge.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_lock_mgr.c`
+- `src/application/mine/ws63_final/DEBUG_COMMANDS.md`
+
+ÑéÖ¤½á¹û£º
+- ÃüÁî£º`cd /home/xixi/code/fbb_ws63_20260114/src && python3 build.py ws63-liteos-app`
+- ½á¹û£ºÍ¨¹ı£¬ÈÕÖ¾°üº¬ `######### Build target:ws63_liteos_app success` Óë `packet success!`¡£
+
 ÑéÖ¤½á¹û£º
 - ÃüÁî£º`cd /home/xixi/code/fbb_ws63_20260114/src && CMAKE_BUILD_PARALLEL_LEVEL=1 python3 build.py -c ws63-liteos-app`
 - ½á¹û£ºÍ¨¹ı£¬`Build target:ws63_liteos_app success`¡£
+
+### 2026-04-14: µ÷ÊÔÃüÁî¸ÄÎªÖ÷»ú SLE µ¥Èë¿Ú + µ÷ÊÔÈÕÖ¾ SLE »Ø´«
+
+±ä¸üÕªÒª£º
+- ½« `ws63_final` µ÷ÊÔÃüÁîÈë¿ÚÇĞ»»ÎªÖ÷»ú SLE ÏÂĞĞ×¢Èë£¬ÏÈÏû·ÑÎÄ±¾ÃüÁî£¬Î´ÃüÖĞÔÙ×ßÔ­×Ó¿ÚÍ¸´«¡£
+- µ÷ÊÔÈÕÖ¾Êä³öÂ·¾¶µ÷ÕûÎª SLE ÉÏĞĞ `DEBUG` ±êÇ©£¬`ws63_final` ±¾»úµ÷ÊÔ UART Ä¬ÈÏ²»ÔÙ³Ğµ£µ÷ÊÔÈÕÖ¾Êä³ö¡£
+- µ÷ÊÔÄ£¿é¿ª¹Ø²ğ·ÖÎª¡°ÃüÁîºËĞÄ¿ª¹Ø + ±¾»ú UART I/O ¿ª¹Ø + SLE ÃüÁî/ÈÕÖ¾¿ª¹Ø¡±£¬±ÜÃâ¹Ø±Õ±¾»ú´®¿ÚºóÃüÁîºËĞÄÊ§Ğ§¡£
+- Í¬²½¸üĞÂµ÷ÊÔÊÖ²á£¬Ã÷È·¡°ÃüÁîÓëµ÷ÊÔÈÕÖ¾¾ù¾­ SLE£¬ws63_final ±¾»ú´®¿ÚÄ¬ÈÏÎŞµ÷ÊÔÊä³ö¡±¡£
+
+Ó°ÏìÎÄ¼ş£º
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_debug.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task_debug.h`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task.c`
+- `src/application/mine/ws63_final/App/Task/ws63_final_task.h`
+- `src/application/mine/ws63_final/Middleware/ws63_final_sle.c`
+- `src/application/mine/ws63_final/Middleware/ws63_final_sle.h`
+- `src/application/mine/ws63_final/Config/ws63_final_config.h`
+- `src/application/mine/ws63_final/DEBUG_COMMANDS.md`
+
+ÑéÖ¤½á¹û£º
+- ÃüÁî£º`cd /home/xixi/code/fbb_ws63_20260114/src && python3 build.py ws63-liteos-app`
+- ½á¹û£ºÍ¨¹ı£¬ÈÕÖ¾°üº¬ `######### Build target:ws63_liteos_app success` Óë `packet success!`¡£
+
+### 2026-04-14: ARMED å‘¨æœŸå†…æ”¹ä¸ºæ¥æºçº§ç‹¬ç«‹å°ç¦ï¼ˆæŒ‡çº¹/æŒ‰é”®ï¼‰
+
+å˜æ›´æ‘˜è¦ï¼š
+- é‡æ„é—¨é”ç¼–æ’ä»»åŠ¡ lock_mgrï¼šå–æ¶ˆè·¨æ¥æºå…¨å±€å¤±è´¥è®¡æ•°ä¸ LOCKOUT è§¦å‘ï¼Œæ”¹ä¸ºåªå¤„ç† ARMED ç”Ÿå‘½å‘¨æœŸä¸ç»Ÿä¸€åé¦ˆã€‚
+- ä¿ç•™æ¥æºä»»åŠ¡å„è‡ªçš„ 5 æ¬¡å¤±è´¥å°ç¦ç­–ç•¥ï¼šæŒ‡çº¹å¤±è´¥ 5 æ¬¡ä»…ç¦ç”¨æŒ‡çº¹ã€æŒ‰é”®å¤±è´¥ 5 æ¬¡ä»…ç¦ç”¨æŒ‰é”®ï¼Œç›´åˆ°æœ¬æ¬¡ ARMED å‘¨æœŸç»“æŸã€‚
+- ç»Ÿä¸€è®¤è¯å¤±è´¥çš„å£°å…‰æç¤ºé“¾è·¯ï¼šåœ¨ lock_mgr å¯¹æœ‰æ•ˆå¤±è´¥äº‹ä»¶ç»Ÿä¸€è§¦å‘èœ‚é¸£ + RGB çº¢ç¯æç¤ºã€‚
+- ä¸ºé¿å…åŒæç¤ºï¼Œç§»é™¤ TTP229 æœ¬åœ°å¤±è´¥èœ‚é¸£ï¼Œç”± lock_mgr ç»Ÿä¸€è´Ÿè´£å¤±è´¥æç¤ºã€‚
+- é¡ºå¸¦ä¿®å¤ sensor_bridge é¡¶éƒ¨å†å²æŸåç‰‡æ®µï¼ˆä¹±ç æ³¨é‡Š/å­¤ç«‹è¯­å¥/ç¼ºå¤±å®å®šä¹‰ï¼‰ï¼Œæ¢å¤å¯ç¼–è¯‘æ€§ï¼Œä¸æ”¹ä¸šåŠ¡ç­–ç•¥ã€‚
+
+å½±å“æ–‡ä»¶ï¼š
+- src/application/mine/ws63_final/App/Task/ws63_final_task_lock_mgr.c
+- src/application/mine/ws63_final/App/Task/ws63_final_task_ttp229.c
+- src/application/mine/ws63_final/App/Task/ws63_final_task_sensor_bridge.c
+- src/application/mine/ws63_final/README.md
+
+éªŒè¯ç»“æœï¼š
+- å‘½ä»¤ï¼šcd /home/xixi/code/fbb_ws63_20260114/src && python3 build.py ws63-liteos-app
+- ç»“æœï¼šé€šè¿‡ï¼Œæ—¥å¿—åŒ…å« ######### Build target:ws63_liteos_app successã€‚
+
+é£é™©/åç»­ï¼š
+- lock_mgr å·²ä¸å†è¿›å…¥å…¨å±€ LOCKOUTï¼›è‹¥åç»­éœ€è¦â€œæ¥æºçº§å°ç¦ + å…¨å±€é”å®šå¹¶å­˜â€ç­–ç•¥ï¼Œéœ€è¦å•ç‹¬è®¾è®¡ä¼˜å…ˆçº§ä¸å†²çªå¤„ç†è§„åˆ™ã€‚

@@ -313,6 +313,16 @@ static void mine_sle_uart_host_read_handler_common(uart_bus_t bus, const void *b
         return;
     }
 
+#if (MINE_HOST_STRICT_CMD_INPUT_ENABLE == 1U)
+    /*
+     * 严格模式：只允许指定命令 UART 进入 Host->SLE 下发路径。
+     * 其余 UART 仅用于本地观测，防止外设噪声误触发从机控制命令。
+     */
+    if (bus != MINE_HOST_CMD_UART_BUS) {
+        return;
+    }
+#endif
+
     buffer_copy = osal_vmalloc(length);
     if (buffer_copy == NULL) {
         return;

@@ -82,8 +82,8 @@ extern "C" {
 #define WS63_LOCK_MGR_TASK_PRIORITY         25U
 #define WS63_LOCK_MGR_TASK_POLL_MS          20U
 #define WS63_LOCK_LD2402_ARM_DISTANCE_MM_DEFAULT   80U
-/* 认证窗口默认 10s，窗口内任何输入都会续命一次。 */
-#define WS63_LOCK_AUTH_WINDOW_MS_DEFAULT            10000U
+/* 认证窗口默认 20s，窗口内任何输入都会续命一次。 */
+#define WS63_LOCK_AUTH_WINDOW_MS_DEFAULT            20000U
 #define WS63_LOCK_UNLOCK_DURATION_MS_DEFAULT        1500U
 #define WS63_LOCK_HOLD_OPEN_MS_DEFAULT              5000U
 #define WS63_LOCK_FAIL_THRESHOLD_DEFAULT            3U
@@ -95,6 +95,8 @@ extern "C" {
 /* TTP229 密码解锁配置。 */
 #define WS63_TTP229_PASSWORD_TEXT                  "123456"
 #define WS63_TTP229_PASSWORD_LEN                   6U
+/* TTP229 本次 armed 周期内的失败封禁阈值：连续失败 5 次后暂停该来源输入。 */
+#define WS63_TTP229_PASSWORD_FAIL_DISABLE_THRESHOLD 5U
 #define WS63_TTP229_KEY_PROMPT_BEEP_FREQ_HZ        1200U
 #define WS63_TTP229_KEY_PROMPT_BEEP_VOLUME_PERCENT 12U
 #define WS63_TTP229_KEY_PROMPT_BEEP_MS             20U
@@ -103,12 +105,14 @@ extern "C" {
 #define WS63_RX_TRIGGER_LEVEL   0x40U
 #define WS63_TX_TRIGGER_LEVEL   0x10U
 
-/* 任务参数。 */
+/* 任务参数：默认栈仅保留给非管理场景，避免后续任务误用大栈。 */
 #define WS63_TASK_STACK_SIZE    2048U
 #define WS63_TASK_PRIORITY      26U
+/* ZW101 任务包含同步认证与初始化自愈调用链，单独放大栈避免打印与协议解析叠加导致溢出。 */
+#define WS63_ZW101_TASK_STACK_SIZE      3072U
 
-/* RTOS 多任务拆分参数：管理任务负责调试与系统保活。 */
-#define WS63_MGR_TASK_STACK_SIZE        WS63_TASK_STACK_SIZE
+/* RTOS 多任务拆分参数：管理任务负责调试与系统保活，需为命令解析和日志峰值预留 8KB。 */
+#define WS63_MGR_TASK_STACK_SIZE        8192U
 #define WS63_MGR_TASK_PRIORITY          WS63_TASK_PRIORITY
 
 /* WK2114 通信任务：负责子口轮询收发与驱动状态维护。 */
@@ -153,10 +157,33 @@ extern "C" {
 #define WS63_SLE_UPLINK_SUCCESS_LOG_GAP_MS_DEFAULT  2000U
 
 /* ----------------------------- 调试串口命令配置 ---------------------------- */
-/* 在线控测串口开关：0=关闭，1=开启。 */
+/* 调试命令核心开关：0=关闭，1=开启（含命令解析与执行流程）。 */
 #define WS63_DEBUG_UART_ENABLE          1U
 
-/* 默认使用 UART0(GPIO17/18, mode1) 作为在线调试命令口。 */
+/*
+ * 调试模式启动观察窗口（毫秒）：
+ * 1) 启动后主循环会先处理调试命令，再决定是否拉起门锁编排任务；
+ * 2) 该窗口内收到 `DEBUG INIT`，即可把系统切到纯调试模式并跳过门锁任务。
+ */
+#define WS63_DEBUG_BOOT_DECISION_MS     2000U
+
+/*
+ * 严格 SLE 调试模式：
+ * 1=仅允许 SLE 下行作为命令入口，并要求调试日志走 SLE 上行；
+ * 0=允许按独立开关启用本地调试 UART（用于现场应急）。
+ */
+#define WS63_DEBUG_STRICT_SLE_ONLY      1U
+
+/* 本机调试 UART I/O 开关：0=关闭本机串口收发，1=开启。 */
+#define WS63_DEBUG_LOCAL_UART_IO_ENABLE 0U
+
+/* SLE 下行命令入口开关：0=关闭，1=开启。 */
+#define WS63_DEBUG_SLE_CMD_ENABLE       1U
+
+/* 调试日志 SLE 上行开关：0=关闭，1=开启。 */
+#define WS63_DEBUG_SLE_LOG_ENABLE       1U
+
+/* 本机调试 UART 参数：仅在 WS63_DEBUG_LOCAL_UART_IO_ENABLE=1 时生效。 */
 #define WS63_DEBUG_UART_BUS             UART_BUS_0
 #define WS63_DEBUG_UART_TX_PIN          GPIO_17
 #define WS63_DEBUG_UART_RX_PIN          GPIO_18
@@ -173,6 +200,19 @@ extern "C" {
 /* 调试串口接收缓存与命令长度限制。 */
 #define WS63_DEBUG_UART_RX_BUF_SIZE     256U
 #define WS63_DEBUG_CMD_MAX_LEN          96U
+
+/* 严格模式编译守卫：避免误打开本地 UART 入口破坏“仅 SLE 控制”约束。 */
+#if (WS63_DEBUG_STRICT_SLE_ONLY == 1U)
+#if (WS63_DEBUG_LOCAL_UART_IO_ENABLE != 0U)
+#error "Strict SLE mode requires WS63_DEBUG_LOCAL_UART_IO_ENABLE=0"
+#endif
+#if (WS63_DEBUG_SLE_CMD_ENABLE != 1U)
+#error "Strict SLE mode requires WS63_DEBUG_SLE_CMD_ENABLE=1"
+#endif
+#if (WS63_DEBUG_SLE_LOG_ENABLE != 1U)
+#error "Strict SLE mode requires WS63_DEBUG_SLE_LOG_ENABLE=1"
+#endif
+#endif
 
 /* MOTOR WATCH 周期日志间隔。 */
 #define WS63_DEBUG_WATCH_PERIOD_MS      500U

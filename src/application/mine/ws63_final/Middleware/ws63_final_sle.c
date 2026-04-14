@@ -23,6 +23,7 @@
 #define WS63_SLE_TAG_LD2402 "[LD2402]"
 #define WS63_SLE_TAG_ZW101  "[ZW101]"
 #define WS63_SLE_TAG_CAMERA "[CAMERA]"
+#define WS63_SLE_TAG_DEBUG  "[DEBUG]"
 
 #if (WS63_SLE_LOG_ENABLE == 1U)
 #define WS63_SLE_LOG(fmt, ...) osal_printk("[ws63 sle] " fmt "\r\n", ##__VA_ARGS__)
@@ -62,6 +63,11 @@ static uint8_t g_ws63_sle_uplink_success_log_enable = WS63_SLE_UPLINK_SUCCESS_LO
 static uint32_t g_ws63_sle_uplink_success_log_gap_ms = WS63_SLE_UPLINK_SUCCESS_LOG_GAP_MS_DEFAULT;
 static uint32_t g_ws63_sle_uplink_success_last_log_ms = 0U;
 static uint32_t g_ws63_sle_uplink_success_skip_count = 0U;
+
+/**
+ * @brief 统一执行“带标签”的 SLE 上行发送。
+ */
+static errcode_t ws63_sle_send_tagged_data(const char *tag, const uint8_t *data, uint16_t len);
 
 /**
  * @brief 按时间窗口输出上行 success 日志，避免高频数据导致串口刷屏。
@@ -672,13 +678,6 @@ bool ws63_sle_ready(void)
 errcode_t ws63_sle_send_subport_data(uint8_t sub_port, const uint8_t *data, uint16_t len)
 {
     const char *tag;
-    uint8_t *payload = NULL;
-    uint16_t payload_len = 0U;
-    uint16_t offset = 0U;
-    uint16_t remain;
-    uint16_t chunk_len;
-    uint16_t conn_id_snapshot;
-    uint16_t handle_snapshot;
     errcode_t ret;
 
     if ((data == NULL) || (len == 0U)) {
@@ -691,42 +690,27 @@ errcode_t ws63_sle_send_subport_data(uint8_t sub_port, const uint8_t *data, uint
         return ERRCODE_FAIL;
     }
 
-    if (!ws63_sle_ready()) {
-        return ERRCODE_FAIL;
-    }
-
-    ret = ws63_sle_build_payload(tag, data, len, &payload, &payload_len);
+    ret = ws63_sle_send_tagged_data(tag, data, len);
     if (ret != ERRCODE_SUCC) {
+        WS63_SLE_LOG("uplink send failed, sub_port=%u, len=%u, ret=0x%x",
+            (unsigned int)sub_port, (unsigned int)len, (unsigned int)ret);
         return ret;
     }
 
-    conn_id_snapshot = g_ws63_sle_conn_id;
-    handle_snapshot = g_ws63_sle_write_param.handle;
-
-    while (offset < payload_len) {
-        remain = (uint16_t)(payload_len - offset);
-        chunk_len = (remain > (uint16_t)WS63_SLE_SAFE_CHUNK_LEN) ?
-            (uint16_t)WS63_SLE_SAFE_CHUNK_LEN : remain;
-
-        g_ws63_sle_write_param.handle = handle_snapshot;
-        g_ws63_sle_write_param.type = SSAP_PROPERTY_TYPE_VALUE;
-        g_ws63_sle_write_param.data = payload + offset;
-        g_ws63_sle_write_param.data_len = chunk_len;
-
-        ret = ssapc_write_cmd(0U, conn_id_snapshot, &g_ws63_sle_write_param);
-        if (ret != ERRCODE_SLE_SUCCESS) {
-            WS63_SLE_LOG("uplink send failed, sub_port=%u, len=%u, ret=0x%x",
-                (unsigned int)sub_port, (unsigned int)len, (unsigned int)ret);
-            osal_vfree(payload);
-            return ret;
-        }
-
-        offset = (uint16_t)(offset + chunk_len);
-    }
-
-    osal_vfree(payload);
     ws63_sle_log_uplink_success_limited(sub_port, len);
     return ERRCODE_SUCC;
+}
+
+/**
+ * @brief 将调试日志文本按 DEBUG 标签上行到主机。
+ */
+errcode_t ws63_sle_send_debug_data(const uint8_t *data, uint16_t len)
+{
+    if ((data == NULL) || (len == 0U)) {
+        return ERRCODE_INVALID_PARAM;
+    }
+
+    return ws63_sle_send_tagged_data(WS63_SLE_TAG_DEBUG, data, len);
 }
 
 errcode_t ws63_sle_set_uplink_success_log_enable(uint8_t enable)
@@ -753,6 +737,64 @@ uint32_t ws63_sle_get_uplink_success_log_gap_ms(void)
     return g_ws63_sle_uplink_success_log_gap_ms;
 }
 
+/**
+ * @brief 统一执行“带标签”的 SLE 上行发送。
+ *
+ * @param tag  标签字符串。
+ * @param data 原始数据。
+ * @param len  原始长度。
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+static errcode_t ws63_sle_send_tagged_data(const char *tag, const uint8_t *data, uint16_t len)
+{
+    uint8_t *payload = NULL;
+    uint16_t payload_len = 0U;
+    uint16_t offset = 0U;
+    uint16_t remain;
+    uint16_t chunk_len;
+    uint16_t conn_id_snapshot;
+    uint16_t handle_snapshot;
+    errcode_t ret;
+
+    if ((tag == NULL) || (data == NULL) || (len == 0U)) {
+        return ERRCODE_INVALID_PARAM;
+    }
+
+    if (!ws63_sle_ready()) {
+        return ERRCODE_FAIL;
+    }
+
+    ret = ws63_sle_build_payload(tag, data, len, &payload, &payload_len);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+
+    conn_id_snapshot = g_ws63_sle_conn_id;
+    handle_snapshot = g_ws63_sle_write_param.handle;
+
+    while (offset < payload_len) {
+        remain = (uint16_t)(payload_len - offset);
+        chunk_len = (remain > (uint16_t)WS63_SLE_SAFE_CHUNK_LEN) ?
+            (uint16_t)WS63_SLE_SAFE_CHUNK_LEN : remain;
+
+        g_ws63_sle_write_param.handle = handle_snapshot;
+        g_ws63_sle_write_param.type = SSAP_PROPERTY_TYPE_VALUE;
+        g_ws63_sle_write_param.data = payload + offset;
+        g_ws63_sle_write_param.data_len = chunk_len;
+
+        ret = ssapc_write_cmd(0U, conn_id_snapshot, &g_ws63_sle_write_param);
+        if (ret != ERRCODE_SLE_SUCCESS) {
+            osal_vfree(payload);
+            return ret;
+        }
+
+        offset = (uint16_t)(offset + chunk_len);
+    }
+
+    osal_vfree(payload);
+    return ERRCODE_SUCC;
+}
+
 #else
 
 errcode_t ws63_sle_init(ws63_sle_downlink_cb_t downlink_cb)
@@ -773,6 +815,13 @@ bool ws63_sle_ready(void)
 errcode_t ws63_sle_send_subport_data(uint8_t sub_port, const uint8_t *data, uint16_t len)
 {
     (void)sub_port;
+    (void)data;
+    (void)len;
+    return ERRCODE_FAIL;
+}
+
+errcode_t ws63_sle_send_debug_data(const uint8_t *data, uint16_t len)
+{
     (void)data;
     (void)len;
     return ERRCODE_FAIL;

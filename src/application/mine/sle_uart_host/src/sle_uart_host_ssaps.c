@@ -18,6 +18,8 @@
 #include "sle_uart_host_adv.h"
 
 #define osal_printk mine_host_log
+#define MINE_SLE_TAG_DEBUG "[DEBUG]"
+#define MINE_SLE_DEBUG_SHOW_MAX_LEN 96U
 
 static volatile bool g_mine_peer_connected = false;
 static volatile uint16_t g_mine_conn_id = 0;
@@ -34,6 +36,75 @@ static uint8_t g_mine_sle_uuid_base[SLE_UUID_LEN] = {
 };
 
 static const uint8_t g_mine_host_fallback_sle_mac[MINE_SLE_MAC_ADDR_LEN] = MINE_HOST_FALLBACK_SLE_MAC;
+
+/**
+ * @brief 判断上行负载是否命中指定前缀。
+ *
+ * @param data   负载数据。
+ * @param len    负载长度。
+ * @param prefix 前缀文本。
+ * @return true  命中前缀。
+ * @return false 未命中前缀或参数非法。
+ */
+static bool mine_sle_payload_has_prefix(const uint8_t *data, uint16_t len, const char *prefix)
+{
+    size_t prefix_len;
+
+    if ((data == NULL) || (prefix == NULL) || (len == 0U)) {
+        return false;
+    }
+
+    prefix_len = strlen(prefix);
+    if ((prefix_len == 0U) || ((size_t)len < prefix_len)) {
+        return false;
+    }
+
+    return (memcmp(data, prefix, prefix_len) == 0);
+}
+
+/**
+ * @brief 解析并打印从机 [DEBUG] 标签日志。
+ *
+ * 说明：
+ * 1) ws63_final 的调试日志统一走 [DEBUG] 标签；
+ * 2) 这里输出一份可读预览，便于主机侧快速确认命令执行结果；
+ * 3) 真实原始负载仍走原有 SLE->UART 回写链路，不改变协议行为。
+ *
+ * @param data SLE 上行负载。
+ * @param len  负载长度。
+ */
+static void mine_sle_dump_debug_payload(const uint8_t *data, uint16_t len)
+{
+    size_t tag_len;
+    const uint8_t *text;
+    uint16_t text_len;
+    uint16_t show_len;
+    char show_buf[MINE_SLE_DEBUG_SHOW_MAX_LEN + 1U] = {0};
+
+    if ((data == NULL) || (len == 0U)) {
+        return;
+    }
+
+    tag_len = strlen(MINE_SLE_TAG_DEBUG);
+    if ((size_t)len <= tag_len) {
+        osal_printk("[mine host][DEBUG] <empty>\r\n");
+        return;
+    }
+
+    text = data + tag_len;
+    text_len = (uint16_t)(len - (uint16_t)tag_len);
+    show_len = (text_len > MINE_SLE_DEBUG_SHOW_MAX_LEN) ? MINE_SLE_DEBUG_SHOW_MAX_LEN : text_len;
+
+    if (memcpy_s(show_buf, sizeof(show_buf), text, show_len) != EOK) {
+        return;
+    }
+    show_buf[show_len] = '\0';
+
+    osal_printk("[mine host][DEBUG] len:%u data:%s%s\r\n",
+        (unsigned int)text_len,
+        show_buf,
+        (text_len > show_len) ? " ..." : "");
+}
 
 /**
  * @brief 查询 Host 侧链路连接状态。
@@ -219,6 +290,11 @@ static void mine_ssaps_write_request_cb(uint8_t server_id, uint16_t conn_id,
 
     if ((write_cb_param == NULL) || (write_cb_param->value == NULL) || (write_cb_param->length == 0)) {
         return;
+    }
+
+    /* 对 ws63_final 调试日志做标签分流，主机侧可直接观察命令执行回显。 */
+    if (mine_sle_payload_has_prefix(write_cb_param->value, write_cb_param->length, MINE_SLE_TAG_DEBUG)) {
+        mine_sle_dump_debug_payload(write_cb_param->value, write_cb_param->length);
     }
 
     osal_printk("[mine host] sle->uart len:%u\r\n", write_cb_param->length);

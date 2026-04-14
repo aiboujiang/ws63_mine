@@ -786,7 +786,17 @@ void ld2402_process_data(uint8_t sub_port, const uint8_t *data, uint16_t len)
  */
 errcode_t ld2402_set_data_log_enable(uint8_t enable)
 {
+    uint8_t prev_enable;
+
+    prev_enable = g_ld2402_data_log_enable;
     g_ld2402_data_log_enable = (enable != 0U) ? 1U : 0U;
+    if ((g_ld2402_data_log_enable != 0U) && (prev_enable == 0U)) {
+        /*
+         * 退出静默模式后直接清零节流游标，确保下一条 distance:xxx 立刻可见，
+         * 避免刚从 Die 之后恢复日志时还被上一轮静默窗口挡住。
+         */
+        g_ld2402_data_last_log_ms = 0U;
+    }
     return ERRCODE_SUCC;
 }
 

@@ -1,11 +1,11 @@
 /**
  * @file zw101.h
- * @brief ZW101 指纹模组驱动层接口（基于《指纹模组产品用户手册_V1.5.1》）。
+ * @brief ZW101 指纹模组驱动接口（ws63_final 重构版）。
  *
- * 说明：
- * 1) 本文件仅定义 Driver 层协议语义接口；
- * 2) App/Task 层通过封装接口调用，不直接处理协议帧细节；
- * 3) 本次重点实现 ZA 协议兼容命令用于在线调试，业务/维护/定制命令先提供函数实现。
+ * 设计说明：
+ * 1) 仅保留门锁业务必需能力：ENROLL/VERIFY/ECHO/LIST/DEL/CLEAR/CANCEL；
+ * 2) 协议帧细节与 ACK 解析全部封装在 Driver 层，Task 层只使用语义接口；
+ * 3) VERIFY 默认参数由上层传入，便于与 sle_uart_slave 行为保持一致。
  */
 
 #ifndef ZW101_H
@@ -22,7 +22,9 @@ extern "C" {
 #endif
 
 /**
- * @brief ZW101 应答结果。
+ * @brief ZW101 ACK 结果。
+ *
+ * payload[0] 固定为 ACK 码，后续字节为命令私有参数。
  */
 typedef struct {
     uint8_t ack_code;
@@ -31,22 +33,22 @@ typedef struct {
 } zw101_ack_result_t;
 
 /**
- * @brief 初始化 ZW101 驱动并执行通信探测。
+ * @brief 初始化 ZW101 驱动并完成握手探测。
  *
- * @param sub_port 对应的 WK2114 子串口号。
+ * @param sub_port WK2114 子串口号。
  * @return errcode_t ERRCODE_SUCC 成功，其他失败。
  */
 errcode_t zw101_init(uint8_t sub_port);
 
 /**
- * @brief 查询 ZW101 驱动是否已完成初始化。
+ * @brief 查询驱动是否已就绪。
  *
  * @return uint8_t 1=就绪，0=未就绪。
  */
 uint8_t zw101_is_ready(void);
 
 /**
- * @brief 喂入 ZW101 接收数据流。
+ * @brief 喂入子串口接收数据（由 WK2114 轮询回调调用）。
  *
  * @param sub_port 子串口号。
  * @param data 接收缓冲区。
@@ -55,143 +57,87 @@ uint8_t zw101_is_ready(void);
 void zw101_process_data(uint8_t sub_port, const uint8_t *data, uint16_t len);
 
 /**
- * @brief 发送 ZW101 原始命令帧（十六进制字节流）。
+ * @brief 执行 ECHO 命令（GetEcho 0x53）。
  *
- * @param data 命令帧数据。
- * @param len  命令帧长度。
- * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ * @param ack_out 输出 ACK，可为 NULL。
+ * @return errcode_t ERRCODE_SUCC 表示链路可达，其他失败。
  */
-errcode_t zw101_send_raw(const uint8_t *data, uint16_t len);
-
-/* ------------------------- ZA 协议兼容命令（调试重点） ------------------------- */
+errcode_t zw101_echo(uint8_t *ack_out);
 
 /**
- * @brief ZA 兼容握手 GetEcho（0x53）。
+ * @brief 查询当前是否有手指按压在 ZW101 传感器上（PS_GetImageInfo 0x3D）。
  *
- * @param ack_out 输出确认码，可为 NULL。
- * @return errcode_t ERRCODE_SUCC 成功，其他失败。
- */
-errcode_t zw101_za_get_echo(uint8_t *ack_out);
-
-/**
- * @brief ZA 自动登记 AutoLogin（0x54）。
+ * ACK 语义：0x00=有手指，0x02=无手指。
  *
- * @param wait_time 待指时长（1~255）。
- * @param sample_interval_code 采样间隔编码（0~15，对应高 4bit）。
- * @param press_times 按指次数（2 或 3，对应低 4bit）。
- * @param page_id 存储序号。
- * @param allow_dup 重复登记标志（0=不允许，1=允许）。
- * @param ack_out 输出确认码，可为 NULL。
- * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ * @param finger_present_out 输出按压状态：1=有手指，0=无手指。
+ * @param ack_out 输出 ACK，可为 NULL。
+ * @return errcode_t ERRCODE_SUCC 表示成功获取状态，其他失败。
  */
-errcode_t zw101_za_auto_login(uint8_t wait_time,
-    uint8_t sample_interval_code,
-    uint8_t press_times,
-    uint16_t page_id,
-    uint8_t allow_dup,
-    uint8_t *ack_out);
+errcode_t zw101_check_finger_present(uint8_t *finger_present_out, uint8_t *ack_out);
 
 /**
- * @brief ZA 自动搜索 AutoSearch（0x55）。
+ * @brief 执行自动注册（AutoEnroll 0x31）。
+ *
+ * @param page_id 目标模板 ID。
+ * @param enroll_times 采样次数（2~6）。
+ * @param param_flags 参数位。
+ * @param ack_out 输出 ACK，可为 NULL。
+ * @return errcode_t ERRCODE_SUCC 表示注册成功，其他失败。
  */
-errcode_t zw101_za_auto_search(uint8_t wait_time,
-    uint16_t start_page,
-    uint16_t page_num,
-    zw101_ack_result_t *result_out);
+errcode_t zw101_enroll(uint16_t page_id, uint8_t enroll_times, uint16_t param_flags, uint8_t *ack_out);
 
 /**
- * @brief ZA 搜索指纹（带残留判断）SearchResBack（0x56）。
+ * @brief 执行自动验证（AutoIdentify 0x32）。
+ *
+ * @param score_level 安全等级（1~5）。
+ * @param target_id 目标 ID；0xFFFF 表示 1:N。
+ * @param param_flags 参数位。
+ * @param match_id_out 输出匹配 ID，可为 NULL。
+ * @param score_out 输出匹配分数，可为 NULL。
+ * @param ack_out 输出 ACK，可为 NULL。
+ * @return errcode_t ERRCODE_SUCC 表示验证通过，其他失败。
  */
-errcode_t zw101_za_search_res_back(uint8_t buffer_id,
-    uint16_t start_page,
-    uint16_t page_num,
-    zw101_ack_result_t *result_out);
-
-/**
- * @brief ZA 自动登记（灯常亮）AutoLoginStabLight（0x57）。
- */
-errcode_t zw101_za_auto_login_stab_light(uint8_t wait_time,
-    uint8_t press_times,
-    uint16_t page_id,
-    uint8_t allow_dup,
-    uint8_t *ack_out);
-
-/**
- * @brief ZA 自动搜索（搜前提示）AutoSearchWithEcho（0x58）。
- */
-errcode_t zw101_za_auto_search_with_echo(uint8_t wait_time,
-    uint16_t start_page,
-    uint16_t page_num,
-    zw101_ack_result_t *result_out);
-
-/**
- * @brief ZA 过程终止 ProcessTerminateCmd（0xAA）。
- */
-errcode_t zw101_za_process_terminate(uint8_t *ack_out);
-
-/* ------------------------- 业务类指令集（先实现，暂不主动调用） ------------------------- */
-
-errcode_t zw101_business_get_image(void);
-errcode_t zw101_business_gen_char(uint8_t buffer_id);
-errcode_t zw101_business_match(uint16_t *score_out);
-errcode_t zw101_business_search(uint8_t buffer_id,
-    uint16_t start_page,
-    uint16_t page_num,
-    uint16_t *page_id_out,
-    uint16_t *score_out);
-errcode_t zw101_business_reg_model(void);
-errcode_t zw101_business_store_char(uint8_t buffer_id, uint16_t page_id);
-errcode_t zw101_business_load_char(uint8_t buffer_id, uint16_t page_id);
-errcode_t zw101_business_up_char(uint8_t buffer_id);
-errcode_t zw101_business_down_char(uint8_t buffer_id);
-errcode_t zw101_business_delete_char(uint16_t page_id, uint16_t count);
-errcode_t zw101_business_empty(void);
-errcode_t zw101_business_write_reg(uint8_t reg_index, uint8_t reg_value);
-errcode_t zw101_business_read_syspara(uint8_t *syspara_out, uint16_t *out_len);
-errcode_t zw101_business_read_infpage(void);
-errcode_t zw101_business_read_valid_template_num(uint16_t *valid_num_out);
-errcode_t zw101_business_read_index_table(uint8_t table_index);
-errcode_t zw101_business_get_enroll_image(void);
-errcode_t zw101_business_read_add_para(uint8_t *add_para_out, uint16_t *out_len);
-errcode_t zw101_business_sleep(void);
-errcode_t zw101_business_write_empara(uint16_t em_para);
-errcode_t zw101_business_cancel(void);
-errcode_t zw101_business_auto_enroll(uint16_t page_id, uint8_t enroll_times, uint16_t param_flags);
-errcode_t zw101_business_auto_identify(uint8_t score_level,
+errcode_t zw101_verify(uint8_t score_level,
     uint16_t target_id,
     uint16_t param_flags,
     uint16_t *match_id_out,
-    uint16_t *score_out);
+    uint16_t *score_out,
+    uint8_t *ack_out);
 
-/* ------------------------- 维护类指令集（先实现，暂不主动调用） ------------------------- */
+/**
+ * @brief 查询有效模板数量（0x1D）。
+ *
+ * @param valid_num_out 输出模板数量。
+ * @param ack_out 输出 ACK，可为 NULL。
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t zw101_list(uint16_t *valid_num_out, uint8_t *ack_out);
 
-errcode_t zw101_maint_up_image_4bit(void);
-errcode_t zw101_maint_up_image_8bit(void);
-errcode_t zw101_maint_down_image_4bit(void);
-errcode_t zw101_maint_down_image_8bit(void);
-errcode_t zw101_maint_get_chip_sn(uint8_t *chip_sn_out, uint16_t *out_len);
-errcode_t zw101_maint_handshake(uint8_t *ack_out);
-errcode_t zw101_maint_check_sensor(uint8_t *ack_out);
-errcode_t zw101_maint_reset_setting(void);
+/**
+ * @brief 删除模板（0x0C）。
+ *
+ * @param page_id 起始模板 ID。
+ * @param count 删除数量。
+ * @param ack_out 输出 ACK，可为 NULL。
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t zw101_delete(uint16_t page_id, uint16_t count, uint8_t *ack_out);
 
-/* ------------------------- 定制类指令集（先实现，暂不主动调用） ------------------------- */
+/**
+ * @brief 清空模板库（0x0D）。
+ *
+ * @param ack_out 输出 ACK，可为 NULL。
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t zw101_clear(uint8_t *ack_out);
 
-errcode_t zw101_custom_set_pwd(uint32_t pwd);
-errcode_t zw101_custom_verify_pwd(uint32_t pwd);
-errcode_t zw101_custom_set_chip_addr(uint32_t chip_addr);
-errcode_t zw101_custom_write_notepad(uint8_t page_id, const uint8_t *data, uint8_t data_len);
-errcode_t zw101_custom_read_notepad(uint8_t page_id, uint8_t *data_out, uint16_t *out_len);
-errcode_t zw101_custom_bln_auto_manual_switch(uint8_t mode);
-errcode_t zw101_custom_control_bln(uint8_t func_code,
-    uint8_t start_color,
-    uint8_t end_color_or_duty,
-    uint8_t loop_times,
-    uint8_t cycle);
-errcode_t zw101_custom_get_image_info(uint8_t *area_out, uint8_t *quality_out);
-errcode_t zw101_custom_search_now(uint16_t start_page,
-    uint16_t page_num,
-    uint16_t *page_id_out,
-    uint16_t *score_out);
+/**
+ * @brief 取消当前流程（0x30）。
+ *
+ * @param ack_out 输出 ACK，可为 NULL。
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t zw101_cancel(uint8_t *ack_out);
 
 #ifdef __cplusplus
 #if __cplusplus

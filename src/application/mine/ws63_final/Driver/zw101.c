@@ -1,10 +1,11 @@
 /**
  * @file zw101.c
- * @brief ZW101 指纹模组驱动层实现。
+ * @brief ZW101 指纹模组驱动实现（ws63_final 重构版）。
  *
- * 依据文档：src/application/mine/lib/指纹模组产品用户手册_V1.5.1.pdf
- * - 第 4.1 节：基本通信流程（包头/包标识/包长度/校验和）；
- * - 第 5 节：ZA 协议兼容命令（0x53/0x54/0x55/0x56/0x57/0x58/0xAA）。
+ * 关键约束：
+ * 1) 仅保留门锁业务必需命令，避免旧 ZA/RAW 调试路径继续扩散；
+ * 2) Driver 统一负责帧组包、ACK 等待、超时与字段解析；
+ * 3) VERIFY/ENROLL 等流程均通过同步 ACK 结果回传给 Task 层状态机。
  */
 
 #include "zw101.h"
@@ -13,7 +14,6 @@
 #include <string.h>
 
 #include "osal_debug.h"
-
 #include "securec.h"
 
 #include "wk2114.h"
@@ -27,62 +27,25 @@
 #define ZW101_PACKET_ACK 0x07U
 
 #define ZW101_ACK_OK 0x00U
-#define ZW101_ACK_TIMEOUT 0x26U
-#define ZW101_ACK_AUTOLOGIN_OK1 0x56U
-#define ZW101_ACK_AUTOLOGIN_OK2 0x57U
-#define ZW101_ACK_PROCESS_TERMINATED 0x58U
+#define ZW101_ACK_NO_FINGER 0x02U
 #define ZW101_ACK_GET_ECHO_READY 0x55U
+#define ZW101_ACK_TIMEOUT 0x26U
 
-#define ZW101_CMD_GET_IMAGE 0x01U
-#define ZW101_CMD_GEN_CHAR 0x02U
-#define ZW101_CMD_MATCH 0x03U
-#define ZW101_CMD_SEARCH 0x04U
-#define ZW101_CMD_REG_MODEL 0x05U
-#define ZW101_CMD_STORE_CHAR 0x06U
-#define ZW101_CMD_LOAD_CHAR 0x07U
-#define ZW101_CMD_UP_CHAR 0x08U
-#define ZW101_CMD_DOWN_CHAR 0x09U
-#define ZW101_CMD_UP_IMAGE_4BIT 0x0AU
-#define ZW101_CMD_DOWN_IMAGE_4BIT 0x0BU
-#define ZW101_CMD_DELETE_CHAR 0x0CU
-#define ZW101_CMD_EMPTY 0x0DU
-#define ZW101_CMD_WRITE_REG 0x0EU
-#define ZW101_CMD_READ_SYS_PARA 0x0FU
-#define ZW101_CMD_SET_PWD 0x12U
-#define ZW101_CMD_VFY_PWD 0x13U
-#define ZW101_CMD_SET_CHIP_ADDR 0x15U
-#define ZW101_CMD_READ_INF_PAGE 0x16U
-#define ZW101_CMD_WRITE_NOTEPAD 0x18U
-#define ZW101_CMD_READ_NOTEPAD 0x19U
-#define ZW101_CMD_READ_VALID_TEMPLATE_NUM 0x1DU
-#define ZW101_CMD_READ_INDEX_TABLE 0x1FU
-#define ZW101_CMD_GET_ENROLL_IMAGE 0x29U
+#define ZW101_CMD_DELETE 0x0CU
+#define ZW101_CMD_CLEAR 0x0DU
+#define ZW101_CMD_VALID_TEMPLATE_NUM 0x1DU
 #define ZW101_CMD_CANCEL 0x30U
 #define ZW101_CMD_AUTO_ENROLL 0x31U
 #define ZW101_CMD_AUTO_IDENTIFY 0x32U
-#define ZW101_CMD_SLEEP 0x33U
-#define ZW101_CMD_GET_CHIP_SN 0x34U
 #define ZW101_CMD_HANDSHAKE 0x35U
 #define ZW101_CMD_CHECK_SENSOR 0x36U
-#define ZW101_CMD_REST_SETTING 0x3BU
-#define ZW101_CMD_CONTROL_BLN 0x3CU
 #define ZW101_CMD_GET_IMAGE_INFO 0x3DU
-#define ZW101_CMD_SEARCH_NOW 0x3EU
-#define ZW101_CMD_BLN_AM_SW 0x60U
-#define ZW101_CMD_READ_ADD_PARA 0x62U
-#define ZW101_CMD_UP_IMAGE_8BIT 0x6AU
-#define ZW101_CMD_DOWN_IMAGE_8BIT 0x6BU
+#define ZW101_CMD_GET_ECHO 0x53U
 
-/* 手册目录中写注册比对参数信息给出 33H；该值与休眠命令重号，按手册原文保留。 */
-#define ZW101_CMD_WRITE_EMPARA 0x33U
-
-#define ZW101_CMD_ZA_GET_ECHO 0x53U
-#define ZW101_CMD_ZA_AUTO_LOGIN 0x54U
-#define ZW101_CMD_ZA_AUTO_SEARCH 0x55U
-#define ZW101_CMD_ZA_SEARCH_RES_BACK 0x56U
-#define ZW101_CMD_ZA_AUTO_LOGIN_STAB 0x57U
-#define ZW101_CMD_ZA_AUTO_SEARCH_ECHO 0x58U
-#define ZW101_CMD_ZA_PROCESS_TERMINATE 0xAAU
+/* AutoIdentify 阶段码：对齐手册与 sle_uart_slave 解析口径。 */
+#define ZW101_VERIFY_STAGE_LEGAL_CHECK 0x00U
+#define ZW101_VERIFY_STAGE_CAPTURE 0x01U
+#define ZW101_VERIFY_STAGE_SEARCH 0x05U
 
 /* ----------------------------- 缓冲与超时 ----------------------------- */
 #define ZW101_RX_TMP_BUF_SIZE 64U
@@ -92,17 +55,22 @@
 #define ZW101_ACK_PAYLOAD_MAX_LEN 64U
 
 #define ZW101_DRAIN_MAX_ROUND 32U
+#define ZW101_INIT_RETRY_TIMES 3U
 
 #define ZW101_WAIT_POLL_MS 5U
 #define ZW101_TIMEOUT_COMMON_MS 1000U
-#define ZW101_TIMEOUT_CAPTURE_MS 1500U
 #define ZW101_TIMEOUT_AUTO_MS 30000U
+
+/* 详细追踪日志：用于定位“未触摸也返回成功”这类链路疑难问题。 */
+#define ZW101_TRACE_DETAIL_ENABLE 1U
+#define ZW101_TRACE_PAYLOAD_PREVIEW_MAX 16U
 
 /* ----------------------------- 驱动上下文 ----------------------------- */
 static uint8_t g_zw101_sub_port = 0U;
 static uint8_t g_zw101_ready = 0U;
 static uint8_t g_zw101_rx_cache[ZW101_RX_CACHE_SIZE] = {0};
 static uint16_t g_zw101_rx_cache_len = 0U;
+static uint32_t g_zw101_cmd_seq = 0U;
 
 /* ----------------------------- 工具函数 ----------------------------- */
 
@@ -152,6 +120,52 @@ static uint8_t zw101_is_valid_frame(const uint8_t *frame, uint16_t frame_len)
 }
 
 /**
+ * @brief 打印 ACK/载荷预览日志，辅助排查异常结果来源。
+ */
+static void zw101_trace_payload(const char *tag,
+    uint8_t cmd,
+    uint32_t seq,
+    const uint8_t *payload,
+    uint16_t payload_len)
+{
+#if (ZW101_TRACE_DETAIL_ENABLE == 1U)
+    uint16_t i;
+    uint16_t preview_len;
+
+    if ((tag == NULL) || (payload == NULL) || (payload_len == 0U)) {
+        return;
+    }
+
+    preview_len = payload_len;
+    if (preview_len > ZW101_TRACE_PAYLOAD_PREVIEW_MAX) {
+        preview_len = ZW101_TRACE_PAYLOAD_PREVIEW_MAX;
+    }
+
+    osal_printk("[zw101 trace] %s seq=%u cmd=0x%02X len=%u data=",
+        tag,
+        (unsigned int)seq,
+        (unsigned int)cmd,
+        (unsigned int)payload_len);
+    for (i = 0U; i < preview_len; i++) {
+        osal_printk("%02X", (unsigned int)payload[i]);
+        if ((uint16_t)(i + 1U) < preview_len) {
+            osal_printk(" ");
+        }
+    }
+    if (payload_len > preview_len) {
+        osal_printk(" ...");
+    }
+    osal_printk("\r\n");
+#else
+    (void)tag;
+    (void)cmd;
+    (void)seq;
+    (void)payload;
+    (void)payload_len;
+#endif
+}
+
+/**
  * @brief 向接收缓存追加数据，溢出时丢弃最旧数据。
  */
 static void zw101_rx_cache_push(const uint8_t *data, uint16_t len)
@@ -163,8 +177,10 @@ static void zw101_rx_cache_push(const uint8_t *data, uint16_t len)
     }
 
     if (len >= ZW101_RX_CACHE_SIZE) {
-        if (memcpy_s(g_zw101_rx_cache, sizeof(g_zw101_rx_cache),
-            &data[len - ZW101_RX_CACHE_SIZE], ZW101_RX_CACHE_SIZE) == EOK) {
+        if (memcpy_s(g_zw101_rx_cache,
+            sizeof(g_zw101_rx_cache),
+            &data[len - ZW101_RX_CACHE_SIZE],
+            ZW101_RX_CACHE_SIZE) == EOK) {
             g_zw101_rx_cache_len = ZW101_RX_CACHE_SIZE;
         }
         return;
@@ -203,7 +219,7 @@ static void zw101_rx_cache_clear(void)
 /**
  * @brief 从缓存中提取一帧完整协议包。
  *
- * @return uint8_t 1=提取成功，0=当前缓存还不够组成完整帧。
+ * @return uint8_t 1=提取成功，0=当前缓存不足以组成完整帧。
  */
 static uint8_t zw101_rx_cache_pop_frame(uint8_t *frame, uint16_t *frame_len)
 {
@@ -269,15 +285,16 @@ static uint8_t zw101_rx_cache_pop_frame(uint8_t *frame, uint16_t *frame_len)
                 g_zw101_rx_cache_len - total_len);
         }
         g_zw101_rx_cache_len = (uint16_t)(g_zw101_rx_cache_len - total_len);
+
         *frame_len = total_len;
         return 1U;
     }
 }
 
 /**
- * @brief 非阻塞读取一次子串口并写入缓存。
+ * @brief 从 WK2114 子口读取一次数据并入缓存。
  */
-static void zw101_pump_uart_once(void)
+static void zw101_pump_uart_once(uint8_t trace_silent)
 {
     uint8_t rx_tmp[ZW101_RX_TMP_BUF_SIZE] = {0};
     uint8_t len;
@@ -289,29 +306,53 @@ static void zw101_pump_uart_once(void)
     len = wk2114_subport_read(g_zw101_sub_port, rx_tmp, sizeof(rx_tmp));
     if (len > 0U) {
         zw101_rx_cache_push(rx_tmp, len);
+#if (ZW101_TRACE_DETAIL_ENABLE == 1U)
+    if (trace_silent == 0U) {
+        osal_printk("[zw101 trace] pump len=%u cache=%u\r\n",
+        (unsigned int)len,
+        (unsigned int)g_zw101_rx_cache_len);
+    }
+#else
+    (void)trace_silent;
+#endif
     }
 }
 
 /**
- * @brief 清空子串口接收残留数据。
+ * @brief 清空硬件 FIFO 与软件缓存，避免旧包干扰新命令。
  */
-static void zw101_drain_uart(void)
+static void zw101_drain_uart(uint8_t trace_silent)
 {
     uint8_t i;
+    uint8_t read_len;
+    uint32_t drained_bytes = 0U;
     uint8_t dummy[ZW101_RX_TMP_BUF_SIZE] = {0};
 
+    if (g_zw101_sub_port == 0U) {
+        return;
+    }
+
     for (i = 0U; i < ZW101_DRAIN_MAX_ROUND; i++) {
-        if (wk2114_subport_read(g_zw101_sub_port, dummy, sizeof(dummy)) == 0U) {
+        read_len = wk2114_subport_read(g_zw101_sub_port, dummy, sizeof(dummy));
+        if (read_len == 0U) {
             break;
         }
-        ws63_bsp_sleep_ms(2U);
+        drained_bytes += read_len;
     }
 
     zw101_rx_cache_clear();
+
+#if (ZW101_TRACE_DETAIL_ENABLE == 1U)
+    if ((trace_silent == 0U) && (drained_bytes > 0U)) {
+        osal_printk("[zw101 trace] drain removed=%u bytes\r\n", (unsigned int)drained_bytes);
+    }
+#else
+    (void)trace_silent;
+#endif
 }
 
 /**
- * @brief 组包发送命令帧。
+ * @brief 发送一条 ZW101 命令帧。
  */
 static errcode_t zw101_send_command(uint8_t cmd, const uint8_t *params, uint16_t params_len)
 {
@@ -355,24 +396,13 @@ static errcode_t zw101_send_command(uint8_t cmd, const uint8_t *params, uint16_t
 }
 
 /**
- * @brief 是否命中自动登记中间态确认码（需要继续等待）。
+ * @brief 等待一帧 ACK。
  */
-static uint8_t zw101_is_autologin_progress_ack(uint8_t ack_code)
-{
-    return (uint8_t)((ack_code == ZW101_ACK_AUTOLOGIN_OK1) ||
-        (ack_code == ZW101_ACK_AUTOLOGIN_OK2));
-}
-
-/**
- * @brief 等待 ACK 帧。
- *
- * @param timeout_ms 超时时间。
- * @param filter_autologin_progress 1=忽略 0x56/0x57 中间态并继续等待。
- * @param out_result 输出应答。
- * @return errcode_t ERRCODE_SUCC 收到 ACK，ERRCODE_FAIL 超时或异常。
- */
-static errcode_t zw101_wait_ack(uint32_t timeout_ms,
-    uint8_t filter_autologin_progress,
+static errcode_t zw101_wait_ack(uint8_t cmd,
+    uint32_t seq,
+    uint32_t timeout_ms,
+    uint8_t trace_silent,
+    uint8_t wait_verify_terminal,
     zw101_ack_result_t *out_result)
 {
     uint32_t start_ms;
@@ -388,10 +418,19 @@ static errcode_t zw101_wait_ack(uint32_t timeout_ms,
 
     start_ms = ws63_bsp_get_tick_ms();
     while ((uint32_t)(ws63_bsp_get_tick_ms() - start_ms) < timeout_ms) {
-        zw101_pump_uart_once();
+        zw101_pump_uart_once(trace_silent);
 
         while (zw101_rx_cache_pop_frame(frame, &frame_len) == 1U) {
             if (frame[6] != ZW101_PACKET_ACK) {
+#if (ZW101_TRACE_DETAIL_ENABLE == 1U)
+                if (trace_silent == 0U) {
+                    osal_printk("[zw101 trace] seq=%u cmd=0x%02X ignore packet=0x%02X len=%u\r\n",
+                        (unsigned int)seq,
+                        (unsigned int)cmd,
+                        (unsigned int)frame[6],
+                        (unsigned int)frame_len);
+                }
+#endif
                 continue;
             }
 
@@ -402,10 +441,6 @@ static errcode_t zw101_wait_ack(uint32_t timeout_ms,
 
             payload_len = (uint16_t)(data_len - 2U);
             if (payload_len == 0U) {
-                continue;
-            }
-
-            if ((filter_autologin_progress == 1U) && zw101_is_autologin_progress_ack(frame[9])) {
                 continue;
             }
 
@@ -421,6 +456,50 @@ static errcode_t zw101_wait_ack(uint32_t timeout_ms,
                     out_result->payload_len = payload_len;
                 }
             }
+
+#if (ZW101_TRACE_DETAIL_ENABLE == 1U)
+            if (trace_silent == 0U) {
+                osal_printk("[zw101 trace] seq=%u cmd=0x%02X ack=0x%02X payload_len=%u frame_len=%u\r\n",
+                    (unsigned int)seq,
+                    (unsigned int)cmd,
+                    (unsigned int)frame[9],
+                    (unsigned int)payload_len,
+                    (unsigned int)frame_len);
+                zw101_trace_payload("ack_payload", cmd, seq, &frame[9], payload_len);
+            }
+#endif
+
+            /*
+             * AutoIdentify 同步等待策略：
+             * 1) ACK=0x00 但阶段非 SEARCH（LEGAL_CHECK/CAPTURE）时继续等待；
+             * 2) ACK!=0x00 视为终态失败，立即返回给上层。
+             */
+            if ((wait_verify_terminal != 0U) && (cmd == ZW101_CMD_AUTO_IDENTIFY) &&
+                (out_result != NULL) && (out_result->ack_code == ZW101_ACK_OK)) {
+                if (out_result->payload_len < 2U) {
+#if (ZW101_TRACE_DETAIL_ENABLE == 1U)
+                    if (trace_silent == 0U) {
+                        osal_printk("[zw101 trace] seq=%u cmd=0x%02X verify ack missing stage, continue\r\n",
+                            (unsigned int)seq,
+                            (unsigned int)cmd);
+                    }
+#endif
+                    continue;
+                }
+
+                if (out_result->payload[1] != ZW101_VERIFY_STAGE_SEARCH) {
+#if (ZW101_TRACE_DETAIL_ENABLE == 1U)
+                    if (trace_silent == 0U) {
+                        osal_printk("[zw101 trace] seq=%u cmd=0x%02X verify stage=0x%02X continue\r\n",
+                            (unsigned int)seq,
+                            (unsigned int)cmd,
+                            (unsigned int)out_result->payload[1]);
+                    }
+#endif
+                    continue;
+                }
+            }
+
             return ERRCODE_SUCC;
         }
 
@@ -431,6 +510,16 @@ static errcode_t zw101_wait_ack(uint32_t timeout_ms,
         out_result->ack_code = ZW101_ACK_TIMEOUT;
         out_result->payload_len = 0U;
     }
+
+#if (ZW101_TRACE_DETAIL_ENABLE == 1U)
+    if (trace_silent == 0U) {
+        osal_printk("[zw101 trace] seq=%u cmd=0x%02X wait timeout=%u cache=%u\r\n",
+            (unsigned int)seq,
+            (unsigned int)cmd,
+            (unsigned int)timeout_ms,
+            (unsigned int)g_zw101_rx_cache_len);
+    }
+#endif
     return ERRCODE_FAIL;
 }
 
@@ -441,37 +530,66 @@ static errcode_t zw101_send_cmd_wait(uint8_t cmd,
     const uint8_t *params,
     uint16_t params_len,
     uint32_t timeout_ms,
-    uint8_t filter_autologin_progress,
+    uint8_t trace_silent,
+    uint8_t wait_verify_terminal,
     zw101_ack_result_t *out_result)
 {
     errcode_t ret;
+    uint32_t seq;
 
-    zw101_drain_uart();
+    seq = ++g_zw101_cmd_seq;
+
+#if (ZW101_TRACE_DETAIL_ENABLE == 1U)
+    if (trace_silent == 0U) {
+        osal_printk("[zw101 trace] seq=%u send cmd=0x%02X params_len=%u timeout=%u\r\n",
+            (unsigned int)seq,
+            (unsigned int)cmd,
+            (unsigned int)params_len,
+            (unsigned int)timeout_ms);
+        if ((params != NULL) && (params_len > 0U)) {
+            zw101_trace_payload("cmd_params", cmd, seq, params, params_len);
+        }
+    }
+#endif
+
+    zw101_drain_uart(trace_silent);
 
     ret = zw101_send_command(cmd, params, params_len);
     if (ret != ERRCODE_SUCC) {
+#if (ZW101_TRACE_DETAIL_ENABLE == 1U)
+        if (trace_silent == 0U) {
+            osal_printk("[zw101 trace] seq=%u cmd=0x%02X send fail ret=0x%x\r\n",
+                (unsigned int)seq,
+                (unsigned int)cmd,
+                (unsigned int)ret);
+        }
+#endif
         return ret;
     }
 
-    ret = zw101_wait_ack(timeout_ms, filter_autologin_progress, out_result);
+    ret = zw101_wait_ack(cmd, seq, timeout_ms, trace_silent, wait_verify_terminal, out_result);
     if ((ret != ERRCODE_SUCC) && (out_result != NULL) && (out_result->ack_code == ZW101_ACK_TIMEOUT)) {
         osal_printk("[zw101] cmd 0x%02X wait ack timeout\r\n", (unsigned int)cmd);
     }
-    return ret;
-}
 
-/**
- * @brief 统一处理“命令发送成功且 ACK=0x00 才判成功”。
- */
-static errcode_t zw101_expect_ack_ok(errcode_t ret, const zw101_ack_result_t *ack)
-{
-    if (ret != ERRCODE_SUCC) {
-        return ret;
+#if (ZW101_TRACE_DETAIL_ENABLE == 1U)
+    if (trace_silent == 0U) {
+        if (out_result != NULL) {
+            osal_printk("[zw101 trace] seq=%u cmd=0x%02X done ret=0x%x ack=0x%02X payload=%u\r\n",
+                (unsigned int)seq,
+                (unsigned int)cmd,
+                (unsigned int)ret,
+                (unsigned int)out_result->ack_code,
+                (unsigned int)out_result->payload_len);
+        } else {
+            osal_printk("[zw101 trace] seq=%u cmd=0x%02X done ret=0x%x (no out_result)\r\n",
+                (unsigned int)seq,
+                (unsigned int)cmd,
+                (unsigned int)ret);
+        }
     }
-    if ((ack == NULL) || (ack->ack_code != ZW101_ACK_OK)) {
-        return ERRCODE_FAIL;
-    }
-    return ERRCODE_SUCC;
+#endif
+    return ret;
 }
 
 /**
@@ -488,7 +606,7 @@ static void zw101_pack_u16(uint16_t value, uint8_t *out_hi, uint8_t *out_lo)
 }
 
 /**
- * @brief 解析 ACK 载荷中的 16 位字段（从 offset 开始，载荷下标基于 payload[0]=ack）。
+ * @brief 解析 ACK 载荷中的 16 位字段（payload[0] 为 ack）。
  */
 static uint16_t zw101_unpack_payload_u16(const zw101_ack_result_t *ack, uint16_t offset)
 {
@@ -500,17 +618,77 @@ static uint16_t zw101_unpack_payload_u16(const zw101_ack_result_t *ack, uint16_t
 }
 
 /**
- * @brief 检查驱动是否可发送命令。
+ * @brief 填充调用方 ACK 输出参数。
+ */
+static void zw101_set_ack_out(uint8_t *ack_out, const zw101_ack_result_t *ack)
+{
+    if (ack_out == NULL) {
+        return;
+    }
+
+    if (ack == NULL) {
+        *ack_out = 0xFFU;
+        return;
+    }
+
+    *ack_out = ack->ack_code;
+}
+
+/**
+ * @brief 统一判定“发送成功且 ACK=0x00 才成功”。
+ */
+static errcode_t zw101_expect_ack_ok(errcode_t ret, const zw101_ack_result_t *ack)
+{
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+
+    if ((ack == NULL) || (ack->ack_code != ZW101_ACK_OK)) {
+        return ERRCODE_FAIL;
+    }
+
+    return ERRCODE_SUCC;
+}
+
+/**
+ * @brief 检查驱动是否可发送业务命令。
  */
 static errcode_t zw101_check_ready(void)
 {
     if ((g_zw101_sub_port == 0U) || (g_zw101_ready == 0U)) {
         return ERRCODE_FAIL;
     }
+
     return ERRCODE_SUCC;
 }
 
-/* ----------------------------- 对外基础接口 ----------------------------- */
+/**
+ * @brief 标准握手（0x35），仅用于初始化兜底。
+ */
+static errcode_t zw101_handshake(uint8_t *ack_out)
+{
+    errcode_t ret;
+    zw101_ack_result_t ack;
+
+    ret = zw101_send_cmd_wait(ZW101_CMD_HANDSHAKE, NULL, 0U, ZW101_TIMEOUT_COMMON_MS, 0U, 0U, &ack);
+    zw101_set_ack_out(ack_out, &ack);
+    return zw101_expect_ack_ok(ret, &ack);
+}
+
+/**
+ * @brief 传感器检测（0x36），用于初始化探测。
+ */
+static errcode_t zw101_check_sensor(uint8_t *ack_out)
+{
+    errcode_t ret;
+    zw101_ack_result_t ack;
+
+    ret = zw101_send_cmd_wait(ZW101_CMD_CHECK_SENSOR, NULL, 0U, ZW101_TIMEOUT_COMMON_MS, 0U, 0U, &ack);
+    zw101_set_ack_out(ack_out, &ack);
+    return zw101_expect_ack_ok(ret, &ack);
+}
+
+/* ----------------------------- 对外接口 ----------------------------- */
 
 errcode_t zw101_init(uint8_t sub_port)
 {
@@ -527,57 +705,46 @@ errcode_t zw101_init(uint8_t sub_port)
 
     osal_printk("[zw101] init on port %u\r\n", (unsigned int)sub_port);
 
-    zw101_drain_uart();
+    zw101_drain_uart(0U);
 
-    for (retry = 0U; retry < 3U; retry++) {
+    for (retry = 0U; retry < ZW101_INIT_RETRY_TIMES; retry++) {
         ack = 0xFFU;
-        ret = zw101_za_get_echo(&ack);
+        ret = zw101_echo(&ack);
         osal_printk("[zw101] init try%u echo ret=0x%x ack=0x%02X\r\n",
             (unsigned int)(retry + 1U),
             (unsigned int)ret,
             (unsigned int)ack);
-        if (ret == ERRCODE_SUCC) {
-            if ((ack == ZW101_ACK_GET_ECHO_READY) || (ack == ZW101_ACK_OK)) {
-                ack = 0xFFU;
-                ret = zw101_maint_check_sensor(&ack);
-                osal_printk("[zw101] init try%u check_sensor ret=0x%x ack=0x%02X\r\n",
-                    (unsigned int)(retry + 1U),
-                    (unsigned int)ret,
-                    (unsigned int)ack);
-                if (ret == ERRCODE_SUCC) {
-                    if (ack == ZW101_ACK_OK) {
-                        g_zw101_ready = 1U;
-                        osal_printk("[zw101] init ok (echo=0x%02X sensor=0x%02X)\r\n",
-                            (unsigned int)ZW101_ACK_GET_ECHO_READY,
-                            (unsigned int)ack);
-                        return ERRCODE_SUCC;
-                    }
-                }
+        if ((ret == ERRCODE_SUCC) && ((ack == ZW101_ACK_GET_ECHO_READY) || (ack == ZW101_ACK_OK))) {
+            ack = 0xFFU;
+            ret = zw101_check_sensor(&ack);
+            osal_printk("[zw101] init try%u check_sensor ret=0x%x ack=0x%02X\r\n",
+                (unsigned int)(retry + 1U),
+                (unsigned int)ret,
+                (unsigned int)ack);
+            if (ret == ERRCODE_SUCC) {
+                g_zw101_ready = 1U;
+                osal_printk("[zw101] init ok (echo+sensor)\r\n");
+                return ERRCODE_SUCC;
             }
         }
 
-        /* 兼容路径：若 ZA 握手不通，退回标准握手 0x35 再做传感器检查。 */
         ack = 0xFFU;
-        ret = zw101_maint_handshake(&ack);
+        ret = zw101_handshake(&ack);
         osal_printk("[zw101] init try%u handshake ret=0x%x ack=0x%02X\r\n",
             (unsigned int)(retry + 1U),
             (unsigned int)ret,
             (unsigned int)ack);
         if (ret == ERRCODE_SUCC) {
-            if (ack == ZW101_ACK_OK) {
-                ack = 0xFFU;
-                ret = zw101_maint_check_sensor(&ack);
-                osal_printk("[zw101] init try%u check_sensor ret=0x%x ack=0x%02X\r\n",
-                    (unsigned int)(retry + 1U),
-                    (unsigned int)ret,
-                    (unsigned int)ack);
-                if (ret == ERRCODE_SUCC) {
-                    if (ack == ZW101_ACK_OK) {
-                        g_zw101_ready = 1U;
-                        osal_printk("[zw101] init ok (handshake+sensor)\r\n");
-                        return ERRCODE_SUCC;
-                    }
-                }
+            ack = 0xFFU;
+            ret = zw101_check_sensor(&ack);
+            osal_printk("[zw101] init try%u check_sensor ret=0x%x ack=0x%02X\r\n",
+                (unsigned int)(retry + 1U),
+                (unsigned int)ret,
+                (unsigned int)ack);
+            if (ret == ERRCODE_SUCC) {
+                g_zw101_ready = 1U;
+                osal_printk("[zw101] init ok (handshake+sensor)\r\n");
+                return ERRCODE_SUCC;
             }
         }
 
@@ -588,9 +755,6 @@ errcode_t zw101_init(uint8_t sub_port)
     return ERRCODE_FAIL;
 }
 
-/**
- * @brief 查询 ZW101 驱动是否已进入可用状态。
- */
 uint8_t zw101_is_ready(void)
 {
     return g_zw101_ready;
@@ -598,633 +762,89 @@ uint8_t zw101_is_ready(void)
 
 void zw101_process_data(uint8_t sub_port, const uint8_t *data, uint16_t len)
 {
-    uint8_t frame[ZW101_FRAME_BUF_SIZE] = {0};
-    uint16_t frame_len;
-
     if ((sub_port != g_zw101_sub_port) || (data == NULL) || (len == 0U)) {
         return;
     }
 
     /*
-     * 主循环轮询读到的包在这里做流式缓存。
-     * 同步命令执行时会复用同一套帧提取逻辑，保证通信流程一致。
+     * 统一把轮询回调数据喂入缓存，避免 ACK 只在“主动读串口”路径可见。
+     * 同步命令会在等待函数中从同一缓存抽帧，保证行为一致。
      */
     zw101_rx_cache_push(data, len);
-
-    while (zw101_rx_cache_pop_frame(frame, &frame_len) == 1U) {
-        if ((frame[6] == ZW101_PACKET_ACK) && (frame_len >= 12U)) {
-            osal_printk("[zw101] async ack=0x%02X\r\n", (unsigned int)frame[9]);
-        }
-    }
 }
 
-errcode_t zw101_send_raw(const uint8_t *data, uint16_t len)
-{
-    if ((data == NULL) || (len == 0U) || (g_zw101_sub_port == 0U)) {
-        return ERRCODE_INVALID_PARAM;
-    }
-
-    return wk2114_subport_write(g_zw101_sub_port, data, len);
-}
-
-/* ----------------------------- ZA 协议兼容命令 ----------------------------- */
-
-errcode_t zw101_za_get_echo(uint8_t *ack_out)
+errcode_t zw101_echo(uint8_t *ack_out)
 {
     errcode_t ret;
     zw101_ack_result_t ack;
 
-    ret = zw101_send_cmd_wait(ZW101_CMD_ZA_GET_ECHO,
-        NULL,
-        0U,
-        ZW101_TIMEOUT_COMMON_MS,
-        0U,
-        &ack);
-    if (ack_out != NULL) {
-        *ack_out = ack.ack_code;
+    if (g_zw101_sub_port == 0U) {
+        if (ack_out != NULL) {
+            *ack_out = 0xFFU;
+        }
+        return ERRCODE_FAIL;
     }
+
+    ret = zw101_send_cmd_wait(ZW101_CMD_GET_ECHO, NULL, 0U, ZW101_TIMEOUT_COMMON_MS, 0U, 0U, &ack);
+    zw101_set_ack_out(ack_out, &ack);
 
     if (ret != ERRCODE_SUCC) {
         return ret;
     }
 
-    if ((ack.ack_code == ZW101_ACK_GET_ECHO_READY) || (ack.ack_code == ZW101_ACK_OK)) {
+    return ((ack.ack_code == ZW101_ACK_GET_ECHO_READY) || (ack.ack_code == ZW101_ACK_OK)) ?
+        ERRCODE_SUCC : ERRCODE_FAIL;
+}
+
+errcode_t zw101_check_finger_present(uint8_t *finger_present_out, uint8_t *ack_out)
+{
+    errcode_t ret;
+    zw101_ack_result_t ack;
+
+    if (finger_present_out != NULL) {
+        *finger_present_out = 1U;
+    }
+
+    if (zw101_check_ready() != ERRCODE_SUCC) {
+        if (ack_out != NULL) {
+            *ack_out = 0xFFU;
+        }
+        return ERRCODE_FAIL;
+    }
+
+    /*
+     * 离手检测改用 PS_GetImageInfo(0x3D)：
+     * - ACK=0x02 表示传感器无手指；
+     * - ACK=0x00 表示当前检测到按压。
+     * 该路径会高频轮询，保持 trace_silent=1U 降低日志噪声。
+     */
+    ret = zw101_send_cmd_wait(ZW101_CMD_GET_IMAGE_INFO, NULL, 0U, ZW101_TIMEOUT_COMMON_MS, 1U, 0U, &ack);
+    zw101_set_ack_out(ack_out, &ack);
+    if (ret != ERRCODE_SUCC) {
+        return ret;
+    }
+
+    if (ack.ack_code == ZW101_ACK_OK) {
+        if (finger_present_out != NULL) {
+            *finger_present_out = 1U;
+        }
+        return ERRCODE_SUCC;
+    }
+
+    if (ack.ack_code == ZW101_ACK_NO_FINGER) {
+        if (finger_present_out != NULL) {
+            *finger_present_out = 0U;
+        }
         return ERRCODE_SUCC;
     }
 
     return ERRCODE_FAIL;
 }
 
-errcode_t zw101_za_auto_login(uint8_t wait_time,
-    uint8_t sample_interval_code,
-    uint8_t press_times,
-    uint16_t page_id,
-    uint8_t allow_dup,
-    uint8_t *ack_out)
+errcode_t zw101_enroll(uint16_t page_id, uint8_t enroll_times, uint16_t param_flags, uint8_t *ack_out)
 {
     uint8_t params[5] = {0};
     errcode_t ret;
-    zw101_ack_result_t ack;
-
-    if ((press_times != 2U) && (press_times != 3U)) {
-        return ERRCODE_INVALID_PARAM;
-    }
-
-    params[0] = wait_time;
-    params[1] = (uint8_t)(((sample_interval_code & 0x0FU) << 4U) | (press_times & 0x0FU));
-    zw101_pack_u16(page_id, &params[2], &params[3]);
-    params[4] = (allow_dup == 0U) ? 0U : 1U;
-
-    ret = zw101_send_cmd_wait(ZW101_CMD_ZA_AUTO_LOGIN,
-        params,
-        sizeof(params),
-        ZW101_TIMEOUT_AUTO_MS,
-        1U,
-        &ack);
-    if (ack_out != NULL) {
-        *ack_out = ack.ack_code;
-    }
-
-    return zw101_expect_ack_ok(ret, &ack);
-}
-
-errcode_t zw101_za_auto_search(uint8_t wait_time,
-    uint16_t start_page,
-    uint16_t page_num,
-    zw101_ack_result_t *result_out)
-{
-    uint8_t params[5] = {0};
-    errcode_t ret;
-    zw101_ack_result_t ack;
-
-    params[0] = wait_time;
-    zw101_pack_u16(start_page, &params[1], &params[2]);
-    zw101_pack_u16(page_num, &params[3], &params[4]);
-
-    ret = zw101_send_cmd_wait(ZW101_CMD_ZA_AUTO_SEARCH,
-        params,
-        sizeof(params),
-        ZW101_TIMEOUT_AUTO_MS,
-        0U,
-        &ack);
-    if (result_out != NULL) {
-        *result_out = ack;
-    }
-
-    return zw101_expect_ack_ok(ret, &ack);
-}
-
-errcode_t zw101_za_search_res_back(uint8_t buffer_id,
-    uint16_t start_page,
-    uint16_t page_num,
-    zw101_ack_result_t *result_out)
-{
-    uint8_t params[5] = {0};
-    errcode_t ret;
-    zw101_ack_result_t ack;
-
-    if ((buffer_id != 1U) && (buffer_id != 2U)) {
-        return ERRCODE_INVALID_PARAM;
-    }
-
-    params[0] = buffer_id;
-    zw101_pack_u16(start_page, &params[1], &params[2]);
-    zw101_pack_u16(page_num, &params[3], &params[4]);
-
-    ret = zw101_send_cmd_wait(ZW101_CMD_ZA_SEARCH_RES_BACK,
-        params,
-        sizeof(params),
-        ZW101_TIMEOUT_COMMON_MS,
-        0U,
-        &ack);
-    if (result_out != NULL) {
-        *result_out = ack;
-    }
-
-    return zw101_expect_ack_ok(ret, &ack);
-}
-
-errcode_t zw101_za_auto_login_stab_light(uint8_t wait_time,
-    uint8_t press_times,
-    uint16_t page_id,
-    uint8_t allow_dup,
-    uint8_t *ack_out)
-{
-    uint8_t params[5] = {0};
-    errcode_t ret;
-    zw101_ack_result_t ack;
-
-    if ((press_times != 2U) && (press_times != 3U)) {
-        return ERRCODE_INVALID_PARAM;
-    }
-
-    params[0] = wait_time;
-    params[1] = press_times;
-    zw101_pack_u16(page_id, &params[2], &params[3]);
-    params[4] = (allow_dup == 0U) ? 0U : 1U;
-
-    ret = zw101_send_cmd_wait(ZW101_CMD_ZA_AUTO_LOGIN_STAB,
-        params,
-        sizeof(params),
-        ZW101_TIMEOUT_AUTO_MS,
-        1U,
-        &ack);
-    if (ack_out != NULL) {
-        *ack_out = ack.ack_code;
-    }
-
-    return zw101_expect_ack_ok(ret, &ack);
-}
-
-errcode_t zw101_za_auto_search_with_echo(uint8_t wait_time,
-    uint16_t start_page,
-    uint16_t page_num,
-    zw101_ack_result_t *result_out)
-{
-    uint8_t params[5] = {0};
-    errcode_t ret;
-    zw101_ack_result_t ack;
-
-    params[0] = wait_time;
-    zw101_pack_u16(start_page, &params[1], &params[2]);
-    zw101_pack_u16(page_num, &params[3], &params[4]);
-
-    ret = zw101_send_cmd_wait(ZW101_CMD_ZA_AUTO_SEARCH_ECHO,
-        params,
-        sizeof(params),
-        ZW101_TIMEOUT_AUTO_MS,
-        0U,
-        &ack);
-    if (result_out != NULL) {
-        *result_out = ack;
-    }
-
-    return zw101_expect_ack_ok(ret, &ack);
-}
-
-errcode_t zw101_za_process_terminate(uint8_t *ack_out)
-{
-    errcode_t ret;
-    zw101_ack_result_t ack;
-
-    ret = zw101_send_cmd_wait(ZW101_CMD_ZA_PROCESS_TERMINATE,
-        NULL,
-        0U,
-        ZW101_TIMEOUT_COMMON_MS,
-        0U,
-        &ack);
-    if (ack_out != NULL) {
-        *ack_out = ack.ack_code;
-    }
-
-    if (ret != ERRCODE_SUCC) {
-        return ret;
-    }
-
-    return (ack.ack_code == ZW101_ACK_PROCESS_TERMINATED) ? ERRCODE_SUCC : ERRCODE_FAIL;
-}
-
-/* ----------------------------- 业务类指令集 ----------------------------- */
-
-errcode_t zw101_business_get_image(void)
-{
-    zw101_ack_result_t ack;
-
-    if (zw101_check_ready() != ERRCODE_SUCC) {
-        return ERRCODE_FAIL;
-    }
-
-    return zw101_expect_ack_ok(
-        zw101_send_cmd_wait(ZW101_CMD_GET_IMAGE, NULL, 0U, ZW101_TIMEOUT_CAPTURE_MS, 0U, &ack),
-        &ack);
-}
-
-errcode_t zw101_business_gen_char(uint8_t buffer_id)
-{
-    zw101_ack_result_t ack;
-
-    if ((zw101_check_ready() != ERRCODE_SUCC) || (buffer_id == 0U)) {
-        return ERRCODE_FAIL;
-    }
-
-    return zw101_expect_ack_ok(
-        zw101_send_cmd_wait(ZW101_CMD_GEN_CHAR, &buffer_id, 1U, ZW101_TIMEOUT_COMMON_MS, 0U, &ack),
-        &ack);
-}
-
-errcode_t zw101_business_match(uint16_t *score_out)
-{
-    errcode_t ret;
-    zw101_ack_result_t ack;
-
-    if (zw101_check_ready() != ERRCODE_SUCC) {
-        return ERRCODE_FAIL;
-    }
-
-    ret = zw101_send_cmd_wait(ZW101_CMD_MATCH, NULL, 0U, ZW101_TIMEOUT_COMMON_MS, 0U, &ack);
-    if ((ret == ERRCODE_SUCC) && (score_out != NULL) && (ack.payload_len >= 3U)) {
-        *score_out = zw101_unpack_payload_u16(&ack, 1U);
-    }
-
-    return zw101_expect_ack_ok(ret, &ack);
-}
-
-errcode_t zw101_business_search(uint8_t buffer_id,
-    uint16_t start_page,
-    uint16_t page_num,
-    uint16_t *page_id_out,
-    uint16_t *score_out)
-{
-    uint8_t params[5] = {0};
-    errcode_t ret;
-    zw101_ack_result_t ack;
-
-    if ((zw101_check_ready() != ERRCODE_SUCC) || (buffer_id == 0U)) {
-        return ERRCODE_FAIL;
-    }
-
-    params[0] = buffer_id;
-    zw101_pack_u16(start_page, &params[1], &params[2]);
-    zw101_pack_u16(page_num, &params[3], &params[4]);
-
-    ret = zw101_send_cmd_wait(ZW101_CMD_SEARCH,
-        params,
-        sizeof(params),
-        ZW101_TIMEOUT_COMMON_MS,
-        0U,
-        &ack);
-
-    if ((ret == ERRCODE_SUCC) && (ack.payload_len >= 5U)) {
-        if (page_id_out != NULL) {
-            *page_id_out = zw101_unpack_payload_u16(&ack, 1U);
-        }
-        if (score_out != NULL) {
-            *score_out = zw101_unpack_payload_u16(&ack, 3U);
-        }
-    }
-
-    return zw101_expect_ack_ok(ret, &ack);
-}
-
-errcode_t zw101_business_reg_model(void)
-{
-    zw101_ack_result_t ack;
-
-    if (zw101_check_ready() != ERRCODE_SUCC) {
-        return ERRCODE_FAIL;
-    }
-
-    return zw101_expect_ack_ok(
-        zw101_send_cmd_wait(ZW101_CMD_REG_MODEL, NULL, 0U, ZW101_TIMEOUT_COMMON_MS, 0U, &ack),
-        &ack);
-}
-
-errcode_t zw101_business_store_char(uint8_t buffer_id, uint16_t page_id)
-{
-    uint8_t params[3] = {0};
-    zw101_ack_result_t ack;
-
-    if ((zw101_check_ready() != ERRCODE_SUCC) || (buffer_id == 0U)) {
-        return ERRCODE_FAIL;
-    }
-
-    params[0] = buffer_id;
-    zw101_pack_u16(page_id, &params[1], &params[2]);
-
-    return zw101_expect_ack_ok(
-        zw101_send_cmd_wait(ZW101_CMD_STORE_CHAR, params, sizeof(params), ZW101_TIMEOUT_COMMON_MS, 0U, &ack),
-        &ack);
-}
-
-errcode_t zw101_business_load_char(uint8_t buffer_id, uint16_t page_id)
-{
-    uint8_t params[3] = {0};
-    zw101_ack_result_t ack;
-
-    if ((zw101_check_ready() != ERRCODE_SUCC) || (buffer_id == 0U)) {
-        return ERRCODE_FAIL;
-    }
-
-    params[0] = buffer_id;
-    zw101_pack_u16(page_id, &params[1], &params[2]);
-
-    return zw101_expect_ack_ok(
-        zw101_send_cmd_wait(ZW101_CMD_LOAD_CHAR, params, sizeof(params), ZW101_TIMEOUT_COMMON_MS, 0U, &ack),
-        &ack);
-}
-
-errcode_t zw101_business_up_char(uint8_t buffer_id)
-{
-    zw101_ack_result_t ack;
-
-    /* 说明：本函数当前完成“命令 + ACK”阶段，后续数据包上行由上层按场景接入。 */
-    if ((zw101_check_ready() != ERRCODE_SUCC) || (buffer_id == 0U)) {
-        return ERRCODE_FAIL;
-    }
-
-    return zw101_expect_ack_ok(
-        zw101_send_cmd_wait(ZW101_CMD_UP_CHAR, &buffer_id, 1U, ZW101_TIMEOUT_COMMON_MS, 0U, &ack),
-        &ack);
-}
-
-errcode_t zw101_business_down_char(uint8_t buffer_id)
-{
-    zw101_ack_result_t ack;
-
-    /* 说明：本函数当前完成“命令 + ACK”阶段，后续数据包下行由上层按场景接入。 */
-    if ((zw101_check_ready() != ERRCODE_SUCC) || (buffer_id == 0U)) {
-        return ERRCODE_FAIL;
-    }
-
-    return zw101_expect_ack_ok(
-        zw101_send_cmd_wait(ZW101_CMD_DOWN_CHAR, &buffer_id, 1U, ZW101_TIMEOUT_COMMON_MS, 0U, &ack),
-        &ack);
-}
-
-errcode_t zw101_business_delete_char(uint16_t page_id, uint16_t count)
-{
-    uint8_t params[4] = {0};
-    zw101_ack_result_t ack;
-
-    if ((zw101_check_ready() != ERRCODE_SUCC) || (count == 0U)) {
-        return ERRCODE_FAIL;
-    }
-
-    zw101_pack_u16(page_id, &params[0], &params[1]);
-    zw101_pack_u16(count, &params[2], &params[3]);
-
-    return zw101_expect_ack_ok(
-        zw101_send_cmd_wait(ZW101_CMD_DELETE_CHAR, params, sizeof(params), ZW101_TIMEOUT_COMMON_MS, 0U, &ack),
-        &ack);
-}
-
-errcode_t zw101_business_empty(void)
-{
-    zw101_ack_result_t ack;
-
-    if (zw101_check_ready() != ERRCODE_SUCC) {
-        return ERRCODE_FAIL;
-    }
-
-    return zw101_expect_ack_ok(
-        zw101_send_cmd_wait(ZW101_CMD_EMPTY, NULL, 0U, ZW101_TIMEOUT_COMMON_MS, 0U, &ack),
-        &ack);
-}
-
-errcode_t zw101_business_write_reg(uint8_t reg_index, uint8_t reg_value)
-{
-    uint8_t params[2] = {reg_index, reg_value};
-    zw101_ack_result_t ack;
-
-    if (zw101_check_ready() != ERRCODE_SUCC) {
-        return ERRCODE_FAIL;
-    }
-
-    return zw101_expect_ack_ok(
-        zw101_send_cmd_wait(ZW101_CMD_WRITE_REG, params, sizeof(params), ZW101_TIMEOUT_COMMON_MS, 0U, &ack),
-        &ack);
-}
-
-errcode_t zw101_business_read_syspara(uint8_t *syspara_out, uint16_t *out_len)
-{
-    errcode_t ret;
-    zw101_ack_result_t ack;
-    uint16_t copy_len;
-
-    if ((zw101_check_ready() != ERRCODE_SUCC) || (syspara_out == NULL) || (out_len == NULL)) {
-        return ERRCODE_FAIL;
-    }
-
-    ret = zw101_send_cmd_wait(ZW101_CMD_READ_SYS_PARA,
-        NULL,
-        0U,
-        ZW101_TIMEOUT_COMMON_MS,
-        0U,
-        &ack);
-    if (ret != ERRCODE_SUCC) {
-        return ret;
-    }
-    if (ack.ack_code != ZW101_ACK_OK) {
-        return ERRCODE_FAIL;
-    }
-
-    if (ack.payload_len <= 1U) {
-        *out_len = 0U;
-        return ERRCODE_FAIL;
-    }
-
-    copy_len = (uint16_t)(ack.payload_len - 1U);
-    if (copy_len > *out_len) {
-        copy_len = *out_len;
-    }
-
-    if (memcpy_s(syspara_out, *out_len, &ack.payload[1], copy_len) != EOK) {
-        return ERRCODE_FAIL;
-    }
-
-    *out_len = copy_len;
-    return ERRCODE_SUCC;
-}
-
-errcode_t zw101_business_read_infpage(void)
-{
-    zw101_ack_result_t ack;
-
-    /* 说明：本函数当前完成“命令 + ACK”阶段，信息页数据包上传后续按需求接入。 */
-    if (zw101_check_ready() != ERRCODE_SUCC) {
-        return ERRCODE_FAIL;
-    }
-
-    return zw101_expect_ack_ok(
-        zw101_send_cmd_wait(ZW101_CMD_READ_INF_PAGE, NULL, 0U, ZW101_TIMEOUT_COMMON_MS, 0U, &ack),
-        &ack);
-}
-
-errcode_t zw101_business_read_valid_template_num(uint16_t *valid_num_out)
-{
-    errcode_t ret;
-    zw101_ack_result_t ack;
-
-    if (zw101_check_ready() != ERRCODE_SUCC) {
-        return ERRCODE_FAIL;
-    }
-
-    ret = zw101_send_cmd_wait(ZW101_CMD_READ_VALID_TEMPLATE_NUM,
-        NULL,
-        0U,
-        ZW101_TIMEOUT_COMMON_MS,
-        0U,
-        &ack);
-    if (ret != ERRCODE_SUCC) {
-        return ret;
-    }
-    if (ack.ack_code != ZW101_ACK_OK) {
-        return ERRCODE_FAIL;
-    }
-
-    if ((valid_num_out != NULL) && (ack.payload_len >= 3U)) {
-        *valid_num_out = zw101_unpack_payload_u16(&ack, 1U);
-    }
-
-    return ERRCODE_SUCC;
-}
-
-errcode_t zw101_business_read_index_table(uint8_t table_index)
-{
-    zw101_ack_result_t ack;
-
-    if (zw101_check_ready() != ERRCODE_SUCC) {
-        return ERRCODE_FAIL;
-    }
-
-    return zw101_expect_ack_ok(
-        zw101_send_cmd_wait(ZW101_CMD_READ_INDEX_TABLE,
-            &table_index,
-            1U,
-            ZW101_TIMEOUT_COMMON_MS,
-            0U,
-            &ack),
-        &ack);
-}
-
-errcode_t zw101_business_get_enroll_image(void)
-{
-    zw101_ack_result_t ack;
-
-    if (zw101_check_ready() != ERRCODE_SUCC) {
-        return ERRCODE_FAIL;
-    }
-
-    return zw101_expect_ack_ok(
-        zw101_send_cmd_wait(ZW101_CMD_GET_ENROLL_IMAGE, NULL, 0U, ZW101_TIMEOUT_CAPTURE_MS, 0U, &ack),
-        &ack);
-}
-
-errcode_t zw101_business_read_add_para(uint8_t *add_para_out, uint16_t *out_len)
-{
-    errcode_t ret;
-    zw101_ack_result_t ack;
-    uint16_t copy_len;
-
-    if ((zw101_check_ready() != ERRCODE_SUCC) || (add_para_out == NULL) || (out_len == NULL)) {
-        return ERRCODE_FAIL;
-    }
-
-    ret = zw101_send_cmd_wait(ZW101_CMD_READ_ADD_PARA,
-        NULL,
-        0U,
-        ZW101_TIMEOUT_COMMON_MS,
-        0U,
-        &ack);
-    if (ret != ERRCODE_SUCC) {
-        return ret;
-    }
-    if (ack.ack_code != ZW101_ACK_OK) {
-        return ERRCODE_FAIL;
-    }
-
-    if (ack.payload_len <= 1U) {
-        *out_len = 0U;
-        return ERRCODE_FAIL;
-    }
-
-    copy_len = (uint16_t)(ack.payload_len - 1U);
-    if (copy_len > *out_len) {
-        copy_len = *out_len;
-    }
-    if (memcpy_s(add_para_out, *out_len, &ack.payload[1], copy_len) != EOK) {
-        return ERRCODE_FAIL;
-    }
-
-    *out_len = copy_len;
-    return ERRCODE_SUCC;
-}
-
-errcode_t zw101_business_sleep(void)
-{
-    zw101_ack_result_t ack;
-
-    if (zw101_check_ready() != ERRCODE_SUCC) {
-        return ERRCODE_FAIL;
-    }
-
-    return zw101_expect_ack_ok(
-        zw101_send_cmd_wait(ZW101_CMD_SLEEP, NULL, 0U, ZW101_TIMEOUT_COMMON_MS, 0U, &ack),
-        &ack);
-}
-
-errcode_t zw101_business_write_empara(uint16_t em_para)
-{
-    uint8_t params[2] = {0};
-    zw101_ack_result_t ack;
-
-    /* 手册目录中该命令码与休眠同为 33H，本实现按原文保留。 */
-    if (zw101_check_ready() != ERRCODE_SUCC) {
-        return ERRCODE_FAIL;
-    }
-
-    zw101_pack_u16(em_para, &params[0], &params[1]);
-    return zw101_expect_ack_ok(
-        zw101_send_cmd_wait(ZW101_CMD_WRITE_EMPARA, params, sizeof(params), ZW101_TIMEOUT_COMMON_MS, 0U, &ack),
-        &ack);
-}
-
-errcode_t zw101_business_cancel(void)
-{
-    zw101_ack_result_t ack;
-
-    if (zw101_check_ready() != ERRCODE_SUCC) {
-        return ERRCODE_FAIL;
-    }
-
-    return zw101_expect_ack_ok(
-        zw101_send_cmd_wait(ZW101_CMD_CANCEL, NULL, 0U, ZW101_TIMEOUT_COMMON_MS, 0U, &ack),
-        &ack);
-}
-
-errcode_t zw101_business_auto_enroll(uint16_t page_id, uint8_t enroll_times, uint16_t param_flags)
-{
-    uint8_t params[5] = {0};
     zw101_ack_result_t ack;
 
     if (zw101_check_ready() != ERRCODE_SUCC) {
@@ -1235,18 +855,27 @@ errcode_t zw101_business_auto_enroll(uint16_t page_id, uint8_t enroll_times, uin
     params[2] = enroll_times;
     zw101_pack_u16(param_flags, &params[3], &params[4]);
 
-    return zw101_expect_ack_ok(
-        zw101_send_cmd_wait(ZW101_CMD_AUTO_ENROLL, params, sizeof(params), ZW101_TIMEOUT_AUTO_MS, 1U, &ack),
+    ret = zw101_send_cmd_wait(ZW101_CMD_AUTO_ENROLL,
+        params,
+        sizeof(params),
+        ZW101_TIMEOUT_AUTO_MS,
+        0U,
+        0U,
         &ack);
+    zw101_set_ack_out(ack_out, &ack);
+    return zw101_expect_ack_ok(ret, &ack);
 }
 
-errcode_t zw101_business_auto_identify(uint8_t score_level,
+errcode_t zw101_verify(uint8_t score_level,
     uint16_t target_id,
     uint16_t param_flags,
     uint16_t *match_id_out,
-    uint16_t *score_out)
+    uint16_t *score_out,
+    uint8_t *ack_out)
 {
     uint8_t params[5] = {0};
+    uint16_t parsed_match_id = 0xFFFFU;
+    uint16_t parsed_score = 0U;
     errcode_t ret;
     zw101_ack_result_t ack;
 
@@ -1263,397 +892,109 @@ errcode_t zw101_business_auto_identify(uint8_t score_level,
         sizeof(params),
         ZW101_TIMEOUT_AUTO_MS,
         0U,
+        1U,
         &ack);
+    zw101_set_ack_out(ack_out, &ack);
 
-    if ((ret == ERRCODE_SUCC) && (ack.payload_len >= 5U)) {
+    if ((ret == ERRCODE_SUCC) && (ack.ack_code == ZW101_ACK_OK)) {
+        if (ack.payload_len < 6U) {
+            osal_printk("[zw101] verify terminal payload too short, len=%u\r\n",
+                (unsigned int)ack.payload_len);
+            return ERRCODE_FAIL;
+        }
+
+        /* payload[0]=ack, payload[1]=stage, payload[2..3]=id, payload[4..5]=score。 */
+        parsed_match_id = zw101_unpack_payload_u16(&ack, 2U);
+        parsed_score = zw101_unpack_payload_u16(&ack, 4U);
+
+        if ((parsed_match_id == 0xFFFFU) || (parsed_score == 0U)) {
+            osal_printk("[zw101] verify terminal invalid id=%u score=%u\r\n",
+                (unsigned int)parsed_match_id,
+                (unsigned int)parsed_score);
+            return ERRCODE_FAIL;
+        }
+
         if (match_id_out != NULL) {
-            *match_id_out = zw101_unpack_payload_u16(&ack, 1U);
+            *match_id_out = parsed_match_id;
         }
         if (score_out != NULL) {
-            *score_out = zw101_unpack_payload_u16(&ack, 3U);
+            *score_out = parsed_score;
         }
+
+#if (ZW101_TRACE_DETAIL_ENABLE == 1U)
+        osal_printk("[zw101 trace] verify parsed ack=0x%02X stage=0x%02X match_id=%u score=%u raw_len=%u\r\n",
+            (unsigned int)ack.ack_code,
+            (unsigned int)ack.payload[1],
+            (unsigned int)parsed_match_id,
+            (unsigned int)parsed_score,
+            (unsigned int)ack.payload_len);
+#endif
     }
 
     return zw101_expect_ack_ok(ret, &ack);
 }
 
-/* ----------------------------- 维护类指令集 ----------------------------- */
-
-errcode_t zw101_maint_up_image_4bit(void)
-{
-    zw101_ack_result_t ack;
-
-    /* 仅实现命令阶段，图像数据包上传在后续链路接入。 */
-    if (zw101_check_ready() != ERRCODE_SUCC) {
-        return ERRCODE_FAIL;
-    }
-
-    return zw101_expect_ack_ok(
-        zw101_send_cmd_wait(ZW101_CMD_UP_IMAGE_4BIT, NULL, 0U, ZW101_TIMEOUT_COMMON_MS, 0U, &ack),
-        &ack);
-}
-
-errcode_t zw101_maint_up_image_8bit(void)
-{
-    zw101_ack_result_t ack;
-
-    /* 仅实现命令阶段，图像数据包上传在后续链路接入。 */
-    if (zw101_check_ready() != ERRCODE_SUCC) {
-        return ERRCODE_FAIL;
-    }
-
-    return zw101_expect_ack_ok(
-        zw101_send_cmd_wait(ZW101_CMD_UP_IMAGE_8BIT, NULL, 0U, ZW101_TIMEOUT_COMMON_MS, 0U, &ack),
-        &ack);
-}
-
-errcode_t zw101_maint_down_image_4bit(void)
-{
-    zw101_ack_result_t ack;
-
-    /* 仅实现命令阶段，图像数据包下发在后续链路接入。 */
-    if (zw101_check_ready() != ERRCODE_SUCC) {
-        return ERRCODE_FAIL;
-    }
-
-    return zw101_expect_ack_ok(
-        zw101_send_cmd_wait(ZW101_CMD_DOWN_IMAGE_4BIT, NULL, 0U, ZW101_TIMEOUT_COMMON_MS, 0U, &ack),
-        &ack);
-}
-
-errcode_t zw101_maint_down_image_8bit(void)
-{
-    zw101_ack_result_t ack;
-
-    /* 仅实现命令阶段，图像数据包下发在后续链路接入。 */
-    if (zw101_check_ready() != ERRCODE_SUCC) {
-        return ERRCODE_FAIL;
-    }
-
-    return zw101_expect_ack_ok(
-        zw101_send_cmd_wait(ZW101_CMD_DOWN_IMAGE_8BIT, NULL, 0U, ZW101_TIMEOUT_COMMON_MS, 0U, &ack),
-        &ack);
-}
-
-errcode_t zw101_maint_get_chip_sn(uint8_t *chip_sn_out, uint16_t *out_len)
-{
-    errcode_t ret;
-    zw101_ack_result_t ack;
-    uint16_t copy_len;
-
-    if ((zw101_check_ready() != ERRCODE_SUCC) || (chip_sn_out == NULL) || (out_len == NULL)) {
-        return ERRCODE_FAIL;
-    }
-
-    ret = zw101_send_cmd_wait(ZW101_CMD_GET_CHIP_SN,
-        NULL,
-        0U,
-        ZW101_TIMEOUT_COMMON_MS,
-        0U,
-        &ack);
-    if (ret != ERRCODE_SUCC) {
-        return ret;
-    }
-    if (ack.ack_code != ZW101_ACK_OK) {
-        return ERRCODE_FAIL;
-    }
-
-    if (ack.payload_len <= 1U) {
-        *out_len = 0U;
-        return ERRCODE_FAIL;
-    }
-
-    copy_len = (uint16_t)(ack.payload_len - 1U);
-    if (copy_len > *out_len) {
-        copy_len = *out_len;
-    }
-    if (memcpy_s(chip_sn_out, *out_len, &ack.payload[1], copy_len) != EOK) {
-        return ERRCODE_FAIL;
-    }
-
-    *out_len = copy_len;
-    return ERRCODE_SUCC;
-}
-
-errcode_t zw101_maint_handshake(uint8_t *ack_out)
+errcode_t zw101_list(uint16_t *valid_num_out, uint8_t *ack_out)
 {
     errcode_t ret;
     zw101_ack_result_t ack;
 
-    ret = zw101_send_cmd_wait(ZW101_CMD_HANDSHAKE,
-        NULL,
-        0U,
-        ZW101_TIMEOUT_COMMON_MS,
-        0U,
-        &ack);
-
-    if (ack_out != NULL) {
-        *ack_out = ack.ack_code;
+    if ((zw101_check_ready() != ERRCODE_SUCC) || (valid_num_out == NULL)) {
+        return ERRCODE_FAIL;
     }
 
-    if (ret != ERRCODE_SUCC) {
-        return ret;
+    ret = zw101_send_cmd_wait(ZW101_CMD_VALID_TEMPLATE_NUM, NULL, 0U, ZW101_TIMEOUT_COMMON_MS, 0U, 0U, &ack);
+    zw101_set_ack_out(ack_out, &ack);
+
+    if ((ret == ERRCODE_SUCC) && (ack.payload_len >= 3U)) {
+        *valid_num_out = zw101_unpack_payload_u16(&ack, 1U);
     }
-    return (ack.ack_code == ZW101_ACK_OK) ? ERRCODE_SUCC : ERRCODE_FAIL;
+
+    return zw101_expect_ack_ok(ret, &ack);
 }
 
-errcode_t zw101_maint_check_sensor(uint8_t *ack_out)
-{
-    errcode_t ret;
-    zw101_ack_result_t ack;
-
-    ret = zw101_send_cmd_wait(ZW101_CMD_CHECK_SENSOR,
-        NULL,
-        0U,
-        ZW101_TIMEOUT_COMMON_MS,
-        0U,
-        &ack);
-
-    if (ack_out != NULL) {
-        *ack_out = ack.ack_code;
-    }
-
-    if (ret != ERRCODE_SUCC) {
-        return ret;
-    }
-    return (ack.ack_code == ZW101_ACK_OK) ? ERRCODE_SUCC : ERRCODE_FAIL;
-}
-
-errcode_t zw101_maint_reset_setting(void)
-{
-    zw101_ack_result_t ack;
-
-    if (zw101_check_ready() != ERRCODE_SUCC) {
-        return ERRCODE_FAIL;
-    }
-
-    return zw101_expect_ack_ok(
-        zw101_send_cmd_wait(ZW101_CMD_REST_SETTING, NULL, 0U, ZW101_TIMEOUT_COMMON_MS, 0U, &ack),
-        &ack);
-}
-
-/* ----------------------------- 定制类指令集 ----------------------------- */
-
-errcode_t zw101_custom_set_pwd(uint32_t pwd)
-{
-    uint8_t params[4] = {0};
-    zw101_ack_result_t ack;
-
-    if (zw101_check_ready() != ERRCODE_SUCC) {
-        return ERRCODE_FAIL;
-    }
-
-    params[0] = (uint8_t)(pwd >> 24);
-    params[1] = (uint8_t)(pwd >> 16);
-    params[2] = (uint8_t)(pwd >> 8);
-    params[3] = (uint8_t)pwd;
-
-    return zw101_expect_ack_ok(
-        zw101_send_cmd_wait(ZW101_CMD_SET_PWD, params, sizeof(params), ZW101_TIMEOUT_COMMON_MS, 0U, &ack),
-        &ack);
-}
-
-errcode_t zw101_custom_verify_pwd(uint32_t pwd)
-{
-    uint8_t params[4] = {0};
-    zw101_ack_result_t ack;
-
-    if (zw101_check_ready() != ERRCODE_SUCC) {
-        return ERRCODE_FAIL;
-    }
-
-    params[0] = (uint8_t)(pwd >> 24);
-    params[1] = (uint8_t)(pwd >> 16);
-    params[2] = (uint8_t)(pwd >> 8);
-    params[3] = (uint8_t)pwd;
-
-    return zw101_expect_ack_ok(
-        zw101_send_cmd_wait(ZW101_CMD_VFY_PWD, params, sizeof(params), ZW101_TIMEOUT_COMMON_MS, 0U, &ack),
-        &ack);
-}
-
-errcode_t zw101_custom_set_chip_addr(uint32_t chip_addr)
-{
-    uint8_t params[4] = {0};
-    zw101_ack_result_t ack;
-
-    if (zw101_check_ready() != ERRCODE_SUCC) {
-        return ERRCODE_FAIL;
-    }
-
-    params[0] = (uint8_t)(chip_addr >> 24);
-    params[1] = (uint8_t)(chip_addr >> 16);
-    params[2] = (uint8_t)(chip_addr >> 8);
-    params[3] = (uint8_t)chip_addr;
-
-    return zw101_expect_ack_ok(
-        zw101_send_cmd_wait(ZW101_CMD_SET_CHIP_ADDR, params, sizeof(params), ZW101_TIMEOUT_COMMON_MS, 0U, &ack),
-        &ack);
-}
-
-errcode_t zw101_custom_write_notepad(uint8_t page_id, const uint8_t *data, uint8_t data_len)
-{
-    uint8_t params[33] = {0};
-    zw101_ack_result_t ack;
-
-    if ((zw101_check_ready() != ERRCODE_SUCC) || (data == NULL) || (data_len == 0U) || (data_len > 32U)) {
-        return ERRCODE_FAIL;
-    }
-
-    params[0] = page_id;
-    if (memcpy_s(&params[1], sizeof(params) - 1U, data, data_len) != EOK) {
-        return ERRCODE_FAIL;
-    }
-
-    return zw101_expect_ack_ok(
-        zw101_send_cmd_wait(ZW101_CMD_WRITE_NOTEPAD, params, sizeof(params), ZW101_TIMEOUT_COMMON_MS, 0U, &ack),
-        &ack);
-}
-
-errcode_t zw101_custom_read_notepad(uint8_t page_id, uint8_t *data_out, uint16_t *out_len)
-{
-    errcode_t ret;
-    zw101_ack_result_t ack;
-    uint16_t copy_len;
-
-    if ((zw101_check_ready() != ERRCODE_SUCC) || (data_out == NULL) || (out_len == NULL)) {
-        return ERRCODE_FAIL;
-    }
-
-    ret = zw101_send_cmd_wait(ZW101_CMD_READ_NOTEPAD,
-        &page_id,
-        1U,
-        ZW101_TIMEOUT_COMMON_MS,
-        0U,
-        &ack);
-    if (ret != ERRCODE_SUCC) {
-        return ret;
-    }
-    if (ack.ack_code != ZW101_ACK_OK) {
-        return ERRCODE_FAIL;
-    }
-
-    if (ack.payload_len <= 1U) {
-        *out_len = 0U;
-        return ERRCODE_FAIL;
-    }
-
-    copy_len = (uint16_t)(ack.payload_len - 1U);
-    if (copy_len > *out_len) {
-        copy_len = *out_len;
-    }
-
-    if (memcpy_s(data_out, *out_len, &ack.payload[1], copy_len) != EOK) {
-        return ERRCODE_FAIL;
-    }
-
-    *out_len = copy_len;
-    return ERRCODE_SUCC;
-}
-
-errcode_t zw101_custom_bln_auto_manual_switch(uint8_t mode)
-{
-    zw101_ack_result_t ack;
-
-    if (zw101_check_ready() != ERRCODE_SUCC) {
-        return ERRCODE_FAIL;
-    }
-
-    return zw101_expect_ack_ok(
-        zw101_send_cmd_wait(ZW101_CMD_BLN_AM_SW, &mode, 1U, ZW101_TIMEOUT_COMMON_MS, 0U, &ack),
-        &ack);
-}
-
-errcode_t zw101_custom_control_bln(uint8_t func_code,
-    uint8_t start_color,
-    uint8_t end_color_or_duty,
-    uint8_t loop_times,
-    uint8_t cycle)
-{
-    uint8_t params[5] = {0};
-    zw101_ack_result_t ack;
-
-    if (zw101_check_ready() != ERRCODE_SUCC) {
-        return ERRCODE_FAIL;
-    }
-
-    params[0] = func_code;
-    params[1] = start_color;
-    params[2] = end_color_or_duty;
-    params[3] = loop_times;
-    params[4] = cycle;
-
-    return zw101_expect_ack_ok(
-        zw101_send_cmd_wait(ZW101_CMD_CONTROL_BLN, params, sizeof(params), ZW101_TIMEOUT_COMMON_MS, 0U, &ack),
-        &ack);
-}
-
-errcode_t zw101_custom_get_image_info(uint8_t *area_out, uint8_t *quality_out)
-{
-    errcode_t ret;
-    zw101_ack_result_t ack;
-
-    if (zw101_check_ready() != ERRCODE_SUCC) {
-        return ERRCODE_FAIL;
-    }
-
-    ret = zw101_send_cmd_wait(ZW101_CMD_GET_IMAGE_INFO,
-        NULL,
-        0U,
-        ZW101_TIMEOUT_COMMON_MS,
-        0U,
-        &ack);
-    if (ret != ERRCODE_SUCC) {
-        return ret;
-    }
-    if (ack.ack_code != ZW101_ACK_OK) {
-        return ERRCODE_FAIL;
-    }
-
-    if (ack.payload_len >= 3U) {
-        if (area_out != NULL) {
-            *area_out = ack.payload[1];
-        }
-        if (quality_out != NULL) {
-            *quality_out = ack.payload[2];
-        }
-        return ERRCODE_SUCC;
-    }
-
-    return ERRCODE_FAIL;
-}
-
-errcode_t zw101_custom_search_now(uint16_t start_page,
-    uint16_t page_num,
-    uint16_t *page_id_out,
-    uint16_t *score_out)
+errcode_t zw101_delete(uint16_t page_id, uint16_t count, uint8_t *ack_out)
 {
     uint8_t params[4] = {0};
     errcode_t ret;
     zw101_ack_result_t ack;
 
+    if ((zw101_check_ready() != ERRCODE_SUCC) || (count == 0U)) {
+        return ERRCODE_FAIL;
+    }
+
+    zw101_pack_u16(page_id, &params[0], &params[1]);
+    zw101_pack_u16(count, &params[2], &params[3]);
+
+    ret = zw101_send_cmd_wait(ZW101_CMD_DELETE, params, sizeof(params), ZW101_TIMEOUT_COMMON_MS, 0U, 0U, &ack);
+    zw101_set_ack_out(ack_out, &ack);
+    return zw101_expect_ack_ok(ret, &ack);
+}
+
+errcode_t zw101_clear(uint8_t *ack_out)
+{
+    errcode_t ret;
+    zw101_ack_result_t ack;
+
     if (zw101_check_ready() != ERRCODE_SUCC) {
         return ERRCODE_FAIL;
     }
 
-    zw101_pack_u16(start_page, &params[0], &params[1]);
-    zw101_pack_u16(page_num, &params[2], &params[3]);
+    ret = zw101_send_cmd_wait(ZW101_CMD_CLEAR, NULL, 0U, ZW101_TIMEOUT_COMMON_MS, 0U, 0U, &ack);
+    zw101_set_ack_out(ack_out, &ack);
+    return zw101_expect_ack_ok(ret, &ack);
+}
 
-    ret = zw101_send_cmd_wait(ZW101_CMD_SEARCH_NOW,
-        params,
-        sizeof(params),
-        ZW101_TIMEOUT_COMMON_MS,
-        0U,
-        &ack);
+errcode_t zw101_cancel(uint8_t *ack_out)
+{
+    errcode_t ret;
+    zw101_ack_result_t ack;
 
-    if ((ret == ERRCODE_SUCC) && (ack.payload_len >= 5U)) {
-        if (page_id_out != NULL) {
-            *page_id_out = zw101_unpack_payload_u16(&ack, 1U);
-        }
-        if (score_out != NULL) {
-            *score_out = zw101_unpack_payload_u16(&ack, 3U);
-        }
+    if (zw101_check_ready() != ERRCODE_SUCC) {
+        return ERRCODE_FAIL;
     }
 
+    ret = zw101_send_cmd_wait(ZW101_CMD_CANCEL, NULL, 0U, ZW101_TIMEOUT_COMMON_MS, 0U, 0U, &ack);
+    zw101_set_ack_out(ack_out, &ack);
     return zw101_expect_ack_ok(ret, &ack);
 }

@@ -73,6 +73,18 @@ bool ws63_sle_ready(void);
 errcode_t ws63_sle_send_subport_data(uint8_t sub_port, const uint8_t *data, uint16_t len);
 
 /**
+ * @brief 将调试日志文本上行到 SLE Host。
+ *
+ * 该接口独立于子口数据上行，统一使用 DEBUG 标签，
+ * 用于承载 ws63_final 调试命令的文本输出。
+ *
+ * @param data 日志数据。
+ * @param len  日志长度。
+ * @return errcode_t ERRCODE_SUCC 成功，其他为失败码。
+ */
+errcode_t ws63_sle_send_debug_data(const uint8_t *data, uint16_t len);
+
+/**
  * @brief 设置 SLE 上行 success 日志开关。
  *
  * @param enable 1=开启，0=关闭。

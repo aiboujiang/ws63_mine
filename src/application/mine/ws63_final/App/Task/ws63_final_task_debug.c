@@ -6,6 +6,7 @@
 #include "ws63_final_task_debug.h"
 
 #include "ws63_final_task.h"
+#include "ws63_final_task_internal.h"
 
 #include <ctype.h>
 #include <stdarg.h>
@@ -27,6 +28,7 @@
 #define WS63_DEBUG_RAW_CMD_MAX_BYTES 64U
 #define WS63_DEBUG_SENSOR_LOG_GAP_MS_MAX 60000U
 
+/* 调试命令核心开关：仅控制命令组帧、解析和执行流程。 */
 #if (WS63_DEBUG_UART_ENABLE == 1U)
 static uint8_t g_ws63_debug_uart_ready = 0U;
 /* 电机周期监控开关：仅控制 MOTOR WATCH ON|OFF。 */
@@ -34,7 +36,9 @@ static uint8_t g_ws63_debug_motor_watch_enable = 0U;
 /* TTP229 周期监控开关：用于持续观察矩阵键盘按键位图变化。 */
 static uint8_t g_ws63_debug_ttp229_watch_enable = 0U;
 static uint32_t g_ws63_debug_last_watch_ms = 0U;
+#if (WS63_DEBUG_LOCAL_UART_IO_ENABLE == 1U)
 static uint8_t g_ws63_debug_uart_rx_buf[WS63_DEBUG_UART_RX_BUF_SIZE] = {0};
+#endif
 static char g_ws63_debug_cmd_line[WS63_DEBUG_CMD_MAX_LEN] = {0};
 static uint16_t g_ws63_debug_cmd_line_len = 0U;
 static char g_ws63_debug_cmd_queue[WS63_DEBUG_CMD_QUEUE_DEPTH][WS63_DEBUG_CMD_MAX_LEN] = {{0}};
@@ -46,6 +50,88 @@ static uint8_t g_ws63_debug_cmd_too_long = 0U;
 static uint8_t g_ws63_debug_uart_rx_error = 0U;
 /* 记录上一字符是否为 '\\r'，用于兼容 CRLF，避免一条命令被执行两次。 */
 static uint8_t g_ws63_debug_last_char_cr = 0U;
+/* 纯调试模式开关：进入后门锁编排任务保持挂起，仅保留调试命令链路。 */
+static uint8_t g_ws63_debug_only_mode = 0U;
+
+/* 下面两个函数在状态控制接口中复用，提前声明避免静态函数先用后定义。 */
+static unsigned int ws63_debug_irq_lock(void);
+static void ws63_debug_irq_unlock(unsigned int irq_status);
+
+/**
+ * @brief 读出当前纯调试模式状态。
+ */
+uint8_t ws63_task_debug_is_debug_only_mode(void)
+{
+    unsigned int irq_status;
+    uint8_t enable;
+
+    irq_status = ws63_debug_irq_lock();
+    enable = g_ws63_debug_only_mode;
+    ws63_debug_irq_unlock(irq_status);
+    return enable;
+}
+
+/**
+ * @brief 设置纯调试模式状态。
+ *
+ * 说明：该状态是任务层门控开关，决定门锁编排任务是否启动或恢复。
+ */
+errcode_t ws63_task_debug_set_debug_only_mode(uint8_t enable)
+{
+    unsigned int irq_status;
+    uint8_t prev_enable;
+
+    irq_status = ws63_debug_irq_lock();
+    prev_enable = g_ws63_debug_only_mode;
+    g_ws63_debug_only_mode = (enable != 0U) ? 1U : 0U;
+    ws63_debug_irq_unlock(irq_status);
+
+    if ((enable != 0U) && (prev_enable == 0U)) {
+        /*
+         * 进入 DEBUG INIT 时同步关掉 LD2402 运行态日志，并主动取消 ZW101 的挂起/执行中的认证流程。
+         * 这样主机切到纯调试模式后，串口不会再被巡航距离刷屏，正在跑的 ZW101 也能尽量及时收口。
+         */
+        (void)ws63_task_ld2402_set_log_enable(0U);
+        (void)ws63_task_zw101_cancel_active_request();
+    }
+
+    return ERRCODE_SUCC;
+}
+
+/**
+ * @brief 判断一段 SLE 下行数据是否可作为调试命令文本流。
+ *
+ * 判定规则采用“白名单字符”：可打印 ASCII、CR/LF、制表符、退格和 DEL。
+ * 这样可以尽量避免把二进制透传帧误判为调试命令。
+ *
+ * @param data 输入数据。
+ * @param len  数据长度。
+ * @return uint8_t 1=可作为命令文本，0=不作为命令文本。
+ */
+static uint8_t ws63_debug_is_text_stream(const uint8_t *data, uint16_t len)
+{
+    uint16_t i;
+
+    if ((data == NULL) || (len == 0U)) {
+        return 0U;
+    }
+
+    for (i = 0U; i < len; i++) {
+        uint8_t ch = data[i];
+
+        if ((ch == '\r') || (ch == '\n') || (ch == '\t') || (ch == 0x08U) || (ch == 0x7FU)) {
+            continue;
+        }
+
+        if (isprint((int)ch)) {
+            continue;
+        }
+
+        return 0U;
+    }
+
+    return 1U;
+}
 
 /**
  * @brief 把电机状态转换为可读字符串。
@@ -206,9 +292,8 @@ static int32_t ws63_debug_motor_rpm_to_output_rps_milli(int32_t motor_rpm)
 /**
  * @brief 调试串口接收回调：按行组帧后压入命令队列。
  */
-static void ws63_debug_uart_rx_callback(const void *buffer, uint16_t length, bool error)
+static void ws63_debug_feed_rx_bytes(const uint8_t *rx_data, uint16_t length, bool error)
 {
-    const uint8_t *rx_data;
     uint16_t i;
     uint8_t ch;
 
@@ -216,11 +301,10 @@ static void ws63_debug_uart_rx_callback(const void *buffer, uint16_t length, boo
         g_ws63_debug_uart_rx_error = 1U;
     }
 
-    if ((buffer == NULL) || (length == 0U)) {
+    if ((rx_data == NULL) || (length == 0U)) {
         return;
     }
 
-    rx_data = (const uint8_t *)buffer;
     for (i = 0U; i < length; i++) {
         ch = rx_data[i];
 
@@ -270,13 +354,24 @@ static void ws63_debug_uart_rx_callback(const void *buffer, uint16_t length, boo
 }
 
 /**
- * @brief 向调试串口发送文本。
+ * @brief 调试串口接收回调：按行组帧后压入命令队列。
  */
-static void ws63_debug_uart_send_text(const char *text)
+#if (WS63_DEBUG_LOCAL_UART_IO_ENABLE == 1U)
+static void ws63_debug_uart_rx_callback(const void *buffer, uint16_t length, bool error)
 {
+    ws63_debug_feed_rx_bytes((const uint8_t *)buffer, length, error);
+}
+#endif
+
+/**
+ * @brief 通过 SLE 上行发送调试日志文本。
+ */
+static void ws63_debug_sle_send_text(const char *text)
+{
+#if (WS63_DEBUG_SLE_LOG_ENABLE == 1U)
     size_t text_len;
 
-    if ((g_ws63_debug_uart_ready == 0U) || (text == NULL)) {
+    if (text == NULL) {
         return;
     }
 
@@ -285,7 +380,15 @@ static void ws63_debug_uart_send_text(const char *text)
         return;
     }
 
-    (void)ws63_debug_uart_write((const uint8_t *)text, (uint16_t)text_len, 0U);
+    if (text_len > 0xFFFFU) {
+        text_len = 0xFFFFU;
+    }
+
+    /* 调试日志统一经 SLE 回传到主机侧，不走本机调试串口。 */
+    (void)ws63_task_send_debug_log_to_host((const uint8_t *)text, (uint16_t)text_len);
+#else
+    (void)text;
+#endif
 }
 
 /**
@@ -308,10 +411,7 @@ static void ws63_debug_log(const char *fmt, ...)
         return;
     }
 
-#if (WS63_DEBUG_LOG_MIRROR_SYS == 1U)
-    osal_printk("%s", log_buf);
-#endif
-    ws63_debug_uart_send_text(log_buf);
+    ws63_debug_sle_send_text(log_buf);
 }
 
 /**
@@ -723,6 +823,148 @@ static void ws63_debug_dump_ld2402_runtime_status(const char *tag)
         (unsigned int)ws63_task_ld2402_get_log_gap_ms());
 }
 
+/**
+ * @brief 向 camera 子口发送一条人脸管理调试命令。
+ *
+ * 这里统一把上层指令整理成 `[camera]...` 格式，再交给 WK2114 子口发送，
+ * 这样调用方只需要关心业务语义，不需要重复拼接协议前缀。
+ *
+ * @param camera_payload 不含前缀的 camera 业务文本，例如 `add 1`、`List`、`Del 1`。
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+static errcode_t ws63_debug_send_camera_command(const char *camera_payload)
+{
+    char send_buf[WS63_DEBUG_CMD_MAX_LEN] = {0};
+    int32_t ret;
+
+    if ((camera_payload == NULL) || (camera_payload[0] == '\0')) {
+        return ERRCODE_INVALID_PARAM;
+    }
+
+    /* camera 子口若尚未拉起，先走惰性初始化，避免命令直接丢失。 */
+    ret = ws63_task_ensure_camera_ready();
+    if (ret != ERRCODE_SUCC) {
+        ws63_debug_log("[ws63 dbg] CAMERA ready fail ret=0x%x\r\n", (unsigned int)ret);
+        return ret;
+    }
+
+    ret = snprintf_s(send_buf,
+        sizeof(send_buf),
+        sizeof(send_buf) - 1U,
+        "[camera]%s\r\n",
+        camera_payload);
+    if (ret < 0) {
+        ws63_debug_log("[ws63 dbg] CAMERA format fail\r\n");
+        return ERRCODE_FAIL;
+    }
+
+    ret = ws63_task_send(WS63_SLE_CAMERA_SUBPORT, (const uint8_t *)send_buf, (uint16_t)strlen(send_buf));
+    ws63_debug_log("[ws63 dbg] CAMERA send payload=[camera]%s ret=0x%x\r\n",
+        camera_payload,
+        (unsigned int)ret);
+    return ret;
+}
+
+/**
+ * @brief 执行 camera 前缀调试命令。
+ *
+ * 兼容两种输入方式：
+ * 1) `[camera]add 1` 这类紧凑写法；
+ * 2) `CAMERA ADD 1` 这类空格写法；
+ * 3) `[camera]start` / `[camera]die` 这类生命周期别名。
+ *
+ * 当前命令只负责下发文本，不对 List 返回值做二次解析；回包会由 camera
+ * 子模块按原文打印到调试日志中。
+ *
+ * @param cmd 已转大写的完整命令行。
+ */
+static void ws63_debug_exec_camera_command(const char *cmd)
+{
+    char camera_buf[WS63_DEBUG_CMD_MAX_LEN] = {0};
+    char *cursor;
+    char *op;
+    char *arg0;
+    char payload[WS63_DEBUG_CMD_MAX_LEN] = {0};
+    uint32_t camera_id = 0U;
+    errcode_t ret;
+
+    if (cmd == NULL) {
+        return;
+    }
+
+    if (strncpy_s(camera_buf, sizeof(camera_buf), cmd, sizeof(camera_buf) - 1U) != EOK) {
+        return;
+    }
+
+    cursor = camera_buf;
+    if (strncmp(cursor, "[CAMERA]", 8U) == 0) {
+        cursor += 8U;
+    } else if (strncmp(cursor, "CAMERA", 6U) == 0) {
+        cursor += 6U;
+    } else {
+        return;
+    }
+
+    op = ws63_debug_next_token(&cursor);
+    if (op == NULL) {
+        ws63_debug_log("[ws63 dbg] usage: [camera]add <id> | [camera]List | [camera]Del <id>\r\n");
+        return;
+    }
+
+    if (strcmp(op, "ADD") == 0) {
+        arg0 = ws63_debug_next_token(&cursor);
+        if ((arg0 == NULL) || (!ws63_debug_parse_u32_value(arg0, &camera_id)) || (camera_id > 65535U)) {
+            ws63_debug_log("[ws63 dbg] usage: [camera]add <id>\r\n");
+            return;
+        }
+
+        ret = snprintf_s(payload, sizeof(payload), sizeof(payload) - 1U, "add %u", (unsigned int)camera_id);
+        if (ret < 0) {
+            ws63_debug_log("[ws63 dbg] CAMERA add format fail\r\n");
+            return;
+        }
+
+        (void)ws63_debug_send_camera_command(payload);
+        return;
+    }
+
+    if (strcmp(op, "LIST") == 0) {
+        (void)ws63_debug_send_camera_command("List");
+        return;
+    }
+
+    if (strcmp(op, "DEL") == 0) {
+        arg0 = ws63_debug_next_token(&cursor);
+        if ((arg0 == NULL) || (!ws63_debug_parse_u32_value(arg0, &camera_id)) || (camera_id > 65535U)) {
+            ws63_debug_log("[ws63 dbg] usage: [camera]Del <id>\r\n");
+            return;
+        }
+
+        ret = snprintf_s(payload, sizeof(payload), sizeof(payload) - 1U, "Del %u", (unsigned int)camera_id);
+        if (ret < 0) {
+            ws63_debug_log("[ws63 dbg] CAMERA del format fail\r\n");
+            return;
+        }
+
+        (void)ws63_debug_send_camera_command(payload);
+        return;
+    }
+
+    if (strcmp(op, "START") == 0) {
+        /* start 作为调试别名，实际仍下发 camera 现网已使用的 action。 */
+        (void)ws63_debug_send_camera_command("action");
+        return;
+    }
+
+    if (strcmp(op, "DIE") == 0) {
+        /* die 作为调试别名，实际仍下发 camera 现网已使用的 Die。 */
+        (void)ws63_debug_send_camera_command("Die");
+        return;
+    }
+
+    ws63_debug_log("[ws63 dbg] usage: [camera]add <id> | [camera]List | [camera]Del <id> | [camera]start | [camera]die\r\n");
+}
+
     /**
      * @brief 打印调试命令帮助。
      */
@@ -1082,6 +1324,9 @@ static void ws63_debug_dump_sle_uplink_log_status(const char *tag)
 static void ws63_debug_print_help(void)
 {
     ws63_debug_log("[ws63 dbg] command list:\r\n");
+    ws63_debug_log("[ws63 dbg]   DEBUG INIT\r\n");
+    ws63_debug_log("[ws63 dbg]   DEBUG EXIT\r\n");
+    ws63_debug_log("[ws63 dbg]   DEBUG STAT\r\n");
     ws63_debug_log("[ws63 dbg]   HELP\r\n");
     ws63_debug_log("[ws63 dbg]   MOTOR FWD <0-100>\r\n");
     ws63_debug_log("[ws63 dbg]   MOTOR REV <0-100>\r\n");
@@ -1109,6 +1354,11 @@ static void ws63_debug_print_help(void)
     ws63_debug_log("[ws63 dbg]   TTP229 WATCH ON|OFF\r\n");
     ws63_debug_log("[ws63 dbg]   TTP229 ENABLE ON|OFF\r\n");
     ws63_debug_log("[ws63 dbg]   TTP229 ALARM ON|OFF\r\n");
+    ws63_debug_log("[ws63 dbg]   [camera]add <id>\r\n");
+    ws63_debug_log("[ws63 dbg]   [camera]List\r\n");
+    ws63_debug_log("[ws63 dbg]   [camera]Del <id>\r\n");
+    ws63_debug_log("[ws63 dbg]   [camera]start\r\n");
+    ws63_debug_log("[ws63 dbg]   [camera]die\r\n");
     ws63_debug_log("[ws63 dbg]   LD HELP\r\n");
     ws63_debug_log("[ws63 dbg]   LD INIT\r\n");
     ws63_debug_log("[ws63 dbg]   LD STAT\r\n");
@@ -1133,19 +1383,16 @@ static void ws63_debug_print_help(void)
     ws63_debug_log("[ws63 dbg]   SLE ULOG ON|OFF\r\n");
     ws63_debug_log("[ws63 dbg]   SLE ULOGINT <0-60000ms>\r\n");
     ws63_debug_log("[ws63 dbg]   SLE ULOGSTAT\r\n");
-    ws63_debug_log("[ws63 dbg]   ZW101 INIT\r\n");
-    ws63_debug_log("[ws63 dbg]   ZW101 HANDSHAKE\r\n");
-    ws63_debug_log("[ws63 dbg]   ZW101 CHECKSENSOR\r\n");
-    ws63_debug_log("[ws63 dbg]   ZW101 RAW <HEX...>\r\n");
-    ws63_debug_log("[ws63 dbg]   ZW101 STAT\r\n");
-    ws63_debug_log("[ws63 dbg]   ZW101 ZA HELP\r\n");
-    ws63_debug_log("[ws63 dbg]   ZW101 ZA ECHO\r\n");
-    ws63_debug_log("[ws63 dbg]   ZW101 ZA LOGIN <wait> <interval0-15> <press2|3> <id> <dup0|1>\r\n");
-    ws63_debug_log("[ws63 dbg]   ZW101 ZA SEARCH <wait> <start> <count>\r\n");
-    ws63_debug_log("[ws63 dbg]   ZW101 ZA SEARCHRES <buf1|2> <start> <count>\r\n");
-    ws63_debug_log("[ws63 dbg]   ZW101 ZA LOGINLIGHT <wait> <press2|3> <id> <dup0|1>\r\n");
-    ws63_debug_log("[ws63 dbg]   ZW101 ZA SEARCHECHO <wait> <start> <count>\r\n");
-    ws63_debug_log("[ws63 dbg]   ZW101 ZA TERM\r\n");
+    ws63_debug_log("[ws63 dbg]   ZW HELP\r\n");
+    ws63_debug_log("[ws63 dbg]   ZW INIT\r\n");
+    ws63_debug_log("[ws63 dbg]   ZW STAT\r\n");
+    ws63_debug_log("[ws63 dbg]   ZW ECHO\r\n");
+    ws63_debug_log("[ws63 dbg]   ZW VERIFY [score1-5] [id]\r\n");
+    ws63_debug_log("[ws63 dbg]   ZW ENROLL <id> [times2-6]\r\n");
+    ws63_debug_log("[ws63 dbg]   ZW LIST\r\n");
+    ws63_debug_log("[ws63 dbg]   ZW DEL <id> [count]\r\n");
+    ws63_debug_log("[ws63 dbg]   ZW CLEAR\r\n");
+    ws63_debug_log("[ws63 dbg]   ZW CANCEL\r\n");
 }
 
 /**
@@ -1156,13 +1403,14 @@ static void ws63_debug_exec_command(const char *line)
     uint16_t i;
     uint16_t freq_hz;
     uint16_t raw_len;
-    uint16_t za_page_id;
-    uint16_t za_score;
-    uint8_t za_ack;
-    uint8_t za_argc;
+    uint16_t zw_page_id;
+    uint16_t zw_score;
+    uint16_t zw_valid_num;
+    uint8_t zw_ack;
+    uint8_t zw_argc;
     uint8_t rgb_argc;
     uint8_t duty;
-    uint32_t za_args[6] = {0};
+    uint32_t zw_args[6] = {0};
     uint32_t rgb_args[4] = {0};
     uint8_t raw_buf[WS63_DEBUG_RAW_CMD_MAX_BYTES] = {0};
     errcode_t ret;
@@ -1186,6 +1434,24 @@ static void ws63_debug_exec_command(const char *line)
         return;
     }
 
+    if (strcmp(cmd, "DEBUG INIT") == 0) {
+        ret = ws63_task_debug_set_debug_only_mode(1U);
+        ws63_debug_log("[ws63 dbg] DEBUG INIT ret=0x%x mode=DEBUG_ONLY\r\n", (unsigned int)ret);
+        return;
+    }
+
+    if (strcmp(cmd, "DEBUG EXIT") == 0) {
+        ret = ws63_task_debug_set_debug_only_mode(0U);
+        ws63_debug_log("[ws63 dbg] DEBUG EXIT ret=0x%x mode=NORMAL\r\n", (unsigned int)ret);
+        return;
+    }
+
+    if (strcmp(cmd, "DEBUG STAT") == 0) {
+        ws63_debug_log("[ws63 dbg] DEBUG mode=%s\r\n",
+            (ws63_task_debug_is_debug_only_mode() != 0U) ? "DEBUG_ONLY" : "NORMAL");
+        return;
+    }
+
     if ((strcmp(cmd, "HELP") == 0) || (strcmp(cmd, "?") == 0)) {
         ws63_debug_print_help();
         return;
@@ -1193,6 +1459,12 @@ static void ws63_debug_exec_command(const char *line)
 
     if ((strncmp(cmd, "LD ", 3) == 0) || (strcmp(cmd, "LD") == 0)) {
         ws63_debug_exec_ld_command(cmd);
+        return;
+    }
+
+    if ((strncmp(cmd, "[CAMERA]", 8U) == 0) ||
+        ((strncmp(cmd, "CAMERA", 6U) == 0) && ((cmd[6] == '\0') || (cmd[6] == ' ') || (cmd[6] == '\t')))) {
+        ws63_debug_exec_camera_command(cmd);
         return;
     }
 
@@ -1476,202 +1748,161 @@ static void ws63_debug_exec_command(const char *line)
         return;
     }
 
-    if (strcmp(cmd, "ZW101 INIT") == 0) {
+    if ((strcmp(cmd, "ZW") == 0) || (strcmp(cmd, "ZW HELP") == 0)) {
+        ws63_debug_log("[ws63 dbg] ZW commands:\r\n");
+        ws63_debug_log("[ws63 dbg]   ZW INIT\r\n");
+        ws63_debug_log("[ws63 dbg]   ZW STAT\r\n");
+        ws63_debug_log("[ws63 dbg]   ZW ECHO\r\n");
+        ws63_debug_log("[ws63 dbg]   ZW VERIFY [score1-5] [id]\r\n");
+        ws63_debug_log("[ws63 dbg]   ZW ENROLL <id> [times2-6]\r\n");
+        ws63_debug_log("[ws63 dbg]   ZW LIST\r\n");
+        ws63_debug_log("[ws63 dbg]   ZW DEL <id> [count]\r\n");
+        ws63_debug_log("[ws63 dbg]   ZW CLEAR\r\n");
+        ws63_debug_log("[ws63 dbg]   ZW CANCEL\r\n");
+        return;
+    }
+
+    if (strcmp(cmd, "ZW INIT") == 0) {
         ret = ws63_task_zw101_reinit();
-        ws63_debug_log("[ws63 dbg] ZW101 INIT ret=0x%x\r\n", (unsigned int)ret);
+        ws63_debug_log("[ws63 dbg] ZW INIT ret=0x%x\r\n", (unsigned int)ret);
         return;
     }
 
-    if (strcmp(cmd, "ZW101 HANDSHAKE") == 0) {
-        za_ack = 0xFFU;
-        ret = ws63_task_zw101_handshake(&za_ack);
-        ws63_debug_log("[ws63 dbg] ZW101 HANDSHAKE ret=0x%x ack=0x%02x\r\n",
+    if (strcmp(cmd, "ZW STAT") == 0) {
+        ws63_debug_log("[ws63 dbg] ZW subport=%u\r\n", (unsigned int)ZW101_SUBPORT);
+        return;
+    }
+
+    if (strcmp(cmd, "ZW ECHO") == 0) {
+        zw_ack = 0xFFU;
+        ret = ws63_task_zw101_echo(&zw_ack);
+        ws63_debug_log("[ws63 dbg] ZW ECHO ret=0x%x ack=0x%02x\r\n",
             (unsigned int)ret,
-            (unsigned int)za_ack);
+            (unsigned int)zw_ack);
         return;
     }
 
-    if (strcmp(cmd, "ZW101 CHECKSENSOR") == 0) {
-        za_ack = 0xFFU;
-        ret = ws63_task_zw101_check_sensor(&za_ack);
-        ws63_debug_log("[ws63 dbg] ZW101 CHECKSENSOR ret=0x%x ack=0x%02x\r\n",
+    if (strcmp(cmd, "ZW LIST") == 0) {
+        zw_ack = 0xFFU;
+        zw_valid_num = 0U;
+        ret = ws63_task_zw101_list(&zw_valid_num, &zw_ack);
+        ws63_debug_log("[ws63 dbg] ZW LIST ret=0x%x ack=0x%02x valid=%u\r\n",
             (unsigned int)ret,
-            (unsigned int)za_ack);
+            (unsigned int)zw_ack,
+            (unsigned int)zw_valid_num);
         return;
     }
 
-    if (strcmp(cmd, "ZW101 ZA HELP") == 0) {
-        ws63_debug_log("[ws63 dbg] ZA commands:\r\n");
-        ws63_debug_log("[ws63 dbg]   ZW101 ZA ECHO\r\n");
-        ws63_debug_log("[ws63 dbg]   ZW101 ZA LOGIN <wait> <interval0-15> <press2|3> <id> <dup0|1>\r\n");
-        ws63_debug_log("[ws63 dbg]   ZW101 ZA SEARCH <wait> <start> <count>\r\n");
-        ws63_debug_log("[ws63 dbg]   ZW101 ZA SEARCHRES <buf1|2> <start> <count>\r\n");
-        ws63_debug_log("[ws63 dbg]   ZW101 ZA LOGINLIGHT <wait> <press2|3> <id> <dup0|1>\r\n");
-        ws63_debug_log("[ws63 dbg]   ZW101 ZA SEARCHECHO <wait> <start> <count>\r\n");
-        ws63_debug_log("[ws63 dbg]   ZW101 ZA TERM\r\n");
-        return;
-    }
-
-    if (strcmp(cmd, "ZW101 ZA ECHO") == 0) {
-        za_ack = 0xFFU;
-        ret = ws63_task_zw101_za_get_echo(&za_ack);
-        ws63_debug_log("[ws63 dbg] ZW101 ZA ECHO ret=0x%x ack=0x%02x\r\n",
+    if (strcmp(cmd, "ZW CLEAR") == 0) {
+        zw_ack = 0xFFU;
+        ret = ws63_task_zw101_clear(&zw_ack);
+        ws63_debug_log("[ws63 dbg] ZW CLEAR ret=0x%x ack=0x%02x\r\n",
             (unsigned int)ret,
-            (unsigned int)za_ack);
+            (unsigned int)zw_ack);
         return;
     }
 
-    if (strncmp(cmd, "ZW101 ZA LOGIN ", 15) == 0) {
-        if (!ws63_debug_parse_u32_tokens(cmd + 15, za_args, 6U, &za_argc) || (za_argc != 5U)) {
-            ws63_debug_log("[ws63 dbg] usage: ZW101 ZA LOGIN <wait> <interval0-15> <press2|3> <id> <dup0|1>\r\n");
-            return;
-        }
-        if ((za_args[1] > 15U) || ((za_args[2] != 2U) && (za_args[2] != 3U)) ||
-            (za_args[3] > 65535U) || (za_args[4] > 1U)) {
-            ws63_debug_log("[ws63 dbg] invalid LOGIN args\r\n");
-            return;
-        }
-
-        za_ack = 0xFFU;
-        ret = ws63_task_zw101_za_auto_login((uint8_t)za_args[0],
-            (uint8_t)za_args[1],
-            (uint8_t)za_args[2],
-            (uint16_t)za_args[3],
-            (uint8_t)za_args[4],
-            &za_ack);
-        ws63_debug_log("[ws63 dbg] ZW101 ZA LOGIN ret=0x%x ack=0x%02x\r\n",
+    if (strcmp(cmd, "ZW CANCEL") == 0) {
+        zw_ack = 0xFFU;
+        ret = ws63_task_zw101_cancel(&zw_ack);
+        ws63_debug_log("[ws63 dbg] ZW CANCEL ret=0x%x ack=0x%02x\r\n",
             (unsigned int)ret,
-            (unsigned int)za_ack);
+            (unsigned int)zw_ack);
         return;
     }
 
-    if (strncmp(cmd, "ZW101 ZA SEARCH ", 16) == 0) {
-        if (!ws63_debug_parse_u32_tokens(cmd + 16, za_args, 6U, &za_argc) || (za_argc != 3U)) {
-            ws63_debug_log("[ws63 dbg] usage: ZW101 ZA SEARCH <wait> <start> <count>\r\n");
-            return;
-        }
-        if ((za_args[1] > 65535U) || (za_args[2] > 65535U)) {
-            ws63_debug_log("[ws63 dbg] invalid SEARCH args\r\n");
+    if (strncmp(cmd, "ZW ENROLL ", 10) == 0) {
+        /* 默认参数：禁止重复登记（bit4=1），其余位按手册默认 0。 */
+        const uint16_t enroll_param_default = 0x0010U;
+
+        if (!ws63_debug_parse_u32_tokens(cmd + 10, zw_args, 6U, &zw_argc) ||
+            ((zw_argc != 1U) && (zw_argc != 2U))) {
+            ws63_debug_log("[ws63 dbg] usage: ZW ENROLL <id> [times2-6]\r\n");
             return;
         }
 
-        za_ack = 0xFFU;
-        za_page_id = 0U;
-        za_score = 0U;
-        ret = ws63_task_zw101_za_auto_search((uint8_t)za_args[0],
-            (uint16_t)za_args[1],
-            (uint16_t)za_args[2],
-            &za_page_id,
-            &za_score,
-            &za_ack);
-        ws63_debug_log("[ws63 dbg] ZW101 ZA SEARCH ret=0x%x ack=0x%02x id=%u score=%u\r\n",
+        if ((zw_args[0] > 65535U) || ((zw_argc == 2U) && ((zw_args[1] < 2U) || (zw_args[1] > 6U)))) {
+            ws63_debug_log("[ws63 dbg] invalid ENROLL args\r\n");
+            return;
+        }
+
+        zw_ack = 0xFFU;
+        ret = ws63_task_zw101_enroll((uint16_t)zw_args[0],
+            (zw_argc == 2U) ? (uint8_t)zw_args[1] : 3U,
+            enroll_param_default,
+            &zw_ack);
+        ws63_debug_log("[ws63 dbg] ZW ENROLL ret=0x%x ack=0x%02x\r\n",
             (unsigned int)ret,
-            (unsigned int)za_ack,
-            (unsigned int)za_page_id,
-            (unsigned int)za_score);
+            (unsigned int)zw_ack);
         return;
     }
 
-    if (strncmp(cmd, "ZW101 ZA SEARCHRES ", 19) == 0) {
-        if (!ws63_debug_parse_u32_tokens(cmd + 19, za_args, 6U, &za_argc) || (za_argc != 3U)) {
-            ws63_debug_log("[ws63 dbg] usage: ZW101 ZA SEARCHRES <buf1|2> <start> <count>\r\n");
-            return;
-        }
-        if (((za_args[0] != 1U) && (za_args[0] != 2U)) || (za_args[1] > 65535U) || (za_args[2] > 65535U)) {
-            ws63_debug_log("[ws63 dbg] invalid SEARCHRES args\r\n");
+    if (strncmp(cmd, "ZW DEL ", 7) == 0) {
+        if (!ws63_debug_parse_u32_tokens(cmd + 7, zw_args, 6U, &zw_argc) ||
+            ((zw_argc != 1U) && (zw_argc != 2U))) {
+            ws63_debug_log("[ws63 dbg] usage: ZW DEL <id> [count]\r\n");
             return;
         }
 
-        za_ack = 0xFFU;
-        za_page_id = 0U;
-        za_score = 0U;
-        ret = ws63_task_zw101_za_search_res_back((uint8_t)za_args[0],
-            (uint16_t)za_args[1],
-            (uint16_t)za_args[2],
-            &za_page_id,
-            &za_score,
-            &za_ack);
-        ws63_debug_log("[ws63 dbg] ZW101 ZA SEARCHRES ret=0x%x ack=0x%02x id=%u score=%u\r\n",
+        if ((zw_args[0] > 65535U) || ((zw_argc == 2U) && ((zw_args[1] == 0U) || (zw_args[1] > 65535U)))) {
+            ws63_debug_log("[ws63 dbg] invalid DEL args\r\n");
+            return;
+        }
+
+        zw_ack = 0xFFU;
+        ret = ws63_task_zw101_delete((uint16_t)zw_args[0],
+            (zw_argc == 2U) ? (uint16_t)zw_args[1] : 1U,
+            &zw_ack);
+        ws63_debug_log("[ws63 dbg] ZW DEL ret=0x%x ack=0x%02x\r\n",
             (unsigned int)ret,
-            (unsigned int)za_ack,
-            (unsigned int)za_page_id,
-            (unsigned int)za_score);
+            (unsigned int)zw_ack);
         return;
     }
 
-    if (strncmp(cmd, "ZW101 ZA LOGINLIGHT ", 20) == 0) {
-        if (!ws63_debug_parse_u32_tokens(cmd + 20, za_args, 6U, &za_argc) || (za_argc != 4U)) {
-            ws63_debug_log("[ws63 dbg] usage: ZW101 ZA LOGINLIGHT <wait> <press2|3> <id> <dup0|1>\r\n");
-            return;
-        }
-        if (((za_args[1] != 2U) && (za_args[1] != 3U)) || (za_args[2] > 65535U) || (za_args[3] > 1U)) {
-            ws63_debug_log("[ws63 dbg] invalid LOGINLIGHT args\r\n");
-            return;
+    if ((strcmp(cmd, "ZW VERIFY") == 0) || (strncmp(cmd, "ZW VERIFY ", 10) == 0)) {
+        /* VERIFY 默认参数对齐 slave：score=3, id=0xFFFF, param=0x0000。 */
+        const uint8_t verify_score_default = 3U;
+        const uint16_t verify_id_default = 0xFFFFU;
+        const uint16_t verify_param_default = 0x0000U;
+        uint8_t verify_score = verify_score_default;
+        uint16_t verify_id = verify_id_default;
+
+        if (strcmp(cmd, "ZW VERIFY") != 0) {
+            if (!ws63_debug_parse_u32_tokens(cmd + 10, zw_args, 6U, &zw_argc) ||
+                ((zw_argc != 1U) && (zw_argc != 2U))) {
+                ws63_debug_log("[ws63 dbg] usage: ZW VERIFY [score1-5] [id]\r\n");
+                return;
+            }
+
+            if ((zw_args[0] < 1U) || (zw_args[0] > 5U)) {
+                ws63_debug_log("[ws63 dbg] invalid VERIFY score, expect 1~5\r\n");
+                return;
+            }
+            verify_score = (uint8_t)zw_args[0];
+
+            if (zw_argc == 2U) {
+                if (zw_args[1] > 65535U) {
+                    ws63_debug_log("[ws63 dbg] invalid VERIFY id\r\n");
+                    return;
+                }
+                verify_id = (uint16_t)zw_args[1];
+            }
         }
 
-        za_ack = 0xFFU;
-        ret = ws63_task_zw101_za_auto_login_stab((uint8_t)za_args[0],
-            (uint8_t)za_args[1],
-            (uint16_t)za_args[2],
-            (uint8_t)za_args[3],
-            &za_ack);
-        ws63_debug_log("[ws63 dbg] ZW101 ZA LOGINLIGHT ret=0x%x ack=0x%02x\r\n",
+        zw_ack = 0xFFU;
+        zw_page_id = 0U;
+        zw_score = 0U;
+        ret = ws63_task_zw101_verify(verify_score,
+            verify_id,
+            verify_param_default,
+            &zw_page_id,
+            &zw_score,
+            &zw_ack);
+        ws63_debug_log("[ws63 dbg] ZW VERIFY ret=0x%x ack=0x%02x id=%u score=%u\r\n",
             (unsigned int)ret,
-            (unsigned int)za_ack);
-        return;
-    }
-
-    if (strncmp(cmd, "ZW101 ZA SEARCHECHO ", 20) == 0) {
-        if (!ws63_debug_parse_u32_tokens(cmd + 20, za_args, 6U, &za_argc) || (za_argc != 3U)) {
-            ws63_debug_log("[ws63 dbg] usage: ZW101 ZA SEARCHECHO <wait> <start> <count>\r\n");
-            return;
-        }
-        if ((za_args[1] > 65535U) || (za_args[2] > 65535U)) {
-            ws63_debug_log("[ws63 dbg] invalid SEARCHECHO args\r\n");
-            return;
-        }
-
-        za_ack = 0xFFU;
-        za_page_id = 0U;
-        za_score = 0U;
-        ret = ws63_task_zw101_za_auto_search_echo((uint8_t)za_args[0],
-            (uint16_t)za_args[1],
-            (uint16_t)za_args[2],
-            &za_page_id,
-            &za_score,
-            &za_ack);
-        ws63_debug_log("[ws63 dbg] ZW101 ZA SEARCHECHO ret=0x%x ack=0x%02x id=%u score=%u\r\n",
-            (unsigned int)ret,
-            (unsigned int)za_ack,
-            (unsigned int)za_page_id,
-            (unsigned int)za_score);
-        return;
-    }
-
-    if (strcmp(cmd, "ZW101 ZA TERM") == 0) {
-        za_ack = 0xFFU;
-        ret = ws63_task_zw101_za_terminate(&za_ack);
-        ws63_debug_log("[ws63 dbg] ZW101 ZA TERM ret=0x%x ack=0x%02x\r\n",
-            (unsigned int)ret,
-            (unsigned int)za_ack);
-        return;
-    }
-
-    if (strcmp(cmd, "ZW101 STAT") == 0) {
-        ws63_debug_log("[ws63 dbg] ZW101 subport=%u\r\n", (unsigned int)ZW101_SUBPORT);
-        return;
-    }
-
-    if (strncmp(cmd, "ZW101 RAW ", 10) == 0) {
-        if (!ws63_debug_parse_hex_bytes(cmd + 10, raw_buf, sizeof(raw_buf), &raw_len)) {
-            ws63_debug_log("[ws63 dbg] invalid ZW101 raw hex, example: EF 01 FF FF\r\n");
-            return;
-        }
-
-        ret = ws63_task_zw101_send_raw(raw_buf, raw_len);
-        ws63_debug_log("[ws63 dbg] ZW101 RAW len=%u ret=0x%x\r\n",
-            (unsigned int)raw_len,
-            (unsigned int)ret);
+            (unsigned int)zw_ack,
+            (unsigned int)zw_page_id,
+            (unsigned int)zw_score);
         return;
     }
 
@@ -1717,7 +1948,9 @@ static void ws63_debug_exec_command(const char *line)
  */
 static void ws63_debug_uart_cmd_init(void)
 {
+#if (WS63_DEBUG_LOCAL_UART_IO_ENABLE == 1U)
     errcode_t ret;
+#endif
 
     g_ws63_debug_uart_ready = 0U;
     g_ws63_debug_motor_watch_enable = 0U;
@@ -1732,19 +1965,21 @@ static void ws63_debug_uart_cmd_init(void)
     g_ws63_debug_uart_rx_error = 0U;
     g_ws63_debug_last_char_cr = 0U;
 
+#if (WS63_DEBUG_LOCAL_UART_IO_ENABLE == 1U)
     ret = ws63_debug_uart_init(g_ws63_debug_uart_rx_buf, sizeof(g_ws63_debug_uart_rx_buf));
     if (ret != ERRCODE_SUCC) {
-        osal_printk("[wk2114 final task] debug uart init fail, ret=0x%x\r\n", (unsigned int)ret);
+        ws63_debug_log("[ws63 dbg] local uart init fail, ret=0x%x\r\n", (unsigned int)ret);
         return;
     }
 
     ret = ws63_debug_uart_register_rx_callback(ws63_debug_uart_rx_callback, 1U);
     if (ret != ERRCODE_SUCC) {
-        osal_printk("[wk2114 final task] debug uart cb reg fail, ret=0x%x\r\n", (unsigned int)ret);
+        ws63_debug_log("[ws63 dbg] local uart cb reg fail, ret=0x%x\r\n", (unsigned int)ret);
         return;
     }
 
     g_ws63_debug_uart_ready = 1U;
+#endif
 }
 
 /**
@@ -1757,19 +1992,17 @@ static void ws63_debug_uart_cmd_process(uint32_t now_ms)
     uint8_t overflow;
     char cmd_line[WS63_DEBUG_CMD_MAX_LEN] = {0};
 
-    if (g_ws63_debug_uart_ready == 0U) {
-        return;
-    }
-
-    ws63_debug_take_async_flags(&rx_error, &too_long, &overflow);
-    if (rx_error == 1U) {
-        ws63_debug_log("[ws63 dbg] uart rx error\r\n");
-    }
-    if (too_long == 1U) {
-        ws63_debug_log("[ws63 dbg] command too long, dropped\r\n");
-    }
-    if (overflow == 1U) {
-        ws63_debug_log("[ws63 dbg] command queue overflow, dropped\r\n");
+    if (g_ws63_debug_uart_ready == 1U) {
+        ws63_debug_take_async_flags(&rx_error, &too_long, &overflow);
+        if (rx_error == 1U) {
+            ws63_debug_log("[ws63 dbg] uart rx error\r\n");
+        }
+        if (too_long == 1U) {
+            ws63_debug_log("[ws63 dbg] command too long, dropped\r\n");
+        }
+        if (overflow == 1U) {
+            ws63_debug_log("[ws63 dbg] command queue overflow, dropped\r\n");
+        }
     }
 
     while (ws63_debug_queue_pop_line(cmd_line, sizeof(cmd_line)) == 1U) {
@@ -1793,14 +2026,45 @@ static void ws63_debug_uart_cmd_process(uint32_t now_ms)
         ws63_debug_dump_ttp229_status("watch");
     }
 }
+
+errcode_t ws63_task_debug_try_consume_sle_downlink(const uint8_t *data, uint16_t len)
+{
+#if (WS63_DEBUG_SLE_CMD_ENABLE == 1U)
+    if ((data == NULL) || (len == 0U)) {
+        return ERRCODE_INVALID_PARAM;
+    }
+
+    if (ws63_debug_is_text_stream(data, len) == 0U) {
+        return ERRCODE_FAIL;
+    }
+
+    /* 命令消费复用同一组帧状态机，确保 UART/SLE 输入行为一致。 */
+    ws63_debug_feed_rx_bytes(data, len, false);
+    return ERRCODE_SUCC;
+#else
+    (void)data;
+    (void)len;
+    return ERRCODE_FAIL;
+#endif
+}
 #endif
 
 void ws63_task_debug_init(void)
 {
 #if (WS63_DEBUG_UART_ENABLE == 1U)
     ws63_debug_uart_cmd_init();
+    (void)ws63_task_debug_set_debug_only_mode(0U);
 #endif
 }
+
+#if (WS63_DEBUG_UART_ENABLE != 1U)
+errcode_t ws63_task_debug_try_consume_sle_downlink(const uint8_t *data, uint16_t len)
+{
+    (void)data;
+    (void)len;
+    return ERRCODE_FAIL;
+}
+#endif
 
 void ws63_task_debug_process(uint32_t now_ms)
 {
@@ -1810,3 +2074,16 @@ void ws63_task_debug_process(uint32_t now_ms)
     (void)now_ms;
 #endif
 }
+
+#if (WS63_DEBUG_UART_ENABLE != 1U)
+uint8_t ws63_task_debug_is_debug_only_mode(void)
+{
+    return 0U;
+}
+
+errcode_t ws63_task_debug_set_debug_only_mode(uint8_t enable)
+{
+    (void)enable;
+    return ERRCODE_SUCC;
+}
+#endif
