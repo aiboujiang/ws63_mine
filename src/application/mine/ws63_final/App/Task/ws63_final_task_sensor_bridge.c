@@ -701,6 +701,8 @@ static void ws63_zw101_report_verify_result(errcode_t ret, uint8_t ack_code, uin
     ws63_zw101_unlock(irq_status);
 
     if (passed != 0U) {
+        /* 指纹通过时更新 lock_mgr 附加字段，供开锁成功事件拼接 finger_id/score。 */
+        ws63_lock_mgr_update_finger_result(match_id, score);
         osal_printk("[zw101] VERIFY SUCCESS id=%u score=%u ack=0x%02x(%s)\r\n",
             (unsigned int)match_id,
             (unsigned int)score,
@@ -726,6 +728,7 @@ static void ws63_zw101_report_verify_result(errcode_t ret, uint8_t ack_code, uin
         osal_printk("[zw101] VERIFY disabled after %u continuous failures\r\n",
             (unsigned int)WS63_ZW101_VERIFY_FAIL_DISABLE_THRESHOLD);
         ws63_task_zw101_notify_alarm(WS63_ZW101_ALARM_TEXT);
+        (void)ws63_task_post_lock_event_text("result=locked;source=finger;reason=zw101_fail_5");
     }
 
     (void)ws63_lock_mgr_report_auth_result(WS63_LOCK_AUTH_SOURCE_ZW101, passed);

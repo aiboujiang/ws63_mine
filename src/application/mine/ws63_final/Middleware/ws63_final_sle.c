@@ -23,6 +23,7 @@
 #define WS63_SLE_TAG_LD2402 "[LD2402]"
 #define WS63_SLE_TAG_ZW101  "[ZW101]"
 #define WS63_SLE_TAG_CAMERA "[CAMERA]"
+#define WS63_SLE_TAG_LOCK   "[LOCK]"
 #define WS63_SLE_TAG_DEBUG  "[DEBUG]"
 
 #if (WS63_SLE_LOG_ENABLE == 1U)
@@ -121,6 +122,10 @@ static const char *ws63_sle_get_tag_by_subport(uint8_t sub_port)
         return WS63_SLE_TAG_CAMERA;
     }
 #endif
+
+    if (sub_port == WS63_SLE_LOCK_SUBPORT) {
+        return WS63_SLE_TAG_LOCK;
+    }
 
     return NULL;
 }

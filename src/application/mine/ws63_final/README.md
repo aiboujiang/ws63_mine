@@ -1254,3 +1254,37 @@ ws63_final/
 
 风险/后续：
 - lock_mgr 已不再进入全局 LOCKOUT；若后续需要“来源级封禁 + 全局锁定并存”策略，需要单独设计优先级与冲突处理规则。
+
+### 2026-04-14: LOCK Event Uplink Enhancement (key/finger/camera)
+
+Change Summary:
+- Added dedicated LOCK business uplink tag routing via SLE subport 4 -> [LOCK].
+- Added lock event report on disable edge after 5 consecutive failures:
+  - key path: result=locked;source=key;reason=ttp229_fail_5
+  - finger path: result=locked;source=finger;reason=zw101_fail_5
+- Added unlock success report for all auth sources:
+  - key success: result=unlock_ok;source=key
+  - finger success: result=unlock_ok;source=finger;finger_id=<id>;score=<score>
+  - camera success: result=unlock_ok;source=camera;camera_label=<label>
+- LOCK business event posting is sent through a dedicated API path and is not gated by DEBUG INIT.
+
+Affected Files:
+- src/application/mine/ws63_final/Config/ws63_final_config.h
+- src/application/mine/ws63_final/Middleware/ws63_final_sle.c
+- src/application/mine/ws63_final/App/Task/ws63_final_task_internal.h
+- src/application/mine/ws63_final/App/Task/ws63_final_task.c
+- src/application/mine/ws63_final/App/Task/ws63_final_task_lock_mgr.c
+- src/application/mine/ws63_final/App/Task/ws63_final_task_sensor_bridge.c
+- src/application/mine/ws63_final/App/Task/ws63_final_task_ttp229.c
+- src/application/mine/ws63_final/App/Task/ws63_final_task_camera.c
+
+Verification:
+- Build command:
+  cd /home/xixi/code/fbb_ws63_20260114/src && python3 build.py -c ws63-liteos-app
+- Build result:
+  Build target:ws63_liteos_app success
+  packet success!
+
+Risks / Follow-up:
+- Host side parser/display can optionally add [LOCK] specific pretty-printing while keeping raw forwarding unchanged.
+- If lock event format evolves, keep key=value schema backward compatible for host tools.

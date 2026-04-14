@@ -6,8 +6,10 @@
 #include "ws63_final_task_internal.h"
 
 #include <stddef.h>
+#include <string.h>
 
 #include "osal_debug.h"
+#include "securec.h"
 
 #include "ld2402.h"
 
@@ -52,11 +54,122 @@ static uint32_t g_ws63_lock_auth_window_deadline_ms = 0U;
 static uint32_t g_ws63_lock_unlock_deadline_ms = 0U;
 static uint32_t g_ws63_lock_feedback_deadline_ms = 0U;
 static uint32_t g_ws63_lock_last_distance_tick_ms = 0U;
+static uint16_t g_ws63_lock_last_finger_id = 0U;
+static uint16_t g_ws63_lock_last_finger_score = 0U;
+static char g_ws63_lock_last_camera_label[32] = {0};
 
 static void ws63_lock_mgr_try_send_camera_close(void);
 static void ws63_lock_mgr_clear_feedback(void);
 static void ws63_lock_mgr_set_ld2402_quiet_mode(uint8_t enable);
 static void ws63_lock_mgr_set_ld2402_channel(uint8_t enable);
+
+/**
+ * @brief 把认证来源转换为上报字段文本。
+ */
+static const char *ws63_lock_mgr_source_to_text(ws63_lock_auth_source_t source)
+{
+    switch (source) {
+        case WS63_LOCK_AUTH_SOURCE_TTP229:
+            return "key";
+        case WS63_LOCK_AUTH_SOURCE_ZW101:
+            return "finger";
+        case WS63_LOCK_AUTH_SOURCE_CAMERA:
+            return "camera";
+        case WS63_LOCK_AUTH_SOURCE_MANUAL:
+            return "manual";
+        default:
+            return "unknown";
+    }
+}
+
+/**
+ * @brief 上报门锁业务事件到 [LOCK] 标签通道。
+ */
+static void ws63_lock_mgr_post_lock_event(const char *event_text)
+{
+    errcode_t ret;
+
+    if (event_text == NULL) {
+        return;
+    }
+
+    ret = ws63_task_post_lock_event_text(event_text);
+    osal_printk("[lock mgr] lock event post ret=0x%x text=%s\r\n",
+        (unsigned int)ret,
+        event_text);
+}
+
+/**
+ * @brief 上报开锁成功事件，并按来源附加业务字段。
+ */
+static void ws63_lock_mgr_report_unlock_success(ws63_lock_auth_source_t source)
+{
+    char event_text[160] = {0};
+    int32_t ret;
+
+    if (source == WS63_LOCK_AUTH_SOURCE_ZW101) {
+        ret = snprintf_s(event_text,
+            sizeof(event_text),
+            sizeof(event_text) - 1U,
+            "result=unlock_ok;source=%s;finger_id=%u;score=%u",
+            ws63_lock_mgr_source_to_text(source),
+            (unsigned int)g_ws63_lock_last_finger_id,
+            (unsigned int)g_ws63_lock_last_finger_score);
+    } else if (source == WS63_LOCK_AUTH_SOURCE_CAMERA) {
+        ret = snprintf_s(event_text,
+            sizeof(event_text),
+            sizeof(event_text) - 1U,
+            "result=unlock_ok;source=%s;camera_label=%s",
+            ws63_lock_mgr_source_to_text(source),
+            (g_ws63_lock_last_camera_label[0] != '\0') ? g_ws63_lock_last_camera_label : "unknown");
+    } else {
+        ret = snprintf_s(event_text,
+            sizeof(event_text),
+            sizeof(event_text) - 1U,
+            "result=unlock_ok;source=%s",
+            ws63_lock_mgr_source_to_text(source));
+    }
+
+    if (ret < 0) {
+        return;
+    }
+
+    ws63_lock_mgr_post_lock_event(event_text);
+}
+
+/**
+ * @brief 更新最近一次指纹认证通过详情。
+ */
+void ws63_lock_mgr_update_finger_result(uint16_t match_id, uint16_t score)
+{
+    unsigned int irq_status;
+
+    irq_status = ws63_os_irq_lock();
+    g_ws63_lock_last_finger_id = match_id;
+    g_ws63_lock_last_finger_score = score;
+    ws63_os_irq_unlock(irq_status);
+}
+
+/**
+ * @brief 更新最近一次 camera 认证通过标签。
+ */
+void ws63_lock_mgr_update_camera_label(const char *label)
+{
+    unsigned int irq_status;
+
+    irq_status = ws63_os_irq_lock();
+    (void)memset_s(g_ws63_lock_last_camera_label,
+        sizeof(g_ws63_lock_last_camera_label),
+        0,
+        sizeof(g_ws63_lock_last_camera_label));
+    if ((label != NULL) && (label[0] != '\0')) {
+        (void)strncpy_s(g_ws63_lock_last_camera_label,
+            sizeof(g_ws63_lock_last_camera_label),
+            label,
+            sizeof(g_ws63_lock_last_camera_label) - 1U);
+    }
+    ws63_os_irq_unlock(irq_status);
+}
 
 /**
  * @brief 生成门锁状态文本，便于调试日志输出。
@@ -283,6 +396,8 @@ static void ws63_lock_mgr_start_unlock(uint32_t now_ms, ws63_lock_auth_source_t 
     g_ws63_lock_feedback_deadline_ms = now_ms + 120U;
     g_ws63_lock_unlock_deadline_ms = now_ms + WS63_LOCK_UNLOCK_DURATION_MS_DEFAULT;
     g_ws63_lock_state = WS63_LOCK_STATE_UNLOCKING;
+
+    ws63_lock_mgr_report_unlock_success(source);
 
     osal_printk("[lock mgr] unlock start, source=%u\r\n", (unsigned int)source);
 }

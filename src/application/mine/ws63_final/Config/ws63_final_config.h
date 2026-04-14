@@ -251,6 +251,8 @@ extern "C" {
 #define WS63_SLE_ZW101_SUBPORT          ZW101_SUBPORT
 #define WS63_SLE_LD2402_SUBPORT         LD2402_SUBPORT
 #define WS63_SLE_CAMERA_SUBPORT         3U
+/* LOCK 业务事件子口：仅用于 SLE 标签路由，不绑定 WK2114 物理子口。 */
+#define WS63_SLE_LOCK_SUBPORT           4U
 
 /* SLE 服务/特征与广播名配置。 */
 #define WS63_SLE_SERVICE_UUID           0xABCDU

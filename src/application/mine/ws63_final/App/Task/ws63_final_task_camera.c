@@ -237,6 +237,48 @@ static uint8_t ws63_camera_parse_score_milli(const char *text, uint16_t *score_m
 }
 
 /**
+ * @brief 从 camera 回包中提取标签文本（如 [Noah_Xiang,0.77] -> Noah_Xiang）。
+ *
+ * @param text 输入回包。
+ * @param label_out 输出标签缓冲。
+ * @param label_out_len 输出标签缓冲长度。
+ * @return uint8_t 1=提取成功，0=提取失败。
+ */
+static uint8_t ws63_camera_parse_label(const char *text, char *label_out, uint16_t label_out_len)
+{
+    const char *left;
+    const char *comma;
+    size_t copy_len;
+
+    if ((text == NULL) || (label_out == NULL) || (label_out_len <= 1U)) {
+        return 0U;
+    }
+
+    label_out[0] = '\0';
+
+    left = strchr(text, '[');
+    comma = strrchr(text, ',');
+    if ((left == NULL) || (comma == NULL) || (comma <= (left + 1))) {
+        return 0U;
+    }
+
+    copy_len = (size_t)(comma - (left + 1));
+    if (copy_len >= (size_t)label_out_len) {
+        copy_len = (size_t)label_out_len - 1U;
+    }
+
+    if (copy_len == 0U) {
+        return 0U;
+    }
+
+    if (memcpy_s(label_out, label_out_len, left + 1, copy_len) != EOK) {
+        return 0U;
+    }
+    label_out[copy_len] = '\0';
+    return 1U;
+}
+
+/**
  * @brief 保存最近一次 camera 回包文本。
  *
  * 只保留可打印字符，避免二进制回包污染调试口。
@@ -286,6 +328,7 @@ static void ws63_camera_store_reply_text(const char *text)
 static void ws63_camera_try_report_auth_result(const char *reply_text)
 {
     uint16_t score_milli;
+    char label[32] = {0};
 
     if (reply_text == NULL) {
         return;
@@ -293,6 +336,8 @@ static void ws63_camera_try_report_auth_result(const char *reply_text)
 
     if (ws63_camera_parse_score_milli(reply_text, &score_milli) != 0U) {
         if (score_milli >= WS63_CAMERA_SCORE_PASS_MILLI) {
+            (void)ws63_camera_parse_label(reply_text, label, sizeof(label));
+            ws63_lock_mgr_update_camera_label(label);
             osal_printk("[camera] score pass, score=%u/1000\r\n", (unsigned int)score_milli);
             (void)ws63_lock_mgr_report_auth_result(WS63_LOCK_AUTH_SOURCE_CAMERA, 1U);
             return;
@@ -303,6 +348,8 @@ static void ws63_camera_try_report_auth_result(const char *reply_text)
         (ws63_camera_text_contains_ci(reply_text, "success") != 0U) ||
         (ws63_camera_text_contains_ci(reply_text, "ok") != 0U) ||
         (ws63_camera_text_contains_ci(reply_text, "allow") != 0U)) {
+        (void)ws63_camera_parse_label(reply_text, label, sizeof(label));
+        ws63_lock_mgr_update_camera_label(label);
         (void)ws63_lock_mgr_report_auth_result(WS63_LOCK_AUTH_SOURCE_CAMERA, 1U);
         return;
     }

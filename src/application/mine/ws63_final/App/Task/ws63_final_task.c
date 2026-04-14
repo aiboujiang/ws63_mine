@@ -7,6 +7,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <string.h>
 
 #include "osal_debug.h"
 #include "securec.h"
@@ -209,6 +210,32 @@ errcode_t ws63_task_post_sle_uplink(const ws63_sle_uplink_msg_t *msg, uint32_t t
         msg,
         (uint16_t)sizeof(ws63_sle_uplink_msg_t),
         timeout);
+}
+
+/**
+ * @brief 向主机发送门锁业务事件（[LOCK] 标签）。
+ *
+ * 说明：门锁结果事件用于业务联动，不受 DEBUG INIT 门控限制。
+ */
+errcode_t ws63_task_post_lock_event_text(const char *event_text)
+{
+#if (WS63_SLE_CORE_ENABLE == 1U)
+    uint16_t len;
+
+    if (event_text == NULL) {
+        return ERRCODE_INVALID_PARAM;
+    }
+
+    len = (uint16_t)strlen(event_text);
+    if ((len == 0U) || (len > WS63_TASK_QUEUE_PAYLOAD_MAX)) {
+        return ERRCODE_INVALID_PARAM;
+    }
+
+    return ws63_sle_send_subport_data(WS63_SLE_LOCK_SUBPORT, (const uint8_t *)event_text, len);
+#else
+    (void)event_text;
+    return ERRCODE_FAIL;
+#endif
 }
 
 /**

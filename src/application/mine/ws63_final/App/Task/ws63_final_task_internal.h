@@ -145,6 +145,16 @@ errcode_t ws63_task_post_wk2114_tx(const ws63_wk2114_tx_msg_t *msg, uint32_t tim
 errcode_t ws63_task_post_sle_uplink(const ws63_sle_uplink_msg_t *msg, uint32_t timeout);
 
 /**
+ * @brief 向 SLE 发送门锁业务事件文本（[LOCK] 标签）。
+ *
+ * 说明：门锁结果事件属于业务关键上报，不受 DEBUG INIT 门控。
+ *
+ * @param event_text 事件文本，建议使用 key=value;key=value 格式。
+ * @return errcode_t ERRCODE_SUCC 成功，其他失败。
+ */
+errcode_t ws63_task_post_lock_event_text(const char *event_text);
+
+/**
  * @brief 确保 ZW101 子口已完成惰性初始化。
  *
  * @return errcode_t ERRCODE_SUCC 成功，其他失败。
@@ -181,6 +191,21 @@ uint8_t ws63_task_wk2114_is_ready(void);
  * @return errcode_t ERRCODE_SUCC 成功，其他失败。
  */
 errcode_t ws63_lock_mgr_report_auth_result(ws63_lock_auth_source_t source, uint8_t passed);
+
+/**
+ * @brief 更新最近一次指纹认证通过详情。
+ *
+ * @param match_id 指纹匹配 ID。
+ * @param score 指纹匹配分数。
+ */
+void ws63_lock_mgr_update_finger_result(uint16_t match_id, uint16_t score);
+
+/**
+ * @brief 更新最近一次 camera 认证通过标签。
+ *
+ * @param label camera 识别标签，可为空字符串。
+ */
+void ws63_lock_mgr_update_camera_label(const char *label);
 
 /**
  * @brief 查询门锁当前是否处于接近唤醒窗口。

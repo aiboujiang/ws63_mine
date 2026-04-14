@@ -414,6 +414,7 @@ static void ws63_ttp229_password_commit_pending(uint16_t pending_mask, uint8_t a
             g_ws63_ttp229_password_disabled = 1U;
             osal_printk("[wk2114 final task] TTP229 password disabled after %u continuous failures\r\n",
                 (unsigned int)WS63_TTP229_PASSWORD_FAIL_DISABLE_THRESHOLD);
+            (void)ws63_task_post_lock_event_text("result=locked;source=key;reason=ttp229_fail_5");
         }
         ws63_ttp229_unlock(irq_status);
     }
