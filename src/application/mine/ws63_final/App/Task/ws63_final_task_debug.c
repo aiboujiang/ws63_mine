@@ -1509,13 +1509,13 @@ static void ws63_debug_print_help(void)
     ws63_debug_log("[ws63 dbg]   RGB OFF\r\n");
     ws63_debug_log("[ws63 dbg]   RGB DEMO ON|OFF\r\n");
     ws63_debug_log("[ws63 dbg]   RGB STAT\r\n");
-    ws63_debug_log("[ws63 dbg]   VK36N16I INIT\r\n");
-    ws63_debug_log("[ws63 dbg]   VK36N16I STAT\r\n");
-    ws63_debug_log("[ws63 dbg]   VK36N16I READ\r\n");
-    ws63_debug_log("[ws63 dbg]   VK36N16I MASK\r\n");
-    ws63_debug_log("[ws63 dbg]   VK36N16I WATCH ON|OFF\r\n");
-    ws63_debug_log("[ws63 dbg]   VK36N16I ENABLE ON|OFF\r\n");
-    ws63_debug_log("[ws63 dbg]   VK36N16I ALARM ON|OFF\r\n");
+    ws63_debug_log("[ws63 dbg]   VK INIT\r\n");
+    ws63_debug_log("[ws63 dbg]   VK STAT\r\n");
+    ws63_debug_log("[ws63 dbg]   VK READ\r\n");
+    ws63_debug_log("[ws63 dbg]   VK MASK\r\n");
+    ws63_debug_log("[ws63 dbg]   VK WATCH ON|OFF\r\n");
+    ws63_debug_log("[ws63 dbg]   VK ENABLE ON|OFF\r\n");
+    ws63_debug_log("[ws63 dbg]   VK ALARM ON|OFF\r\n");
     ws63_debug_log("[ws63 dbg]   [camera]add <id>\r\n");
     ws63_debug_log("[ws63 dbg]   [camera]List\r\n");
     ws63_debug_log("[ws63 dbg]   [camera]Del <id>\r\n");
@@ -1747,26 +1747,26 @@ static void ws63_debug_exec_command(const char *line)
         return;
     }
 
-    if (strcmp(cmd, "VK36N16I INIT") == 0) {
+    if (strcmp(cmd, "VK INIT") == 0) {
         ret = ws63_task_vk36n16i_reinit();
-        ws63_debug_log("[ws63 dbg] VK36N16I INIT ret=0x%x\r\n", (unsigned int)ret);
+        ws63_debug_log("[ws63 dbg] VK INIT ret=0x%x\r\n", (unsigned int)ret);
         ws63_debug_dump_vk36n16i_status("vk36n16i-init");
         return;
     }
 
-    if (strcmp(cmd, "VK36N16I STAT") == 0) {
+    if (strcmp(cmd, "VK STAT") == 0) {
         ws63_debug_dump_vk36n16i_status("vk36n16i-query");
         return;
     }
 
-    if ((strcmp(cmd, "VK36N16I READ") == 0) || (strcmp(cmd, "VK36N16I MASK") == 0)) {
+    if ((strcmp(cmd, "VK READ") == 0) || (strcmp(cmd, "VK MASK") == 0)) {
         char key_text[64] = {0};
 
         if (ws63_task_vk36n16i_get_pressed_text(key_text, sizeof(key_text)) != ERRCODE_SUCC) {
             (void)strncpy_s(key_text, sizeof(key_text), "ERR", 3U);
         }
 
-        ws63_debug_log("[ws63 dbg] VK36N16I raw=0x%04x mask=0x%04x count=%u keys=%s\r\n",
+        ws63_debug_log("[ws63 dbg] VK raw=0x%04x mask=0x%04x count=%u keys=%s\r\n",
             (unsigned int)ws63_task_vk36n16i_get_raw_code(),
             (unsigned int)ws63_task_vk36n16i_get_pressed_mask(),
             (unsigned int)ws63_task_vk36n16i_get_pressed_count(),
@@ -1774,43 +1774,43 @@ static void ws63_debug_exec_command(const char *line)
         return;
     }
 
-    if (strcmp(cmd, "VK36N16I WATCH ON") == 0) {
+    if (strcmp(cmd, "VK WATCH ON") == 0) {
         g_ws63_debug_vk36n16i_watch_enable = 1U;
         g_ws63_debug_last_watch_ms = 0U;
-        ws63_debug_log("[ws63 dbg] VK36N16I WATCH ON\r\n");
+        ws63_debug_log("[ws63 dbg] VK WATCH ON\r\n");
         return;
     }
 
-    if (strcmp(cmd, "VK36N16I WATCH OFF") == 0) {
+    if (strcmp(cmd, "VK WATCH OFF") == 0) {
         g_ws63_debug_vk36n16i_watch_enable = 0U;
-        ws63_debug_log("[ws63 dbg] VK36N16I WATCH OFF\r\n");
+        ws63_debug_log("[ws63 dbg] VK WATCH OFF\r\n");
         return;
     }
 
-    if (strcmp(cmd, "VK36N16I ENABLE ON") == 0) {
+    if (strcmp(cmd, "VK ENABLE ON") == 0) {
         ret = ws63_task_vk36n16i_set_enable(1U);
-        ws63_debug_log("[ws63 dbg] VK36N16I ENABLE ON ret=0x%x\r\n", (unsigned int)ret);
+        ws63_debug_log("[ws63 dbg] VK ENABLE ON ret=0x%x\r\n", (unsigned int)ret);
         ws63_debug_dump_vk36n16i_status("vk36n16i-enable");
         return;
     }
 
-    if (strcmp(cmd, "VK36N16I ENABLE OFF") == 0) {
+    if (strcmp(cmd, "VK ENABLE OFF") == 0) {
         ret = ws63_task_vk36n16i_set_enable(0U);
-        ws63_debug_log("[ws63 dbg] VK36N16I ENABLE OFF ret=0x%x\r\n", (unsigned int)ret);
+        ws63_debug_log("[ws63 dbg] VK ENABLE OFF ret=0x%x\r\n", (unsigned int)ret);
         ws63_debug_dump_vk36n16i_status("vk36n16i-enable");
         return;
     }
 
-    if (strcmp(cmd, "VK36N16I ALARM ON") == 0) {
+    if (strcmp(cmd, "VK ALARM ON") == 0) {
         ret = ws63_task_vk36n16i_set_multi_key_alarm(1U);
-        ws63_debug_log("[ws63 dbg] VK36N16I ALARM ON ret=0x%x\r\n", (unsigned int)ret);
+        ws63_debug_log("[ws63 dbg] VK ALARM ON ret=0x%x\r\n", (unsigned int)ret);
         ws63_debug_dump_vk36n16i_status("vk36n16i-alarm");
         return;
     }
 
-    if (strcmp(cmd, "VK36N16I ALARM OFF") == 0) {
+    if (strcmp(cmd, "VK ALARM OFF") == 0) {
         ret = ws63_task_vk36n16i_set_multi_key_alarm(0U);
-        ws63_debug_log("[ws63 dbg] VK36N16I ALARM OFF ret=0x%x\r\n", (unsigned int)ret);
+        ws63_debug_log("[ws63 dbg] VK ALARM OFF ret=0x%x\r\n", (unsigned int)ret);
         ws63_debug_dump_vk36n16i_status("vk36n16i-alarm");
         return;
     }
