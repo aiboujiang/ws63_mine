@@ -190,7 +190,7 @@ uint8_t ws63_task_wk2114_is_ready(void);
  * @param passed 1=认证通过，0=认证失败。
  * @return errcode_t ERRCODE_SUCC 成功，其他失败。
  */
-errcode_t ws63_lock_mgr_report_auth_result(ws63_lock_auth_source_t source, uint8_t passed);
+errcode_t ws63_lock_mgr_report_auth_result(ws63_lock_auth_source_t source, uint8_t passed, uint8_t ack_code);
 
 /**
  * @brief 更新最近一次指纹认证通过详情。

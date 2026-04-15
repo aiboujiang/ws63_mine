@@ -42,6 +42,7 @@ typedef struct {
     ws63_lock_event_type_t type;
     ws63_lock_auth_source_t source;
     uint8_t passed;
+    uint8_t ack_code;
 } ws63_lock_event_t;
 
 static unsigned long g_ws63_lock_event_queue = 0UL;
@@ -202,9 +203,8 @@ static const char *ws63_lock_mgr_state_to_text(ws63_lock_state_t state)
  */
 static void ws63_lock_mgr_play_fail_prompt(void)
 {
-    (void)ws63_task_buzzer_beep_tone(WS63_VK36N16I_KEY_PROMPT_BEEP_FREQ_HZ,
-        WS63_VK36N16I_KEY_PROMPT_BEEP_VOLUME_PERCENT,
-        WS63_VK36N16I_KEY_PROMPT_BEEP_MS);
+    /* 使用长鸣蜂鸣器代替原本的短促按键音，以匹配加长的 RGB 显示时间 */
+    (void)ws63_task_buzzer_on(WS63_VK36N16I_KEY_PROMPT_BEEP_FREQ_HZ);
 }
 
 /**
@@ -216,9 +216,9 @@ static void ws63_lock_mgr_play_fail_prompt(void)
 static void ws63_lock_mgr_start_fail_feedback(uint32_t now_ms)
 {
     ws63_lock_mgr_play_fail_prompt();
-    (void)ws63_task_rgb_set_color(220U, 0U, 0U);
+    (void)ws63_task_rgb_set_color(150U, 0U, 0U);
     g_ws63_lock_feedback_mode = 2U;
-    g_ws63_lock_feedback_deadline_ms = now_ms + WS63_VK36N16I_KEY_PROMPT_BEEP_MS;
+    g_ws63_lock_feedback_deadline_ms = now_ms + WS63_LOCK_AUTH_FAIL_FEEDBACK_MS_DEFAULT;
 }
 
 /**
@@ -229,7 +229,7 @@ static void ws63_lock_mgr_suspend_for_debug(void)
     ws63_lock_event_t event;
     uint32_t size;
 
-    ws63_task_zw101_cancel_verify_request();
+    ws63_task_zw101_cancel_active_request();
     ws63_lock_mgr_try_send_camera_close();
     (void)ws63_task_motor_coast_stop();
     (void)ws63_task_buzzer_off();
@@ -257,15 +257,16 @@ static void ws63_lock_mgr_suspend_for_debug(void)
 /**
  * @brief 推送一次认证结果到门锁事件队列。
  */
-errcode_t ws63_lock_mgr_report_auth_result(ws63_lock_auth_source_t source, uint8_t passed)
+errcode_t ws63_lock_mgr_report_auth_result(ws63_lock_auth_source_t source, uint8_t passed, uint8_t ack_code)
 {
     ws63_lock_event_t event;
     errcode_t ret;
 
     if (ws63_task_debug_is_debug_only_mode() != 0U) {
-        osal_printk("[lock mgr trace] auth_event_drop source=%u passed=%u debug_only=1\r\n",
+        osal_printk("[lock mgr trace] auth_event_drop source=%u passed=%u ack_code=0x%02x debug_only=1\r\n",
             (unsigned int)source,
-            (unsigned int)((passed != 0U) ? 1U : 0U));
+            (unsigned int)((passed != 0U) ? 1U : 0U),
+            (unsigned int)ack_code);
         return ERRCODE_FAIL;
     }
 
@@ -276,15 +277,17 @@ errcode_t ws63_lock_mgr_report_auth_result(ws63_lock_auth_source_t source, uint8
     event.type = WS63_LOCK_EVENT_AUTH_RESULT;
     event.source = source;
     event.passed = (passed != 0U) ? 1U : 0U;
+    event.ack_code = ack_code;
     ret = ws63_os_msg_queue_send(g_ws63_lock_event_queue,
         &event,
         (uint16_t)sizeof(event),
         WS63_OS_NO_WAIT);
 
-    osal_printk("[lock mgr trace] auth_event_enqueue ret=0x%x source=%u passed=%u state=%s\r\n",
+    osal_printk("[lock mgr trace] auth_event_enqueue ret=0x%x source=%u passed=%u ack_code=0x%02x state=%s\r\n",
         (unsigned int)ret,
         (unsigned int)source,
         (unsigned int)event.passed,
+        (unsigned int)event.ack_code,
         ws63_lock_mgr_state_to_text(g_ws63_lock_state));
 
     return ret;
@@ -401,7 +404,7 @@ static void ws63_lock_mgr_start_unlock(uint32_t now_ms, ws63_lock_auth_source_t 
     (void)ws63_task_rgb_set_color(0U, 180U, 0U);
 
     g_ws63_lock_feedback_mode = 1U;
-    g_ws63_lock_feedback_deadline_ms = now_ms + 120U;
+    g_ws63_lock_feedback_deadline_ms = now_ms + WS63_LOCK_AUTH_SUCCESS_FEEDBACK_MS_DEFAULT;
     g_ws63_lock_unlock_deadline_ms = now_ms + WS63_LOCK_UNLOCK_DURATION_MS_DEFAULT;
     g_ws63_lock_state = WS63_LOCK_STATE_UNLOCKING;
 
@@ -504,11 +507,13 @@ static void ws63_lock_mgr_handle_event(const ws63_lock_event_t *event, uint32_t 
         (unsigned int)now_ms);
 
     /* 认证结果本身也是一次有效输入，先续命再做状态机判定。 */
-    (void)ws63_lock_mgr_refresh_auth_window();
+    if (!((event->source == WS63_LOCK_AUTH_SOURCE_ZW101) && (event->ack_code == 0x26U))) {
+        (void)ws63_lock_mgr_refresh_auth_window();
+    }
 
     if (event->passed != 0U) {
         if (g_ws63_lock_state == WS63_LOCK_STATE_ARMED) {
-            ws63_task_zw101_cancel_verify_request();
+            ws63_task_zw101_cancel_active_request();
             ws63_lock_mgr_start_unlock(now_ms, event->source);
         } else {
             osal_printk("[lock mgr] auth pass ignored, state=%s source=%u\r\n",
@@ -519,15 +524,23 @@ static void ws63_lock_mgr_handle_event(const ws63_lock_event_t *event, uint32_t 
     }
 
     if (g_ws63_lock_state == WS63_LOCK_STATE_ARMED) {
-        osal_printk("[lock mgr] auth fail, source=%u\r\n", (unsigned int)event->source);
-        ws63_lock_mgr_start_fail_feedback(now_ms);
+        if ((event->source == WS63_LOCK_AUTH_SOURCE_ZW101) && (event->ack_code == 0x26U)) {
+            osal_printk("[lock mgr] auth timeout (0x26), skip fail-feedback\r\n");
+        } else {
+            osal_printk("[lock mgr] auth fail, source=%u\r\n", (unsigned int)event->source);
+            ws63_lock_mgr_start_fail_feedback(now_ms);
+        }
 
         if (event->source == WS63_LOCK_AUTH_SOURCE_ZW101) {
-            errcode_t retrigger_ret = ws63_task_zw101_request_verify_after_release();
-            if (retrigger_ret != ERRCODE_SUCC) {
-                osal_printk("[lock mgr] zw101 verify retrigger skipped\r\n");
+            if (event->ack_code != 0x26U) {
+                errcode_t retrigger_ret = ws63_task_zw101_request_verify_after_release();
+                if (retrigger_ret != ERRCODE_SUCC) {
+                    osal_printk("[lock mgr] zw101 verify retrigger skipped\r\n");
+                } else {
+                    osal_printk("[lock mgr trace] zw101 verify retrigger wait-release queued\r\n");
+                }
             } else {
-                osal_printk("[lock mgr trace] zw101 verify retrigger wait-release queued\r\n");
+                osal_printk("[lock mgr trace] zw101 verify timeout, not queuing wait-release\r\n");
             }
         }
     }
@@ -628,7 +641,7 @@ static void *ws63_lock_mgr_task_entry(const char *arg)
 
             if (now_ms >= g_ws63_lock_auth_window_deadline_ms) {
                 osal_printk("[lock mgr] auth window timeout\r\n");
-                ws63_task_zw101_cancel_verify_request();
+                ws63_task_zw101_cancel_active_request();
                 ws63_lock_mgr_try_send_camera_close();
                 ws63_lock_mgr_clear_feedback();
                 g_ws63_lock_state = WS63_LOCK_STATE_IDLE;

@@ -197,7 +197,6 @@ static uint8_t ws63_zw101_try_retry_verify_after_timeout(void)
         g_ws63_zw101_last_verify_ack = WS63_ZW101_ACK_TIMEOUT;
         WS63_FINAL_IRQ_UNLOCK(irq_status);
 
-        (void)ws63_lock_mgr_refresh_auth_window();
         osal_printk("[zw101] VERIFY timeout, retry queued timeout_retry=%u/%u\r\n",
             (unsigned int)timeout_retry_streak,
             (unsigned int)WS63_ZW101_VERIFY_TIMEOUT_RETRY_THRESHOLD);
@@ -681,7 +680,9 @@ static void ws63_zw101_report_verify_result(errcode_t ret, uint8_t ack_code, uin
         return;
     } else {
         ws63_zw101_reset_timeout_retry_state();
-        (void)ws63_lock_mgr_refresh_auth_window();
+        if (ack_code != WS63_ZW101_ACK_TIMEOUT) {
+            (void)ws63_lock_mgr_refresh_auth_window();
+        }
     }
 
     irq_status = WS63_FINAL_IRQ_LOCK();
@@ -745,7 +746,7 @@ static void ws63_zw101_report_verify_result(errcode_t ret, uint8_t ack_code, uin
         (void)ws63_task_post_lock_event_text("result=locked;source=finger;reason=zw101_fail_5");
     }
 
-    (void)ws63_lock_mgr_report_auth_result(WS63_LOCK_AUTH_SOURCE_ZW101, passed);
+    (void)ws63_lock_mgr_report_auth_result(WS63_LOCK_AUTH_SOURCE_ZW101, passed, ack_code);
 }
 
 /**

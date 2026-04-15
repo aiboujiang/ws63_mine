@@ -331,7 +331,7 @@ static void ws63_camera_try_report_auth_result(const char *reply_text)
             (void)ws63_camera_parse_label(reply_text, label, sizeof(label));
             ws63_lock_mgr_update_camera_label(label);
             osal_printk("[camera] score pass, score=%u/1000\r\n", (unsigned int)score_milli);
-            (void)ws63_lock_mgr_report_auth_result(WS63_LOCK_AUTH_SOURCE_CAMERA, 1U);
+            (void)ws63_lock_mgr_report_auth_result(WS63_LOCK_AUTH_SOURCE_CAMERA, 1U, 0xFFU);
             return;
         }
     }
@@ -342,7 +342,7 @@ static void ws63_camera_try_report_auth_result(const char *reply_text)
         (ws63_camera_text_contains_ci(reply_text, "allow") != 0U)) {
         (void)ws63_camera_parse_label(reply_text, label, sizeof(label));
         ws63_lock_mgr_update_camera_label(label);
-        (void)ws63_lock_mgr_report_auth_result(WS63_LOCK_AUTH_SOURCE_CAMERA, 1U);
+        (void)ws63_lock_mgr_report_auth_result(WS63_LOCK_AUTH_SOURCE_CAMERA, 1U, 0xFFU);
         return;
     }
 
@@ -350,7 +350,7 @@ static void ws63_camera_try_report_auth_result(const char *reply_text)
         (ws63_camera_text_contains_ci(reply_text, "deny") != 0U) ||
         (ws63_camera_text_contains_ci(reply_text, "error") != 0U) ||
         (ws63_camera_text_contains_ci(reply_text, "timeout") != 0U)) {
-        (void)ws63_lock_mgr_report_auth_result(WS63_LOCK_AUTH_SOURCE_CAMERA, 0U);
+        (void)ws63_lock_mgr_report_auth_result(WS63_LOCK_AUTH_SOURCE_CAMERA, 0U, 0xFFU);
     }
 }
 

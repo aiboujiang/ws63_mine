@@ -185,6 +185,12 @@ extern "C" {
 /* 开锁动作维持电机正转的时长（毫秒） */
 #define WS63_LOCK_UNLOCK_DURATION_MS_DEFAULT 1500U
 
+/* 认证成功且处于解锁状态时的提示反馈时长（毫秒：绿灯及蜂鸣） */
+#define WS63_LOCK_AUTH_SUCCESS_FEEDBACK_MS_DEFAULT 800U
+
+/* 认证失败且门锁保持状态时的警示反馈时长（毫秒：红灯及蜂鸣） */
+#define WS63_LOCK_AUTH_FAIL_FEEDBACK_MS_DEFAULT 800U
+
 /* 开锁完成后保持开启状态（不自动回锁）的时长（毫秒） */
 #define WS63_LOCK_HOLD_OPEN_MS_DEFAULT 10000U
 

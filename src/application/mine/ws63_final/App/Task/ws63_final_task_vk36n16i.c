@@ -410,7 +410,7 @@ static void ws63_vk36n16i_password_commit_pending(uint16_t pending_mask, uint8_t
         }
         WS63_FINAL_IRQ_UNLOCK(irq_status);
     }
-    (void)ws63_lock_mgr_report_auth_result(WS63_LOCK_AUTH_SOURCE_VK36N16I, passed);
+    (void)ws63_lock_mgr_report_auth_result(WS63_LOCK_AUTH_SOURCE_VK36N16I, passed, 0xFFU);
     ws63_vk36n16i_password_stop_session();
 }
 
