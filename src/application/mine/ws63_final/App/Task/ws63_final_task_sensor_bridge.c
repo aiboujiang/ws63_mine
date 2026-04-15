@@ -45,6 +45,9 @@ static uint8_t g_ws63_zw101_last_verify_ack = 0xFFU;
 /* ¿Î ÷ºÏ≤‚≤ª–Ë“™∏ﬂ∆µ¬÷—Ø£¨  µ±∑≈¥Ûº‰∏Ùø…œ‘÷¯ΩµµÕ¥Æø⁄”Î»’÷æ∏∫‘ÿ°£ */
 #define WS63_ZW101_RELEASE_CHECK_GAP_MS 500U
 
+/* œÍœ∏◊∑◊Ÿƒ¨»œπÿ±’£∫±‹√‚ VERIFY ÷ÿ ‘¡¥¬∑‘⁄’˝≥£≥°æ∞À¢∆¡£¨≈≈’œ ±‘Ÿ¡Ÿ ±¥Úø™°£ */
+#define WS63_ZW101_TRACE_DETAIL_ENABLE 0U
+
 /* ACK ”Ô“Â≥£¡ø£∫”√”⁄±‹√‚÷ÿ ‘∑÷÷ß÷–µƒƒß∑®÷µ°£ */
 #define WS63_ZW101_ACK_OK 0x00U
 #define WS63_ZW101_ACK_NOT_PRESSED 0x09U
@@ -79,6 +82,7 @@ static const char *ws63_zw101_ack_to_text(uint8_t ack_code)
     }
 }
 
+#if (WS63_ZW101_TRACE_DETAIL_ENABLE == 1U)
 /**
  * @brief ∞¥—π◊¥Ã¨Œƒ±æ°£
  */
@@ -86,6 +90,7 @@ static const char *ws63_zw101_finger_text(uint8_t finger_present)
 {
     return (finger_present != 0U) ? "PRESSED" : "RELEASED";
 }
+#endif
 
 /**
  * @brief ¥Ú”° VERIFY ◊¥Ã¨øÏ’’£¨Õ≥“ªπ€≤Ï«Î«ÛŒª/»°œ˚Œª/Ω˚”√Œª±‰ªØ°£
@@ -94,6 +99,7 @@ static const char *ws63_zw101_finger_text(uint8_t finger_present)
  */
 static void ws63_zw101_trace_verify_state(const char *tag)
 {
+#if (WS63_ZW101_TRACE_DETAIL_ENABLE == 1U)
     unsigned int irq_status;
     uint8_t request;
     uint8_t cancelled;
@@ -130,6 +136,9 @@ static void ws63_zw101_trace_verify_state(const char *tag)
         (unsigned int)timeout_streak,
         (unsigned int)armed,
         (unsigned int)ready);
+#else
+    (void)tag;
+#endif
 }
 
 /**
@@ -586,7 +595,6 @@ void ws63_task_zw101_cancel_verify_request(void)
  */
 errcode_t ws63_task_zw101_cancel_active_request(void)
 {
-    uint8_t ack_code = 0xFFU;
     errcode_t ret;
 
     ws63_task_zw101_cancel_verify_request();
@@ -595,10 +603,18 @@ errcode_t ws63_task_zw101_cancel_active_request(void)
         return ERRCODE_SUCC;
     }
 
-    ret = zw101_cancel(&ack_code);
-    osal_printk("[zw101 trace] cancel_active ret=0x%x ack=0x%02x\r\n",
-        (unsigned int)ret,
-        (unsigned int)ack_code);
+#if (WS63_ZW101_TRACE_DETAIL_ENABLE == 1U)
+    {
+        uint8_t ack_code = 0xFFU;
+
+        ret = zw101_cancel(&ack_code);
+        osal_printk("[zw101 trace] cancel_active ret=0x%x ack=0x%02x\r\n",
+            (unsigned int)ret,
+            (unsigned int)ack_code);
+    }
+#else
+    ret = zw101_cancel(NULL);
+#endif
     return ret;
 }
 
@@ -628,10 +644,9 @@ static uint8_t ws63_zw101_is_verify_fail_ack(uint8_t ack_code)
     * - »‘‘ –Ì‘⁄µ±«∞¥∞ø⁄ºÃ–¯÷ÿ ‘£ª
     * - ≤ªº∆»Î ZW101 ¡¨–¯ ß∞‹Ω˚”√º∆ ˝°£
     *
-    * ACK_TIMEOUT “≤ª·ªÿ¬‰µΩ’‚¿Ô≤Œ”Î∆’Õ® ß∞‹Õ≥º∆£¨µ´«∞Ã· «…˙√¸÷‹∆⁄ƒ⁄µƒ∂¿¡¢
     * ≥¨ ±÷ÿ ‘“—æ≠∫ƒæ°£ª∑Ò‘Úª·œ»◊ﬂ°∞¡¢º¥÷ÿ¿≠ VERIFY°±µƒøÏΩ›∑÷÷ß°£
      */
-    if ((ack_code == 0x08U) || (ack_code == 0x24U) || (ack_code == 0x26U) || (ack_code == 0x09U)) {
+    if ((ack_code == 0x08U) || (ack_code == 0x24U) ||  (ack_code == 0x09U)) {
         return 1U;
     }
 
@@ -646,9 +661,11 @@ static void ws63_zw101_report_verify_result(errcode_t ret, uint8_t ack_code, uin
     uint8_t passed;
     uint8_t fail_disable = 0U;
     unsigned int irq_status;
+#if (WS63_ZW101_TRACE_DETAIL_ENABLE == 1U)
     uint8_t fail_streak_after;
     uint8_t disabled_after;
     uint8_t timeout_retry_streak_after;
+#endif
 
     passed = ((ret == ERRCODE_SUCC) && (ack_code == WS63_ZW101_ACK_OK)) ? 1U : 0U;
 
@@ -689,9 +706,6 @@ static void ws63_zw101_report_verify_result(errcode_t ret, uint8_t ack_code, uin
         }
     }
 
-    fail_streak_after = g_ws63_zw101_verify_fail_streak;
-    disabled_after = g_ws63_zw101_verify_disabled;
-    timeout_retry_streak_after = g_ws63_zw101_verify_timeout_streak;
     WS63_FINAL_IRQ_UNLOCK(irq_status);
 
     if (passed != 0U) {
@@ -709,6 +723,11 @@ static void ws63_zw101_report_verify_result(errcode_t ret, uint8_t ack_code, uin
             ws63_zw101_ack_to_text(ack_code));
     }
 
+#if (WS63_ZW101_TRACE_DETAIL_ENABLE == 1U)
+    /* œÍœ∏Ω·π˚øÏ’’÷ª‘⁄¥Úø™◊∑◊Ÿ ± ‰≥ˆ£¨±‹√‚’˝≥£»œ÷§¬∑æ∂÷ÿ∏¥À¢∆¡°£ */
+    fail_streak_after = g_ws63_zw101_verify_fail_streak;
+    disabled_after = g_ws63_zw101_verify_disabled;
+    timeout_retry_streak_after = g_ws63_zw101_verify_timeout_streak;
     osal_printk("[zw101 trace] verify_result ret=0x%x ack=0x%02x id=%u score=%u fail_streak=%u timeout_retry=%u disabled=%u\r\n",
         (unsigned int)ret,
         (unsigned int)ack_code,
@@ -717,6 +736,7 @@ static void ws63_zw101_report_verify_result(errcode_t ret, uint8_t ack_code, uin
         (unsigned int)fail_streak_after,
         (unsigned int)timeout_retry_streak_after,
         (unsigned int)disabled_after);
+#endif
 
     if (fail_disable != 0U) {
         osal_printk("[zw101] VERIFY disabled after %u continuous failures\r\n",
@@ -739,8 +759,10 @@ static void *ws63_zw101_task_entry(const char *arg)
     uint8_t last_wait_reason = 0xFFU;
     uint32_t last_ready_retry_ms = 0U;
     uint32_t last_release_check_ms = 0U;
+#if (WS63_ZW101_TRACE_DETAIL_ENABLE == 1U)
     uint8_t last_release_finger_present = 0xFFU;
     uint32_t last_release_check_ret = 0xFFFFFFFFU;
+#endif
 
     while (1) {
         uint8_t request;
@@ -763,8 +785,10 @@ static void *ws63_zw101_task_entry(const char *arg)
                 ws63_zw101_trace_verify_state("task_wait_finger_release");
                 last_wait_reason = 5U;
                 last_release_check_ms = 0U;
+#if (WS63_ZW101_TRACE_DETAIL_ENABLE == 1U)
                 last_release_finger_present = 0xFFU;
                 last_release_check_ret = 0xFFFFFFFFU;
+#endif
             }
 
             if ((disabled == 0U) && (cancelled == 0U) && (ws63_lock_mgr_is_armed() != 0U) &&
@@ -778,6 +802,7 @@ static void *ws63_zw101_task_entry(const char *arg)
                     last_release_check_ms = now_ms;
                     check_ret = zw101_check_finger_present(&finger_present, &ack_code);
 
+#if (WS63_ZW101_TRACE_DETAIL_ENABLE == 1U)
                     /* Ωˆ‘⁄◊¥Ã¨±‰ªØ ±¥Ú”°£¨±‹√‚ wait_release ∆⁄º‰πÃ∂®Ω⁄≈ƒ»’÷æÀ¢∆¡°£ */
                     if (((uint32_t)check_ret != last_release_check_ret) ||
                         (finger_present != last_release_finger_present)) {
@@ -788,6 +813,7 @@ static void *ws63_zw101_task_entry(const char *arg)
                         last_release_check_ret = (uint32_t)check_ret;
                         last_release_finger_present = finger_present;
                     }
+#endif
 
                     if ((check_ret == ERRCODE_SUCC) && (finger_present == 0U)) {
                         unsigned int irq_status = WS63_FINAL_IRQ_LOCK();
@@ -838,11 +864,17 @@ static void *ws63_zw101_task_entry(const char *arg)
                 (ws63_task_zw101_is_ready() == 0U)) {
                 uint32_t now_ms = ws63_os_tick_ms();
                 if ((uint32_t)(now_ms - last_ready_retry_ms) >= WS63_ZW101_READY_RETRY_GAP_MS) {
-                    errcode_t recover_ret;
-
                     last_ready_retry_ms = now_ms;
-                    recover_ret = ws63_task_ensure_zw101_ready();
-                    osal_printk("[zw101 trace] ready_recover ret=0x%x\r\n", (unsigned int)recover_ret);
+#if (WS63_ZW101_TRACE_DETAIL_ENABLE == 1U)
+                    {
+                        errcode_t recover_ret;
+
+                        recover_ret = ws63_task_ensure_zw101_ready();
+                        osal_printk("[zw101 trace] ready_recover ret=0x%x\r\n", (unsigned int)recover_ret);
+                    }
+#else
+                    (void)ws63_task_ensure_zw101_ready();
+#endif
                 }
             }
 
@@ -1044,6 +1076,21 @@ errcode_t ws63_task_zw101_list(uint16_t *valid_num_out, uint8_t *ack_out)
     }
 
     return zw101_list(valid_num_out, ack_out);
+}
+
+/**
+ * @brief ËØªÂèñ ZW101 Á¥¢ÂºïË°®
+ */
+errcode_t ws63_task_zw101_read_index_table(uint8_t page, uint8_t *index_buf_out, uint8_t *ack_out)
+{
+    if (!ws63_is_subport_enabled(ZW101_SUBPORT)) {
+        if (ack_out != NULL) {
+            *ack_out = 0xFFU;
+        }
+        return ERRCODE_FAIL;
+    }
+
+    return zw101_read_index_table(page, index_buf_out, ack_out);
 }
 
 /**

@@ -443,10 +443,10 @@
   - 排查：优先执行 `ZW INIT` 与 `ZW ECHO` 观察 ACK；若仍超时，检查子口接线、供电与波特率。
 
 - 现象：进入 `ARMED -> VERIFYING` 后“未触摸也快速成功”。
-  - 说明：当前版本已新增全链路追踪日志，按时间顺序可判断是“本次命令真实 ACK”还是“历史/异步帧误命中”。
-  - 关注日志1（驱动层）：`[zw101 trace] seq=... send cmd=0x32 ...`，确认每次 VERIFY 都有唯一 `seq`。
-  - 关注日志2（驱动层）：`[zw101 trace] ... ack=0x.. payload_len=..` + `ack_payload data=...`，直接看原始 ACK 码和载荷字节。
-  - 关注日志3（任务层）：`[zw101 trace] task_before_verify/task_after_verify`，确认请求位、取消位、禁用位与 fail_streak。
+  - 说明：详细追踪默认关闭；需要定位“本次命令真实 ACK”还是“历史/异步帧误命中”时，再临时打开追踪宏。
+  - 关注日志1（驱动层，开启详细追踪后）：`[zw101 trace] seq=... send cmd=0x32 ...`，确认每次 VERIFY 都有唯一 `seq`。
+  - 关注日志2（驱动层，开启详细追踪后）：`[zw101 trace] ... ack=0x.. payload_len=..` + `ack_payload data=...`，直接看原始 ACK 码和载荷字节。
+  - 关注日志3（任务层，开启详细追踪后）：`[zw101 trace] task_before_verify/task_after_verify`，确认请求位、取消位、禁用位与 fail_streak。
   - 关注日志4（锁管理）：`[lock mgr trace] auth_event_enqueue/auth_event_handle`，确认认证结果入队/出队与状态机状态是否一致。
   - 判定建议：若 `seq` 连续但 `ack_payload` 内容固定异常（例如 `id/score` 恒定），优先怀疑模块侧返回语义或参数口径；若 `seq` 与结果错位，优先怀疑串口缓存残留或并发读写时序。
 

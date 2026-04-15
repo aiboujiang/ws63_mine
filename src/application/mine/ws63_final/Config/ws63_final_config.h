@@ -226,7 +226,7 @@ extern "C" {
 #define WS63_CAMERA_ENABLE 1U
 
 /* Camera 控制任务的栈大小 */
-#define WS63_CAMERA_TASK_STACK_SIZE 2048U
+#define WS63_CAMERA_TASK_STACK_SIZE 4096U
 
 /* Camera 控制任务优先级 */
 #define WS63_CAMERA_TASK_PRIORITY 26U

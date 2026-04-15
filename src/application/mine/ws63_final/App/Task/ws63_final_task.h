@@ -458,6 +458,16 @@ errcode_t ws63_task_zw101_enroll(uint16_t page_id,
 errcode_t ws63_task_zw101_list(uint16_t *valid_num_out, uint8_t *ack_out);
 
 /**
+ * @brief 读取 ZW101 有效指纹索引表（READ_INDEX_TABLE）
+ *
+ * @param page 索引页，0表示0-255
+ * @param index_buf_out 输出的32字节buffer
+ * @param ack_out 输出 ACK，可为 NULL。
+ * @return errcode_t ERRCODE_SUCC 成功，否则失败。
+ */
+errcode_t ws63_task_zw101_read_index_table(uint8_t page, uint8_t *index_buf_out, uint8_t *ack_out);
+
+/**
  * @brief ɾ�� ZW101 ģ�壨DEL����
  */
 errcode_t ws63_task_zw101_delete(uint16_t page_id,

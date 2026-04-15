@@ -114,6 +114,16 @@ errcode_t zw101_verify(uint8_t score_level,
 errcode_t zw101_list(uint16_t *valid_num_out, uint8_t *ack_out);
 
 /**
+ * @brief 读取有效指纹索引表（0x1F命令）
+ *
+ * @param page 索引页，0表示0-255
+ * @param index_buf_out 借用的32字节(256位)buffer
+ * @param ack_out 输出 ACK，可为 NULL。
+ * @return errcode_t ERRCODE_SUCC 成功，否则失败。
+ */
+errcode_t zw101_read_index_table(uint8_t page, uint8_t *index_buf_out, uint8_t *ack_out);
+
+/**
  * @brief ɾ��ģ�壨0x0C����
  *
  * @param page_id ��ʼģ�� ID��

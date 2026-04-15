@@ -34,6 +34,7 @@
 #define ZW101_CMD_DELETE 0x0CU
 #define ZW101_CMD_CLEAR 0x0DU
 #define ZW101_CMD_VALID_TEMPLATE_NUM 0x1DU
+#define ZW101_CMD_READ_INDEX_TABLE 0x1FU
 #define ZW101_CMD_CANCEL 0x30U
 #define ZW101_CMD_AUTO_ENROLL 0x31U
 #define ZW101_CMD_AUTO_IDENTIFY 0x32U
@@ -61,8 +62,8 @@
 #define ZW101_TIMEOUT_COMMON_MS 1000U
 #define ZW101_TIMEOUT_AUTO_MS 30000U
 
-/* 详细追踪日志：用于定位“未触摸也返回成功”这类链路疑难问题。 */
-#define ZW101_TRACE_DETAIL_ENABLE 1U
+/* 详细追踪默认关闭：现场只保留成功/失败/超时等关键日志，需要排障时再手动打开。 */
+#define ZW101_TRACE_DETAIL_ENABLE 0U
 #define ZW101_TRACE_PAYLOAD_PREVIEW_MAX 16U
 
 /* ----------------------------- 驱动上下文 ----------------------------- */
@@ -119,6 +120,8 @@ static uint8_t zw101_is_valid_frame(const uint8_t *frame, uint16_t frame_len)
         (frame[frame_len - 1U] == (uint8_t)sum));
 }
 
+/* 详细追踪开启时才需要的载荷预览日志；默认关闭时不编译，避免触发 unused-function。 */
+#if (ZW101_TRACE_DETAIL_ENABLE == 1U)
 /**
  * @brief 打印 ACK/载荷预览日志，辅助排查异常结果来源。
  */
@@ -128,7 +131,6 @@ static void zw101_trace_payload(const char *tag,
     const uint8_t *payload,
     uint16_t payload_len)
 {
-#if (ZW101_TRACE_DETAIL_ENABLE == 1U)
     uint16_t i;
     uint16_t preview_len;
 
@@ -156,14 +158,8 @@ static void zw101_trace_payload(const char *tag,
         osal_printk(" ...");
     }
     osal_printk("\r\n");
-#else
-    (void)tag;
-    (void)cmd;
-    (void)seq;
-    (void)payload;
-    (void)payload_len;
-#endif
 }
+#endif
 
 /**
  * @brief 向接收缓存追加数据，溢出时丢弃最旧数据。
@@ -410,6 +406,9 @@ static errcode_t zw101_wait_ack(uint8_t cmd,
     uint16_t frame_len;
     uint16_t data_len;
     uint16_t payload_len;
+
+    /* 关闭详细追踪后，seq 只用于日志编号，这里显式丢弃避免 -Werror。 */
+    (void)seq;
 
     if (out_result != NULL) {
         out_result->ack_code = 0xFFU;
@@ -948,6 +947,32 @@ errcode_t zw101_list(uint16_t *valid_num_out, uint8_t *ack_out)
 
     if ((ret == ERRCODE_SUCC) && (ack.payload_len >= 3U)) {
         *valid_num_out = zw101_unpack_payload_u16(&ack, 1U);
+    }
+
+    return zw101_expect_ack_ok(ret, &ack);
+}
+
+errcode_t zw101_read_index_table(uint8_t page, uint8_t *index_buf_out, uint8_t *ack_out)
+{
+    errcode_t ret;
+    zw101_ack_result_t ack;
+    uint8_t params[1];
+
+    if ((zw101_check_ready() != ERRCODE_SUCC) || (index_buf_out == NULL)) {
+        return ERRCODE_FAIL;
+    }
+
+    params[0] = page;
+    ret = zw101_send_cmd_wait(ZW101_CMD_READ_INDEX_TABLE, params, sizeof(params), ZW101_TIMEOUT_COMMON_MS, 0U, 0U, &ack);
+    zw101_set_ack_out(ack_out, &ack);
+
+    /* ACK Code(1 byte) + 32 bytes bitfield = 33 bytes min payload */
+    if ((ret == ERRCODE_SUCC) && (ack.payload_len >= 33U)) {
+        if (memcpy_s(index_buf_out, 32, &ack.payload[1], 32) != EOK) {
+            return ERRCODE_FAIL;
+        }
+    } else if (ret == ERRCODE_SUCC) {
+        ret = ERRCODE_FAIL;
     }
 
     return zw101_expect_ack_ok(ret, &ack);
