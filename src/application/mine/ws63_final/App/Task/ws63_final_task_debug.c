@@ -1945,39 +1945,34 @@ static void ws63_debug_exec_command(const char *line)
     }
 
     if (strcmp(cmd, "ZW LIST") == 0) {
+        uint8_t index_table[32] = {0};
         zw_ack = 0xFFU;
         zw_valid_num = 0U;
-        ret = ws63_task_zw101_list(&zw_valid_num, &zw_ack);
-        ws63_debug_log("[ws63 dbg] ZW LIST ret=0x%x ack=0x%02x valid=%u\r\n",
-            (unsigned int)ret,
-            (unsigned int)zw_ack,
-            (unsigned int)zw_valid_num);
-
-        if ((ret == ERRCODE_SUCC) && (zw_valid_num > 0U)) {
-            uint8_t index_table[32] = {0};
-            errcode_t ret_index = ws63_task_zw101_read_index_table(0U, index_table, &zw_ack);
-            if (ret_index == ERRCODE_SUCC) {
-                char id_str[128] = {0};
-                char tmp[16] = {0};
-                uint16_t found = 0U;
-                for (uint16_t i = 0U; i < 256U; i++) {
-                    uint8_t byte_idx = (uint8_t)(i / 8U);
-                    uint8_t bit_idx = (uint8_t)(i % 8U);
-                    if ((index_table[byte_idx] & (1U << bit_idx)) != 0U) {
-                        if (snprintf_s(tmp, sizeof(tmp), sizeof(tmp) - 1, "%u ", (unsigned int)i) > 0) {
-                            (void)strcat_s(id_str, sizeof(id_str), tmp);
-                        }
-                        found++;
-                        if (found >= zw_valid_num) {
-                            break;
-                        }
+        
+        ret = ws63_task_zw101_read_index_table(0U, index_table, &zw_ack);
+        if (ret == ERRCODE_SUCC) {
+            char id_str[128] = {0};
+            char tmp[16] = {0};
+            
+            for (uint16_t i = 0U; i < 256U; i++) {
+                uint8_t byte_idx = (uint8_t)(i / 8U);
+                uint8_t bit_idx = (uint8_t)(i % 8U);
+                if ((index_table[byte_idx] & (1U << bit_idx)) != 0U) {
+                    if (snprintf_s(tmp, sizeof(tmp), sizeof(tmp) - 1, "%u ", (unsigned int)i) > 0) {
+                        (void)strcat_s(id_str, sizeof(id_str), tmp);
                     }
+                    zw_valid_num++;
                 }
-                ws63_debug_log("[ws63 dbg] ZW Enrolled IDs: %s\r\n", id_str);
-            } else {
-                ws63_debug_log("[ws63 dbg] ZW READ INDEX failed ret=0x%x ack=0x%02x\r\n",
-                    (unsigned int)ret_index, (unsigned int)zw_ack);
             }
+            ws63_debug_log("[ws63 dbg] ZW LIST ret=0x%x ack=0x%02x valid=%u IDs: %s\r\n",
+                (unsigned int)ret,
+                (unsigned int)zw_ack,
+                (unsigned int)zw_valid_num,
+                id_str);
+        } else {
+            ws63_debug_log("[ws63 dbg] ZW LIST failed ret=0x%x ack=0x%02x\r\n",
+                (unsigned int)ret,
+                (unsigned int)zw_ack);
         }
         return;
     }
