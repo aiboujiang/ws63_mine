@@ -28,6 +28,7 @@
 typedef enum {
     WS63_LOCK_STATE_INIT = 0,
     WS63_LOCK_STATE_IDLE,
+    WS63_LOCK_STATE_ARMING,
     WS63_LOCK_STATE_ARMED,
     WS63_LOCK_STATE_UNLOCKING,
     WS63_LOCK_STATE_HOLD_OPEN,
@@ -184,6 +185,8 @@ static const char *ws63_lock_mgr_state_to_text(ws63_lock_state_t state)
     switch (state) {
         case WS63_LOCK_STATE_IDLE:
             return "IDLE";
+        case WS63_LOCK_STATE_ARMING:
+            return "ARMING";
         case WS63_LOCK_STATE_ARMED:
             return "ARMED";
         case WS63_LOCK_STATE_UNLOCKING:
@@ -605,31 +608,49 @@ static void *ws63_lock_mgr_task_entry(const char *arg)
                 (distance_tick_ms != g_ws63_lock_last_distance_tick_ms) &&
                 ((uint32_t)(now_ms - distance_tick_ms) <= WS63_LOCK_DISTANCE_STALE_MS)) {
                 g_ws63_lock_last_distance_tick_ms = distance_tick_ms;
-                g_ws63_lock_state = WS63_LOCK_STATE_ARMED;
-                osal_printk("[lock mgr] armed distance=%ldmm tick=%u\r\n",
+                g_ws63_lock_state = WS63_LOCK_STATE_ARMING;
+                osal_printk("[lock mgr] arming starting, distance=%ldmm tick=%u\r\n",
                     (long)distance_mm,
                     (unsigned int)distance_tick_ms);
 
-                /* 每次新进入 ARMED，都重置 ZW101 上一窗口遗留的禁用与失败计数。 */
-                ws63_task_zw101_reset_armed_window_guard();
-                (void)ws63_lock_mgr_refresh_auth_window();
-                ws63_lock_mgr_set_ld2402_quiet_mode(1U);
-                ws63_lock_mgr_set_ld2402_channel(0U);
-
-                /* 进入 ARMED 后再惰性拉起 camera/ZW101，降低上电阶段并发冲突。 */
+                /* 提前拉起 camera/ZW101，准备收 init complete */
                 if (ws63_task_ensure_camera_ready() != ERRCODE_SUCC) {
                     osal_printk("[lock mgr] camera lazy init fail\r\n");
                 }
                 if (ws63_task_ensure_zw101_ready() != ERRCODE_SUCC) {
                     osal_printk("[lock mgr] zw101 lazy init fail\r\n");
                 }
-
+                
                 ws63_lock_mgr_try_send_camera_action();
+            }
+        } else if (g_ws63_lock_state == WS63_LOCK_STATE_ARMING) {
+            /* 1) 维持最近的距离更新，避免走开误判 */
+            if ((distance_mm >= 0) &&
+                ((uint32_t)distance_mm < WS63_LOCK_LD2402_ARM_DISTANCE_MM_DEFAULT) &&
+                (distance_tick_ms != g_ws63_lock_last_distance_tick_ms)) {
+                g_ws63_lock_last_distance_tick_ms = distance_tick_ms;
+            }
+
+            /* 2) 判断是否所有的模组都已经真正初始化完成硬件 */
+            if ((ws63_camera_is_hw_ready() != 0U) && (ws63_task_zw101_is_ready() != 0U)) {
+                g_ws63_lock_state = WS63_LOCK_STATE_ARMED;
+                osal_printk("[lock mgr] all modules init ok, entering ARMED\r\n");
+
+                ws63_task_zw101_reset_armed_window_guard();
+                (void)ws63_lock_mgr_refresh_auth_window();
+                ws63_lock_mgr_set_ld2402_quiet_mode(1U);
+                ws63_lock_mgr_set_ld2402_channel(0U);
+
                 if (ws63_task_zw101_request_verify() != ERRCODE_SUCC) {
                     osal_printk("[lock mgr trace] zw101 verify request on armed failed\r\n");
                 } else {
                     osal_printk("[lock mgr trace] zw101 verify request on armed posted\r\n");
                 }
+            } else if ((uint32_t)(now_ms - g_ws63_lock_last_distance_tick_ms) > WS63_LOCK_DISTANCE_STALE_MS) {
+                /* 3) 如果没初始化完，用户就走开了（超时），则退回IDLE */
+                g_ws63_lock_state = WS63_LOCK_STATE_IDLE;
+                osal_printk("[lock mgr] user left before modules init, abort arming\r\n");
+                ws63_lock_mgr_try_send_camera_close();
             }
         } else if (g_ws63_lock_state == WS63_LOCK_STATE_ARMED) {
             if ((distance_mm >= 0) &&

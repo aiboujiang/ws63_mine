@@ -42,6 +42,15 @@ static uint32_t g_ws63_camera_last_reply_ms = 0U;
 /* camera 接收重组缓冲：处理 WK2114 分包导致的半包文本。 */
 static char g_ws63_camera_rx_assembled[WS63_CAMERA_REPLY_TEXT_MAX] = {0};
 static uint16_t g_ws63_camera_rx_assembled_len = 0U;
+static uint8_t g_ws63_camera_hw_ready = 0U;
+
+/**
+ * @brief 查询 camera 硬件是否已就绪
+ */
+uint8_t ws63_camera_is_hw_ready(void)
+{
+    return g_ws63_camera_hw_ready;
+}
 
 /**
  * @brief camera 状态锁。
@@ -371,6 +380,7 @@ static void ws63_camera_handle_full_reply(const char *reply_text)
         reply_text);
     /* 检查是否为 camera 模块自身的初始化完成通知 */
     if (ws63_camera_text_contains_ci(reply_text, "init complete") != 0U) {
+        g_ws63_camera_hw_ready = 1U;
         osal_printk("[camera] hardware module initialized successfully!\r\n");
     }
     /* 先投递完整上行，再做本地状态更新，保证主机与本地日志观察到同一条完整文本。 */

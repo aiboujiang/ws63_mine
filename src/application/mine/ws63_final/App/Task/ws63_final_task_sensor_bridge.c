@@ -55,7 +55,7 @@ static uint8_t g_ws63_zw101_last_verify_ack = 0xFFU;
 #define WS63_ZW101_ACK_UNKNOWN 0xFFU
 
 /* ½ö¹©±¾ÎÄ¼şÄÚ²¿Ê¹ÓÃ£¬±ÜÃâ°Ñ ZW101 ÈÎÎñ¾ÍĞ÷²éÑ¯À©É¢µ½ÉÏ²ã½Ó¿Ú¡£ */
-static uint8_t ws63_task_zw101_is_ready(void);
+uint8_t ws63_task_zw101_is_ready(void);
 
 
 static void ws63_zw101_reset_timeout_retry_state(void);
@@ -462,7 +462,7 @@ uint8_t ws63_task_ld2402_is_channel_enabled(void)
 /**
  * @brief ²éÑ¯ ZW101 ÊÇ·ñÒÑÍê³É³õÊ¼»¯¡£
  */
-static uint8_t ws63_task_zw101_is_ready(void)
+uint8_t ws63_task_zw101_is_ready(void)
 {
     return zw101_is_ready();
 }
@@ -1080,7 +1080,7 @@ errcode_t ws63_task_zw101_list(uint16_t *valid_num_out, uint8_t *ack_out)
 }
 
 /**
- * @brief è¯»å– ZW101 ç´¢å¼•è¡¨
+ * @brief è¯»å– ZW101 ç´¢å¼•è¡?
  */
 errcode_t ws63_task_zw101_read_index_table(uint8_t page, uint8_t *index_buf_out, uint8_t *ack_out)
 {

@@ -160,6 +160,7 @@ errcode_t ws63_task_post_lock_event_text(const char *event_text);
  * @return errcode_t ERRCODE_SUCC 成功，其他失败。
  */
 errcode_t ws63_task_ensure_zw101_ready(void);
+uint8_t ws63_task_zw101_is_ready(void);
 
 /**
  * @brief 确保 camera 子口已完成惰性初始化。
@@ -167,6 +168,7 @@ errcode_t ws63_task_ensure_zw101_ready(void);
  * @return errcode_t ERRCODE_SUCC 成功，其他失败。
  */
 errcode_t ws63_task_ensure_camera_ready(void);
+uint8_t ws63_camera_is_hw_ready(void);
 
 /**
  * @brief 获取 WK2114 发送队列中的一条消息。

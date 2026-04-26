@@ -29,3 +29,9 @@
 	- 同步更新调试说明，标明详细追踪需要按需开启。
 	- 影响文件：`src/application/mine/ws63_final/Driver/zw101.c`、`src/application/mine/ws63_final/App/Task/ws63_final_task_sensor_bridge.c`、`src/application/mine/ws63_final/DEBUG_COMMANDS.md`。
 	- 验证：`python3 build.py -c ws63-liteos-app` 通过；`zw101.c` 和 `ws63_final_task_sensor_bridge.c` 已编译通过。
+
+- 2026-04-26 修复camera模块init complete回调发送来源
+        - 将camera的 init complete 回调发送来源由宿主任务触发改为响应UART的真实上报。
+        - 当ws63收到camera发来的“init complete”时，正确打印日志并将该包透传到上行链路中，证明camera初始化完成。
+        - 影响文件：`App/Task/ws63_final_task_camera.c`。
+        - 验证：执行 `ws63-liteos-app` 的增量编译编译通过。
