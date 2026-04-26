@@ -369,7 +369,10 @@ static void ws63_camera_handle_full_reply(const char *reply_text)
     osal_printk("[camera] full reply len=%u text=%s\r\n",
         (unsigned int)reply_len,
         reply_text);
-
+    /* 检查是否为 camera 模块自身的初始化完成通知 */
+    if (ws63_camera_text_contains_ci(reply_text, "init complete") != 0U) {
+        osal_printk("[camera] hardware module initialized successfully!\r\n");
+    }
     /* 先投递完整上行，再做本地状态更新，保证主机与本地日志观察到同一条完整文本。 */
     ws63_camera_post_uplink_reply(reply_text);
     ws63_camera_store_reply_text(reply_text);
@@ -653,6 +656,7 @@ errcode_t ws63_camera_task_start(void)
         (unsigned int)WS63_SLE_CAMERA_SUBPORT,
         (unsigned int)WS63_SUBPORT3_BAUD,
         (unsigned int)ws63_os_tick_ms());
+
     return ERRCODE_SUCC;
 }
 #endif
